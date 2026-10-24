@@ -176,9 +176,11 @@ right sound.
     reopening the window.
 17. The item/fluid picker copies the base game's item selector: the search field
     (`search_popup_textfield`) and a `utility/search` button in the title bar,
-    six `filter_group_button_tab_slightly_larger` group tabs per row, and a
-    ten-column `filter_slot_table` in a `deep_slots_scroll_pane` inside a
-    `filter_frame`. While searching, groups without a match are disabled.
+    six `filter_group_button_tab_slightly_larger` group tabs per row (sized to
+    the vanilla 71×72 filter tab; further groups wrap onto a new row), and a
+    square ten-by-ten `filter_slot_table` in a `deep_slots_scroll_pane` inside
+    a `filter_frame`, padded so the grid and scrollbar match the tab row's
+    width. While searching, groups without a match are disabled.
 
 ## Known exceptions to fix
 

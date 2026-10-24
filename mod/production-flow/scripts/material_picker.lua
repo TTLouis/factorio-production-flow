@@ -2,9 +2,10 @@
 -- and native item slots. Its searchable contents include only items and fluids.
 local P = {}
 local NAME = "ssk_material_picker"
--- Same proportions as the base game's item selector: six group tabs per row over
--- a ten-column slot grid.
-local COLUMNS, GROUP_COLUMNS, SLOT = 10, 6, 40
+-- Same proportions as the base game's item selector: six 71 px group tabs per row
+-- (extra groups wrap to a new row) over a square ten-by-ten slot grid. Tabs and grid
+-- share one width: 6 * 71 = 7 + 10 * 40 + 12 (scrollbar) + 7.
+local COLUMNS, GROUP_COLUMNS, SLOT, TAB_W, TAB_H, SCROLLBAR = 10, 6, 40, 71, 72, 12
 
 -- Blueprint parameters and signal/miscellaneous categories are not production
 -- materials. Apply the same rule to browsing, search and translation requests.
@@ -94,6 +95,8 @@ local function populate(player)
       toggled = query == "" and chosen_group == group.name, tooltip = group.localised_name or group.name,
       tags = { ssk_picker = "group", group = group.name } }
     tab.enabled = query == "" or matched[group.name] == true
+    tab.style.width, tab.style.height = TAB_W, TAB_H
+    tab.style.left_padding, tab.style.right_padding, tab.style.top_padding, tab.style.bottom_padding = 3, 4, 4, 4
   end
   local grid = f.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll.ssk_results
   grid.clear()
@@ -154,7 +157,8 @@ end
 function P.open(player, target, current)
   P.close(player)
   local res, scale = player.display_resolution, player.display_scale
-  local rows = math.max(4, math.min(10, math.floor((math.floor(res.height / scale) - 360) / SLOT)))
+  -- Square unless the screen is too short for ten rows.
+  local rows = math.max(4, math.min(COLUMNS, math.floor((math.floor(res.height / scale) - 300) / SLOT)))
   local group = ""
   if current then
     local kind, name = current:match("^(%a+)/(.+)$")
@@ -181,8 +185,8 @@ function P.open(player, target, current)
   local tabs = inner.add { type = "table", name = "ssk_groups", style = "slot_table", column_count = GROUP_COLUMNS }
   tabs.style.horizontal_spacing, tabs.style.vertical_spacing = 0, 0
   local slots = inner.add { type = "frame", name = "ssk_slot_frame", style = "filter_frame", direction = "vertical" }
-  slots.style.horizontally_stretchable = true
-  slots.style.horizontal_align = "center"
+  local side = (GROUP_COLUMNS * TAB_W - COLUMNS * SLOT - SCROLLBAR) / 2
+  slots.style.left_padding, slots.style.right_padding = side, side
   local scroll = slots.add { type = "scroll-pane", name = "ssk_slot_scroll", style = "deep_slots_scroll_pane",
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
   scroll.style.width, scroll.style.height = COLUMNS * SLOT, rows * SLOT
