@@ -39,7 +39,9 @@ release tag must be `v` followed by the exact version in `info.json`.
 
 The workflow runs the tagged source's Lua suite and the publisher's offline
 tests. If the release already has its installable ZIP, every archive member must
-match the tagged mod source. If no ZIP was attached, the workflow builds it and
+match the tagged mod source. Text permits CRLF/LF line-ending differences from
+Windows/Git checkouts; images and other binary files must match byte for byte.
+If no ZIP was attached, the workflow builds it and
 attaches that same archive to GitHub before uploading it to Factorio. The
 512px thumbnail, MIT license, description and screenshots are checked too.
 

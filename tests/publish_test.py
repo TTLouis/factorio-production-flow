@@ -70,6 +70,13 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(P.PublishError, "differs from release source"):
             P.validate_archive(self.archive, self.root, "v0.1.1")
 
+    def test_text_line_endings_are_portable_but_images_are_exact(self):
+        self.assertTrue(P.same_source("control.lua", b"a\r\nb\r\n", b"a\nb\n"))
+        self.assertTrue(P.same_source("LICENSE", b"MIT\r\n", b"MIT\n"))
+        self.assertFalse(P.same_source("control.lua", b"changed\r\n", b"original\n"))
+        self.assertFalse(P.same_source("icon.png", b"a\r\nb", b"a\nb"))
+        self.assertFalse(P.same_source("control.lua", b"\xff\r\n", b"\xff\n"))
+
     def test_reject_changed_github_checksum(self):
         remote = copy.deepcopy(self.remote)
         remote["assets"][0]["digest"] = "sha256:wrong"

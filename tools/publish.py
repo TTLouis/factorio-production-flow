@@ -38,6 +38,15 @@ def digest(path, algorithm="sha256"):
     return hashlib.new(algorithm, path.read_bytes()).hexdigest()
 
 
+def same_source(name, packaged, committed):
+    if Path(name).suffix in {".lua", ".json", ".cfg", ".txt", ".md"} or name == "LICENSE":
+        try:
+            return packaged.decode("utf-8").replace("\r\n", "\n") == committed.decode("utf-8").replace("\r\n", "\n")
+        except UnicodeDecodeError:
+            return False
+    return packaged == committed
+
+
 def request(url, *, method="GET", data=None, headers=None, missing=False, binary=False):
     try:
         with urlopen(Request(url, data=data, headers=headers or {}, method=method), timeout=120) as response:
@@ -107,7 +116,7 @@ def validate_archive(archive, source, tag):
         require(sum(x.file_size for x in entries) <= 64 * 1024 * 1024, "Archive is unexpectedly large")
         require(set(zipfile.namelist()) == {prefix + name for name in expected}, "Archive contains missing or unexpected files")
         for name, path in expected.items():
-            require(zipfile.read(prefix + name) == path.read_bytes(), f"Archive differs from release source: {name}")
+            require(same_source(name, zipfile.read(prefix + name), path.read_bytes()), f"Archive differs from release source: {name}")
         png = zipfile.read(prefix + "thumbnail.png")
         require(png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", png[16:24]) == (512, 512), "Thumbnail must be the 512px release icon")
     return info
