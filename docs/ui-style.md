@@ -164,7 +164,10 @@ right sound.
 15. A chart and its controls form one panel, not loose pieces on the tab
     background: an `inside_deep_frame` with every toolbar row in one
     `subheader_frame` across its top and the chart in a `naked_scroll_pane`
-    directly below (Balance, Focus and Full Sankey all do this).
+    directly below (Balance, Focus and Full Sankey all do this). The strip uses
+    the same spacing on every tab: 12 px left/right and 8 px top/bottom padding,
+    a 40 px first row (fits a slot button), 28 px rows after it and 8 px between
+    rows (`toolbar_strip` in `sankey_ui.lua`).
 16. Less-used chart settings open from a gear `tool_button` (toggled while open)
     as a fly-out: a `frame` with a `frame_title`, a `frame_action_button` close
     and an `inside_shallow_frame_with_padding`, drawn over the chart's top-right

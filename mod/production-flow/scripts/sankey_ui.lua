@@ -175,15 +175,21 @@ end
 
 -- Controls shared by the Balance chart, Focus and Full Sankey toolbars. Each one
 -- has the same caption, order, width and tooltip wherever it appears.
+-- Toolbar strip spacing, the same on every chart: 12 px at the sides, 8 px above,
+-- below and between rows. The first row is slot height (the material slot);
+-- later rows are tool-button height.
+local STRIP_PAD_X, STRIP_PAD_Y, ROW_GAP, FIRST_ROW_H, ROW_H = 12, 8, 8, 40, 28
+
 local function option_row(bar)
   local row = bar.add { type = "flow", direction = "horizontal" }
   row.style.vertical_align = "center"
   row.style.horizontal_spacing = 8
+  row.style.height = ROW_H
   return row
 end
 
 local function right_group(row, us)
-  row.style.width = math.max(240, (us.toolbar_width or us.canvas_w or 900) - 12)
+  row.style.width = math.max(240, (us.toolbar_width or us.canvas_w or 900) - 2 * STRIP_PAD_X)
   local spacer = row.add { type = "empty-widget", tags = { ssk_toolbar_spacer = true } }
   spacer.style.horizontally_stretchable = true
   spacer.style.minimal_width = 16
@@ -397,25 +403,30 @@ local function toolbar_strip(bar, us)
   local strip = bar.add { type = "frame", style = "subheader_frame", direction = "vertical", tags = { ssk_primary_controls = true } }
   strip.style.height = SK.toolbar_height(us)
   strip.style.horizontally_stretchable = true
-  return strip
+  strip.style.left_padding, strip.style.right_padding = STRIP_PAD_X, STRIP_PAD_X
+  strip.style.top_padding, strip.style.bottom_padding = STRIP_PAD_Y, STRIP_PAD_Y
+  local rows = strip.add { type = "flow", direction = "vertical" }
+  rows.style.vertical_spacing = ROW_GAP
+  local first = option_row(rows)
+  first.style.height = FIRST_ROW_H
+  return rows, first
 end
 
 local function focus_toolbar(bar, us, player)
-  local strip = toolbar_strip(bar, us)
-  local main = option_row(strip)
+  local rows, main = toolbar_strip(bar, us)
   item_pickers(main, us)
   local actions = right_group(main, us)
   zoom_buttons(actions, true)
   label_toggle(actions, us)
   settings_button(actions, us)
   -- Balance picks its material from the list beside the chart, so only Focus keeps history.
-  if not us.neighborhood then history_controls(strip, us) end
+  if not us.neighborhood then history_controls(rows, us) end
 end
 
 local function build_toolbar(bar, us, L, player)
   if us.view == "focus" then return focus_toolbar(bar, us, player) end
-  bar = toolbar_strip(bar, us)
-  local r1 = option_row(bar)
+  local r1
+  bar, r1 = toolbar_strip(bar, us)
 
   small(r1, "View:")
   local view_picker = r1.add { type = "drop-down", items = { "Grouped (unfinished)", "Item / fluid names" },
@@ -783,9 +794,9 @@ local function rstate(pi, view)
 end
 
 function SK.toolbar_height(us)
-  if us.neighborhood then return 56 end
-  if us.view == "focus" then return 96 end
-  return 64 + (us.sel and 32 or 0)
+  -- Balance: material row only. Focus: + history. Full: + hint, or + selection and its actions.
+  local rows = us.neighborhood and 1 or us.view == "focus" and 2 or (us.sel and 3 or 2)
+  return 2 * STRIP_PAD_Y + FIRST_ROW_H + (rows - 1) * (ROW_H + ROW_GAP)
 end
 
 -- c: tab content (vertical flow). full=false keeps the scroll-pane (and its scroll position).
