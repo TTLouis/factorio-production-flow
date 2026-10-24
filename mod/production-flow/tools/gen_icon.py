@@ -1,10 +1,11 @@
-"""Generate the 64x64 toolbar icon (graphics/icon.png). Run from anywhere."""
+"""Render the 512px thumbnail from the toolbar curves; --toolbar also rebuilds the 64px icon."""
+import argparse
 import os
 import numpy as np
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-N, SS = 64, 4
+SS = 4
 
 
 def smooth(x):
@@ -12,8 +13,8 @@ def smooth(x):
     return np.interp(x, 1.5 * u * (1 - u) + u ** 3, 3 * u ** 2 - 2 * u ** 3)
 
 
-def main():
-    n = N * SS
+def render(size):
+    n = size * SS
     img = np.zeros((n, n, 4), dtype=np.float64)
     xs = (np.arange(n) + 0.5) / n
     ys = (np.arange(n) + 0.5) / n
@@ -37,12 +38,20 @@ def main():
     for bx in ((0.08, 0.16), (0.84, 0.92)):
         m = ((xs >= bx[0]) & (xs < bx[1]))[None, :] & ((ys >= 0.1) & (ys <= 0.9))[:, None]
         img[m] = (0.92, 0.92, 0.92, 1.0)
-    out = img.reshape(N, SS, N, SS, 4).mean(axis=(1, 3))
-    rgba = np.zeros((N, N, 4), dtype=np.uint8)
+    out = img.reshape(size, SS, size, SS, 4).mean(axis=(1, 3))
+    rgba = np.zeros((size, size, 4), dtype=np.uint8)
     a = out[..., 3:4]
     rgba[..., :3] = np.where(a > 0, out[..., :3] / np.maximum(a, 1e-6), 0).clip(0, 1) * 255
     rgba[..., 3] = (out[..., 3] * 255).round()
-    Image.fromarray(rgba, "RGBA").save(os.path.join(ROOT, "graphics", "icon.png"))
+    return Image.fromarray(rgba, "RGBA")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--toolbar", action="store_true")
+    if parser.parse_args().toolbar:
+        render(64).save(os.path.join(ROOT, "graphics", "icon.png"))
+    render(512).save(os.path.join(ROOT, "thumbnail.png"))
 
 
 if __name__ == "__main__":
