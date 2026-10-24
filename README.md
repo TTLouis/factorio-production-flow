@@ -7,12 +7,16 @@ connect on the selected surface. First beta: **0.1.0**, by **TTLouis**.
 
 ## Views
 
+Charts default to individual item and fluid names. Graph grouping is optional
+and unfinished. Balance is the main focus of this beta. Focus and Full Sankey still need layout,
+navigation and readability improvements, especially on dense factories.
+
 - **Balance:** Made, used and net rates, logistic stock, and an item/fluid inspector.
   Uses show consumption of the selected material. Filters stay fixed while the
   list scrolls vertically. Details stack within rows; dividers separate columns,
   rows and item groups.
-- **Focus:** Upstream and downstream recipe connections around one material.
-- **Full Sankey:** Grouped production overview, expandable materials and presets.
+- **Focus — needs more polish:** Upstream and downstream recipe connections around one material.
+- **Full Sankey — needs more polish:** Grouped production overview, expandable materials and presets.
 
 Destination/source colors, hover highlighting, pinned selections, optional labels,
 Fit and Center help you explore the charts. Live updates preserve selectors and
@@ -38,6 +42,9 @@ Flows combine observed crafting activity, production statistics and recipe
 relationships. They do not trace belts, pipes or individual shipments.
 Interplanetary logistics tracking is not included. Stock covers logistic
 networks, not every chest or fluid tank.
+
+See [how rates are calculated](docs/calculations.md) for the measurements,
+productivity adjustments, utilisation estimates and stock calculations.
 
 Compressed widths, minimum visible thickness and separate fluid scaling help
 readability; they are not a conserved mass balance across different materials.

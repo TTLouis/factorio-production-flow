@@ -15,7 +15,7 @@ local ZOOM_STEP = 1.25
 local function round(v) return math.floor(v + 0.5) end
 
 function SK.defaults(us)
-  us.view = us.view or "overview"
+  us.view = us.view or "detail"
   us.tier_mode = us.tier_mode or "depth"
   us.input_depth = math.max(1, math.min(View.MAX_INPUT_DEPTH, us.input_depth or 1))
   us.preset = us.preset or "all"
@@ -218,9 +218,9 @@ local function build_toolbar(bar, us, L, player)
   r1.style.horizontal_spacing = 6
 
   small(r1, "View:")
-  local view_picker = r1.add { type = "drop-down", items = { "Grouped overview", "Individual items" },
+  local view_picker = r1.add { type = "drop-down", items = { "Grouped (unfinished)", "Item / fluid names" },
     selected_index = us.view == "overview" and 1 or 2, tags = { ssk_sk = "view" },
-    tooltip = "Overview groups production chains; expand a group to inspect its members. Items and fluids stay separate." }
+    tooltip = "Individual item and fluid names are the default. Grouping is unfinished: broad category names can hide material details. Expand a group to inspect its members." }
   view_picker.style.width = 160
   local presets = View.presets()
   local items, sel = {}, 1
@@ -298,7 +298,7 @@ local function build_toolbar(bar, us, L, player)
   r2.add{type="checkbox",caption="Live",state=us.live,tags={ssk_sk="live"}}
   button(r2,"Reflow","reflow","Recalculate node order and spacing; Live otherwise keeps the layout stable")
   button(r2,"Unpin","unpin","Clear the selected flow highlight. Click or Shift-click a node to pin it.")
-  if us.view == "overview" then button(r2, "Collapse overview", "overview_reset", "Return expanded groups to the overview") end
+  if us.view == "overview" then button(r2, "Collapse overview", "overview_reset", "Unfinished grouping: return expanded groups to the overview") end
   r2 = bar.add { type = "flow", direction = "horizontal" }
   r2.style.vertical_align = "center"
   r2.style.horizontal_spacing = 6

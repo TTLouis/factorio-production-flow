@@ -80,6 +80,7 @@ function V.presets()
   end
   out[#out + 1] = { id = "super:oil", name = "Oil chain" }
   out[#out + 1] = { id = "roots:item/processing-unit", name = "Electronics" }
+  out[#out + 1] = { id = "roots:item/copper-plate", name = "Copper chain" }
   out[#out + 1] = { id = "roots:item/rocket-part", name = "Rocket" }
   out[#out + 1] = { id = "super:nuclear", name = "Nuclear" }
   return out

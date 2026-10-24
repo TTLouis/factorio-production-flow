@@ -4,7 +4,8 @@
   history, responsive widths, selection retention and all three chart views.
 - Native Factorio 2.1.23 on an isolated Space Age save: 600 seconds of newly
   recorded Production Flow history survived save/reload.
-- 18 Full Sankey/Focus/Balance cases and seven Balance scroll/group cases passed.
+- 20 Full Sankey/Focus/Balance cases, seven Balance scroll/group cases, and two
+  focused copper naming/preset checks passed.
   Native checks retain the same selector controls across live refresh and keep
   hovered node elements valid. They invoke GUI handlers; they do not simulate
   physically opening every dropdown with a mouse.
@@ -19,3 +20,9 @@ changes reapply membership and sorting. Rows leaving the measurement window show
 Inactive with zero rates until refresh, rather than retaining stale numbers.
 
 Broader modpack, multiplayer and large-factory performance testing remains open.
+
+Individual item/fluid names are now the default. A one-time migration replaces
+the unpublished grouped default; later deliberate grouped-view selections persist.
+The view picker explicitly marks grouping as unfinished. Regression checks cover
+defaults, migration, persistence, and absence of aggregate nodes in the plain view.
+Native copper-chain checks cover Vulcanus and a space platform.

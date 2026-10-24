@@ -7,6 +7,7 @@ Date: 2026-10-23
     - Item and fluid input inspection and selected-material consumption rates.
     - Destination/source colors, highlighting, pinning, Fit and Center controls.
     - Vertical-only Balance list with paired Details values and item-group dividers.
+    - Default charts to individual item/fluid names; grouped view is marked unfinished.
   Info:
     - Targets Factorio 2.1; tested on a Space Age save.
     - MIT licensed. Charts describe recipe relationships, not transport routes.

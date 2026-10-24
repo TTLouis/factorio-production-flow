@@ -17,4 +17,5 @@ __pycache__/
 /docs/*
 !/docs/development.md
 !/docs/validation.md
+!/docs/calculations.md
 !/docs/screenshots/

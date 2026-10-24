@@ -3,6 +3,7 @@ local T = {}
 local mode = require("scripts.save_test_mode")
 local SK = require("scripts.sankey_ui")
 local Model = require("scripts.model")
+local View = require("scripts.view")
 local Diag = require("scripts.diag")
 local start, step, capture = nil, 0, nil
 local captures, skipped, products, usage_labels = {}, {}, {}, {}
@@ -45,6 +46,8 @@ if mode == "full" then
     {name="full-gleba",surface="gleba",tab="sankey",view="overview"},
     {name="full-aquilo",surface="aquilo",tab="sankey",view="overview"},
     {name="full-platform",surface="platform-6",tab="sankey",view="overview"},
+    {name="full-platform-copper",surface="platform-6",tab="sankey",view="detail",preset="roots:item/copper-plate"},
+    {name="full-vulcanus-copper",surface="vulcanus",tab="sankey",view="detail",preset="roots:item/copper-plate"},
     {name="full-nauvis-oil",surface="nauvis",tab="sankey",view="detail",preset="super:oil"},
     {name="full-vulcanus-oil",surface="vulcanus",tab="sankey",view="detail",preset="super:oil"},
     {name="full-nauvis-items",surface="nauvis",tab="sankey",view="detail"},
@@ -69,6 +72,13 @@ if mode == "scroll" then
     {name="balance-groups-details",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,groups=true,details=true},
     {name="balance-scroll-groups",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,bottom=true,groups=true},
     {name="balance-beta-water",surface="vulcanus",tab="balance",focus="fluid/water",depth=1},
+  }
+end
+
+if mode=="names" then
+  cases={
+    {name="full-platform-copper",surface="platform-6",tab="sankey",view="detail",preset="roots:item/copper-plate"},
+    {name="full-vulcanus-copper",surface="vulcanus",tab="sankey",view="detail",preset="roots:item/copper-plate"},
   }
 end
 
@@ -199,7 +209,7 @@ function T.tick(UI, Sampler)
   if mode=="scroll" then
     us.bal_filter="all"; us.bal_details=c.details or false; us.bal_sort=c.groups and "groups" or "priority"; us.bal_group=nil
   end
-  if mode=="full" then
+  if (mode=="full" or mode=="names") then
     us.preset=c.preset or "all"; us.sel=nil; us.layout_snapshot=nil; us.auto_rank=nil
     us.show_labels=true; us.heights=c.heights or "sqrt"; us.color_mode="destination"
     us.layout="clean"; us.tier_mode="depth"; us.tier_lo=nil; us.tier_hi=nil
@@ -216,12 +226,19 @@ function T.tick(UI, Sampler)
     if c.name=="balance-condensation" then assert(producers["steam-condensation"], "No measured steam condensation") end
   elseif c.tab == "focus" then
     local fx=SK.focus_state(us); fx.focus=c.focus; fx.live=false
-    if mode=="full" then fx.show_labels=true; fx.focus_steps=2; fx.layout_snapshot=nil; fx.auto_rank=nil end
+    if (mode=="full" or mode=="names") then fx.show_labels=true; fx.focus_steps=2; fx.layout_snapshot=nil; fx.auto_rank=nil end
   end
   UI.open(player)
   assert(us.sidx==game.surfaces[c.surface].index,"Wrong rendered surface")
+  if c.name=="full-platform-copper" or c.name=="full-vulcanus-copper" then
+    local preset_picker=find_action(player.gui.screen.ssk_main,"preset")
+    assert(us.preset_ids[preset_picker.selected_index]==us.preset,"Preset picker does not identify the displayed copper chain")
+    local L=View.build(player,us,us.canvas_w,us.canvas_h)
+    assert(L.nodes["item/copper-plate"] and L.nodes["fluid/molten-copper"],"plain copper chain lost its material names")
+    for _,n in pairs(L.nodes) do assert(n.kind~="group","plain copper chain still has a category node") end
+  end
   assert(us.surface_names[find_scope(player.gui.screen.ssk_main).selected_index]==c.surface,"Surface picker does not identify rendered surface")
-  if mode=="balance" or mode=="scroll" or (mode=="full" and c.tab~="focus") then
+  if mode=="balance" or mode=="scroll" or ((mode=="full" or mode=="names") and c.tab~="focus") then
     for _,action in ipairs({"center_selection","zoom_fit"}) do
       local button=find_action(player.gui.screen.ssk_main,action)
       assert(button, "Missing Balance action "..action)

@@ -27,11 +27,18 @@ local function ustate(pi)
   end
   if not s.tab_id then s.tab_id = "balance" end
   if not s.readability_defaults then
-    s.view, s.tier_mode, s.renderer = "overview", "depth", "poly"
+    s.view, s.tier_mode, s.renderer = "detail", "depth", "poly"
     s.lines, s.layout, s.sel = "curves", "clean", nil
     s.tier_lo, s.tier_hi = nil, nil
     for _, fx in pairs({ s.fx, s.bal_fx }) do fx.renderer = "poly" end
     s.readability_defaults = true
+  end
+  -- Replace the unpublished grouped default once. Later explicit grouping
+  -- choices survive reopening the window and loading the save.
+  if not s.plain_names_default then
+    s.view, s.collapsed, s.overview_open = "detail", {}, {}
+    s.layout_snapshot, s.auto_rank, s.sel = nil, nil, nil
+    s.plain_names_default = true
   end
   -- Adopt the requested default once for existing Live/default users, retaining
   -- explicit longer periods. Later manual choices (including Live) persist.
