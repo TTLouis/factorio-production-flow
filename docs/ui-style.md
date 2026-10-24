@@ -114,8 +114,10 @@ right sound.
    present, so do not write fallbacks to text glyphs such as `"X"` or `">"`.
 3. **No text glyphs as fake icons.** Captions such as `X`, `>`, `◀`, `▲`, `▼`,
    `+` or `−` on a shrunken grey button do not match the game. Use the sprite. If
-   vanilla has no fitting sprite (zoom in and out), use a `tool_button` with that
-   single glyph caption, so it is at least a vanilla 28 px square.
+   vanilla has no fitting sprite (zoom in and out, Fit), use a `tool_button` with
+   that glyph or one short word as its caption, so it is at least a vanilla 28 px
+   tool button. Do not borrow an icon that means something else (`expand` reads
+   as "next", not "fit").
 4. **Every icon-only button has a tooltip** that names the action and any
    modifier (for example "Shift: to top").
 5. **A toggle shows its state with `toggled`**, not with a changing caption such

@@ -133,7 +133,7 @@ end
 -- toolbar
 ---------------------------------------------------------------------------
 local ACTION_SPRITES = {
-  f_back = "left_arrow", f_forward = "right_arrow", zoom_fit = "expand", center_selection = "center",
+  f_back = "left_arrow", f_forward = "right_arrow", center_selection = "center",
   reflow = "refresh", f_options = "list_view", advanced = "list_view", reset_layout = "reset",
   unpin = "pin_arrow", inputs_more = "add", inputs_less = "collapse", overview_reset = "collapse",
   up = "indication_arrow", down = "down_arrow", hide = "filter_blacklist", expand = "expand", collapse = "collapse",
@@ -147,11 +147,11 @@ local function button(parent, caption, action, tooltip, extra)
     return parent.add { type = "sprite-button", style = action == "reset_layout" and "tool_button_red" or "tool_button",
       sprite = "utility/" .. sprite, tooltip = tooltip or caption, tags = tags }
   end
-  -- Vanilla has no zoom-in/out utility sprite. Its square tool button keeps
-  -- the game graphics, hover state, dimensions and click sound for these glyphs.
-  assert(action == "zoom_in" or action == "zoom_out", "Missing toolbar sprite: " .. action)
+  -- Vanilla has no zoom or fit utility sprite. Its square tool button keeps
+  -- the game graphics, hover state, dimensions and click sound for these captions.
+  assert(action == "zoom_in" or action == "zoom_out" or action == "zoom_fit", "Missing toolbar sprite: " .. action)
   local b = parent.add { type = "button", style = "tool_button", caption = caption, tooltip = tooltip or caption, tags = tags }
-  b.style.width = 28
+  if action ~= "zoom_fit" then b.style.width = 28 end
   return b
 end
 
@@ -222,7 +222,7 @@ end
 
 local function zoom_buttons(row, compact)
   button(row, "−", "zoom_out", "Zoom out")
-  button(row, "Fit graph", "zoom_fit", "Fit the chart to the window while keeping icons and text readable; dense charts keep scrolling.")
+  button(row, "Fit", "zoom_fit", "Fit the chart to the window while keeping icons and text readable; dense charts keep scrolling.")
   button(row, "+", "zoom_in", "Zoom in")
   if not compact then button(row, "Center", "center_selection", "Center the selected item, or the whole chart when nothing is selected.") end
 end
