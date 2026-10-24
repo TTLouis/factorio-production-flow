@@ -242,14 +242,17 @@ local function material_caption(key)
   return { "", "[" .. kind .. "=" .. name .. "] ", proto and proto.localised_name or name:gsub("%-", " ") }
 end
 
-local function navigation_controls(row, us)
+-- One history line: Back/Forward, the Last visits list, the visited icons
+-- leading to the current material, and Clear on the right.
+local function history_controls(bar, us)
+  local row = option_row(bar)
   local back, forward = us.focus_hist or {}, us.focus_forward or {}
   local caption = material_caption
   local previous = button(row, "◀", "f_back", #back > 0 and { "", "Back to ", caption(back[#back]) } or "No previous material")
   previous.enabled = #back > 0
   local next_ = button(row, "▶", "f_forward", #forward > 0 and { "", "Forward to ", caption(forward[#forward]) } or "No next material")
   next_.enabled = #forward > 0
-  local items, steps = { "View history" }, {}
+  local items, steps = { "Last visits" }, {}
   for i = #(us.focus_hist or {}), 1, -1 do
     steps[#steps + 1] = -(#back - i + 1)
     items[#items + 1] = { "", "◀ ", caption(back[i]) }
@@ -259,36 +262,32 @@ local function navigation_controls(row, us)
     items[#items + 1] = { "", "▶ ", caption(forward[i]) }
   end
   local recent = row.add { type = "drop-down", items = items, selected_index = 1,
-    tags = { ssk_sk = "f_history", steps = steps }, tooltip = "Jump backward or forward along your viewed-material path" }
+    tags = { ssk_sk = "f_history", steps = steps }, tooltip = "Jump to a material you viewed earlier, or forward again after Back" }
   recent.style.width = 160
   recent.enabled = #items > 1
-  local clear = row.add { type = "sprite-button", style = "tool_button_red", sprite = "utility/trash",
-    tags = { ssk_sk = "f_clear_history" },
-    tooltip = "Clear viewed-material history. Keep the current material and collected production data." }
-  clear.enabled = #back + #forward > 0
-end
-
-local function trail_controls(bar, us)
-  local back, caption = us.focus_hist or {}, material_caption
-  local trail = option_row(bar)
-  small(trail, "Path:")
-  local slots = math.max(2, math.min(5, math.floor(((us.canvas_w or 900) - 210) / 60)))
-  local first = math.max(1, #back - slots + 2)
-  if first > 1 then small(trail, "…") end
+  -- visited icons are tool-button sized so the line keeps the toolbar height
+  local slots = math.max(1, math.min(6, math.floor(((us.toolbar_width or us.canvas_w or 900) - 460) / 56)))
+  local first = math.max(1, #back - slots + 1)
+  if first > 1 then small(row, "…") end
   for i = first, #back do
-    trail.add { type = "sprite-button", style = "slot_button", sprite = back[i],
+    local visit = row.add { type = "sprite-button", style = "slot_button", sprite = back[i],
       tooltip = { "", "Return to ", caption(back[i]) }, tags = { ssk_sk = "f_trail", steps = -(#back - i + 1) } }
-    local arrow = trail.add { type = "sprite", sprite = "utility/right_arrow", resize_to_sprite = false }
+    visit.style.size = 28
+    local arrow = row.add { type = "sprite", sprite = "utility/right_arrow", resize_to_sprite = false }
     arrow.style.width, arrow.style.height = 12, 12
     arrow.style.stretch_image_to_widget_size = true
   end
   if us.focus then
-    local current = small(trail, caption(us.focus))
-    current.style.width = 140
+    local current = small(row, caption(us.focus))
+    current.style.maximal_width = 140
     current.style.font = "default-bold"
     current.style.single_line = true
     current.tooltip = { "", "Current material: ", caption(us.focus) }
   end
+  local clear = right_group(row, us).add { type = "sprite-button", style = "tool_button_red", sprite = "utility/trash",
+    tags = { ssk_sk = "f_clear_history" },
+    tooltip = "Clear Last visits. Keeps the current material and collected production data." }
+  clear.enabled = #back + #forward > 0
 end
 
 local function focus_toolbar(bar, us, player)
@@ -297,12 +296,11 @@ local function focus_toolbar(bar, us, player)
   strip.style.height = 48
   local main = option_row(strip)
   item_pickers(main, us)
-  navigation_controls(main, us)
   local actions = right_group(main, us)
   zoom_buttons(actions, true)
   label_toggle(actions, us)
   button(actions, "Options", "f_options", "Show or hide less-used chart and layout controls").toggled = us.options_open == true
-  trail_controls(bar, us)
+  history_controls(bar, us)
   if us.neighborhood then
     local making = bar.add { type = "label", name = "ssk_producers" }
     making.style.width = math.max(100, (us.toolbar_width or us.canvas_w or 900) - 12)
@@ -817,6 +815,8 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   c.ssk_sp.style.height = viewH
   c.ssk_bar.style.height = SK.toolbar_height(us)
   c.ssk_bar.style.padding = 0
+  -- chart statistics (flows, recorded seconds, scales) are for development only
+  c.ssk_info.visible = developer_controls(player) == true
   local canvas = c.ssk_sp.ssk_canvas
   if us.view == "focus" and not us.focus then
     if not only_auto or #c.ssk_bar.children==0 then focus_toolbar(c.ssk_bar, us, player) end

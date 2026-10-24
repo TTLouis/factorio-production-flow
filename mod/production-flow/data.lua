@@ -72,10 +72,11 @@ protos[#protos + 1] = {
   scale = 0.5,
   flags = { "gui-icon" },
 }
--- Balance favourite toggles (tools/gen_star.py): gold when set, grey outline otherwise.
-for _, v in ipairs({ { "ssk-star", "star.png" }, { "ssk-star-off", "star-off.png" } }) do
-  protos[#protos + 1] = { type = "sprite", name = v[1], filename = "__production-flow__/graphics/" .. v[2],
-    priority = "extra-high-no-scale", size = 32, scale = 0.5, flags = { "gui-icon" } }
+-- Balance favourite toggles use the base game's Browse Games star: gold when set,
+-- grey outline otherwise.
+for _, v in ipairs({ { "ssk-star", { 32, 600 } }, { "ssk-star-off", { 0, 600 } } }) do
+  protos[#protos + 1] = { type = "sprite", name = v[1], filename = "__core__/graphics/gui-new.png",
+    position = v[2], size = 32, scale = 0.5, priority = "extra-high-no-scale", flags = { "gui-icon" } }
 end
 data:extend(protos)
 

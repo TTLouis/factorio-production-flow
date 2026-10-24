@@ -284,12 +284,8 @@ local function open(player)
   local drag = header.add { type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true }
   drag.style.horizontally_stretchable = true
   drag.style.height = 24
-  if helpers.is_valid_sprite_path("utility/close") then
-    header.add { type = "sprite-button", style = "frame_action_button", sprite = "utility/close", tooltip = "Close",
-                 tags = { ssk_rt = "close" } }
-  else
-    header.add { type = "button", caption = "X", tooltip = "Close", tags = { ssk_rt = "close" } }
-  end
+  header.add { type = "sprite-button", style = "frame_action_button", sprite = "utility/close", tooltip = "Close",
+               tags = { ssk_rt = "close" } }
   local bar = frame.add { type = "flow", direction = "horizontal" }
   bar.style.vertical_align = "center"
   bar.style.horizontal_spacing = 8

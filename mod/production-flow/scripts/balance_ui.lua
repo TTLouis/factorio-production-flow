@@ -23,6 +23,11 @@ function BU.favourites(us)
   return us.bal_favs
 end
 
+-- scan cadence and the column legend are development detail; Help explains both
+local function developer(player)
+  return player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value == true
+end
+
 local function text(parent, caption, tooltip, style)
   return parent.add { type = "label", caption = caption, tooltip = tooltip, style = style }
 end
@@ -487,6 +492,7 @@ function BU.fill(player, c, us, scope, only_auto)
       end
     end
     local hint = text(root, "Rates /s · chest stock, all qualities · — unavailable · ≈ estimated empty time · ★ keeps a row or group at the top")
+    hint.visible = developer(player)
     hint.style.font="default-small"
     hint.style.font_color = { 0.65, 0.65, 0.65 }
     hint.style.single_line = false
@@ -555,11 +561,20 @@ function BU.fill(player, c, us, scope, only_auto)
     counter.style.single_line=false
     local update=footer.add{type="sprite-button",style="tool_button",sprite="utility/refresh",tags={ssk_ui="bal_update"},
       tooltip="Reapply filters and sorting, and include new items. Measured values keep updating while row order is held."}
-    if limit < #normal then root.add { type = "button", caption = "Show 200 more", tags = { ssk_ui = "bal_more" } } end
+    if limit < #normal then
+      -- the one text button: a long-form command centred under the list, as vanilla does
+      local more = root.add { type = "flow", direction = "horizontal" }
+      more.style.horizontal_align = "center"
+      more.style.horizontally_stretchable = true
+      more.add { type = "button", caption = "Show 200 more", tags = { ssk_ui = "bal_more" },
+        tooltip = "Add the next 200 matching rows to the list" }
+    end
   end
   local stock_status=Sampler.stock_status()
   local age=stock_status.updated_tick and time(math.max(0,game.tick-stock_status.updated_tick)/60).." ago" or "first scan pending"
-  context.caption = string.format("%s · Averaged over %s · Rates update every 5 s\nChest stock: %s · At least 5 min between scans", scope, time(secs),age)
+  context.caption = developer(player)
+    and string.format("%s · Averaged over %s · Rates update every 5 s\nChest stock: %s · At least 5 min between scans", scope, time(secs), age)
+    or string.format("%s · Averaged over %s", scope, time(secs))
   for _, group in ipairs(SUMMARY_GROUPS) do
     local total = 0
     for _, id in ipairs(group.ids) do total = total + (counts[id] or 0) end

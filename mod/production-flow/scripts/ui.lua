@@ -382,6 +382,7 @@ end
 function UI.open(player)
   UI.close(player)
   local us = ustate(player.index)
+  local developer = player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value
   local res, sc = player.display_resolution, player.display_scale
   local W, H = UI.dimensions(res, sc)
 
@@ -396,7 +397,7 @@ function UI.open(player)
   local drag = tb.add { type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true }
   drag.style.horizontally_stretchable = true
   drag.style.height = 24
-  local function action_button(sprite, fallback, tooltip, tag)
+  local function action_button(sprite, tooltip, tag)
     tb.add { type = "sprite-button", style = "frame_action_button", sprite = sprite,
       tooltip = tooltip, tags = { ssk_ui = tag } }
   end
@@ -405,7 +406,7 @@ function UI.open(player)
   local sitems, ssel = { "Where I am (" .. Su.rich(player.surface) .. ")" }, 1
   us.surface_names = {}
   for i, x in ipairs(surface_choices(us.surface)) do
-    sitems[#sitems + 1] = string.format("%s  (%d machines)", x.label, x.n)
+    sitems[#sitems + 1] = developer and string.format("%s  (%d machines)", x.label, x.n) or x.label
     us.surface_names[i + 1] = x.name
     if us.surface == x.name then ssel = i + 1 end
   end
@@ -424,12 +425,12 @@ function UI.open(player)
   local history=tb.add{type="label",name="ssk_history"}
   history.style.font="default-small-bold";history.style.font_color={1,0.82,0.35}
   history.style.maximal_width=190
-  action_button("utility/questionmark", "?", "Help: controls, calculations, stock, alerts and chart limits", "help")
+  action_button("utility/questionmark", "Help: controls, calculations, stock, alerts and chart limits", "help")
   if player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value then
-    action_button("utility/export_slot", "Export", "Export diagnostics to script-output/production-flow/", "export")
+    action_button("utility/export_slot", "Export diagnostics to script-output/production-flow/", "export")
   end
-  action_button("utility/refresh", "Refresh", "Refresh", "refresh")
-  action_button("utility/close", "X", "Close", "close")
+  action_button("utility/refresh", "Refresh", "refresh")
+  action_button("utility/close", "Close", "close")
 
   local inner = f.add { type = "frame", name = "ssk_inner", style = "inside_deep_frame", direction = "vertical" }
   inner.style.horizontally_stretchable = true

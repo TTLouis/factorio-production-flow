@@ -138,38 +138,39 @@ right sound.
 9. **Use vanilla label styles for text colour.** Do not hard-code new
    `font_color`s. The established exceptions are the Balance status colours and
    the existing grey `hint()` helper; reuse those rather than adding more.
-10. **Custom graphics only when vanilla has nothing suitable.** The Balance
-    favourite star (`ssk-star`, `ssk-star-off`) is currently custom. Vanilla has a
-    16 px star in the Browse Games list (`browse_games_gui_toggle_favorite_on_button`
-    and `..._off_button`). Prefer it if a star is redrawn or resized.
+10. **Custom graphics only when vanilla has nothing suitable.** Prefer pointing a
+    sprite prototype at a base-game image. The Balance favourite star
+    (`ssk-star`, `ssk-star-off`) does this: it uses the Browse Games star from
+    `__core__/graphics/gui-new.png` inside a `tool_button`.
+11. **Developer detail stays behind the "Show development tools" setting.** Chart
+    statistics, scan cadence, machine counts and legend lines that Help already
+    explains are hidden from normal players.
 
 ### Layout
 
-11. Build windows with the anatomy above: `frame_title` + `draggable_space_header`
+12. Build windows with the anatomy above: `frame_title` + `draggable_space_header`
     + `frame_action_button`s, content in `inside_deep_frame` or
     `inside_shallow_frame`, toolbars in `subheader_frame`s.
-12. Right-align toolbar actions after a stretching `empty-widget`, as the base game
+13. Right-align toolbar actions after a stretching `empty-widget`, as the base game
     does. Group related controls; do not mix text buttons, drop-downs and icon
     buttons at random widths in one row.
-13. Do not rely on Unicode symbols rendering in the default fonts; test them in
+14. Do not rely on Unicode symbols rendering in the default fonts; test them in
     native screenshots.
 
 ## Known exceptions to fix
 
-These predate the rules. Fix them when that code is next touched, one area at a
+These predate the rules and are developer tools only. Fix them when that code is next touched, one area at a
 time, and re-run the native screenshot phases. Do not change the Sankey drawing
 code to do so; only the toolbar controls around it.
 
 | Where | Today | Should become |
 | --- | --- | --- |
-| `scripts/sankey_ui.lua` `button()` helper | Every chart toolbar action is a plain grey `button`, with `−`, `+`, `◀`, `▲`, `▼` squeezed to 32 px | `tool_button` sprites: `left_arrow` for Back, `center` for Center, `refresh` for Reflow, `reset` (red) for Reset layout, `collapse`/`expand` for groups, `down_arrow` and `utility/indication_arrow` (or glyph `tool_button`s) for Move, `tool_button` glyphs for zoom |
-| `scripts/sankey_ui.lua` "Advanced" / "Less" | Caption swaps to show state | `tool_button` with `toggled` |
-| `scripts/balance_ui.lua` "Update list" | Plain grey `button` in the footer | `tool_button` with `utility/refresh` and a tooltip |
-| `scripts/balance_ui.lua` "Show 200 more" | Plain grey `button` | Keep as text, centred at the end of the list |
-| `scripts/balance_ui.lua` inspect fallback `">"` | Text fallback for `utility/search` | Remove the fallback |
-| `scripts/ui.lua`, `scripts/help_ui.lua`, `scripts/render_test.lua` close fallback `"X"` | Plain grey `button` fallback | Remove the fallback; `utility/close` always exists |
 | Graph and Sampler tabs ("Rebuild graph", "Rescan machines") | Plain grey `button` | `tool_button` with `utility/refresh` (developer tools; low priority) |
 | Render test window toolbar | Cycling text buttons ("Switch to …", "Ordering: on") | `drop-down`/`checkbox` (developer tool; low priority) |
+
+The chart toolbars, Balance footer, close buttons and favourite star were
+brought in line in October 2026. "Show 200 more" remains the one deliberate
+text button, centred under the Balance list.
 
 ## Checklist for a UI change
 
