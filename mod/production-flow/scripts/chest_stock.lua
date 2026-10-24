@@ -2,8 +2,19 @@
 local C = {}
 C.TYPES = {"container", "logistic-container"}
 C.PER_TICK = 32
-C.INTERVAL = 18000 -- at least five minutes of rest after a completed scan
 local function state() return storage.chest_stock end
+
+function C.interval()
+  local setting=settings.global["ssk-stock-scan-minutes"]
+  return math.max(1,setting and setting.value or 5)*3600
+end
+
+function C.reschedule()
+  local s=state()
+  if s.batch then return end -- The new cooldown applies when the active scan finishes.
+  local h=storage.stock or {};local last=h[#h]
+  s.next_tick=last and last.tick+C.interval() or 0
+end
 
 function C.init()
   if storage.stock_basis ~= "physical-chests-v1" then
@@ -74,7 +85,7 @@ function C.tick(tick)
     h[#h+1] = {tick=tick, start=b.start, s=b.s}
     while #h>7 do table.remove(h,1) end
     s.last = {ticks=tick-b.start+1, reads=b.reads, tick=tick}
-    s.next_tick, s.batch = tick+C.INTERVAL, nil
+    s.next_tick, s.batch = tick+C.interval(), nil
   end
 end
 
@@ -87,7 +98,7 @@ end
 function C.status()
   local s = state()
   local h=storage.stock or {};local snapshot=h[#h]
-  return {tracked=#s.list, per_tick=C.PER_TICK, interval=C.INTERVAL, updated_tick=snapshot and snapshot.tick,
+  return {tracked=#s.list, per_tick=C.PER_TICK, interval=C.interval(), updated_tick=snapshot and snapshot.tick,
           last=s.last, active=s.batch~=nil}
 end
 

@@ -107,6 +107,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--stage',type=Path);p.add_argument('--counts',type=int,nargs='+',default=[1000,10000,50000])
     p.add_argument('--ticks',type=int,default=3600);p.add_argument('--runs',type=int,default=3)
+    p.add_argument('--settings-check',action='store_true')
     p.add_argument('--capture',action='store_true');p.add_argument('--build-only',action='store_true');p.add_argument('--benchmark-only',action='store_true')
     p.add_argument('--save',type=Path,help='Also benchmark a copy of an existing Space Age save')
     p.add_argument('--open',action='store_true',help='Include a Balance-window pair')
@@ -117,6 +118,13 @@ def main():
     try:msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
     except OSError:raise RuntimeError(f'Another stress-test runner owns {stage}')
     print(f'Stage: {stage}',flush=True)
+    if args.settings_check:
+        install(stage,'settings')
+        text=execute(stage,['--benchmark',stage/'saves/_autosave-chests-1000.zip',
+                            '--benchmark-ticks',10,'--benchmark-runs',1],'settings-check')
+        if 'STOCK SETTINGS OK' not in text:raise RuntimeError('Native settings assertions did not complete')
+        print('PASS native stock settings',flush=True)
+        return
     if args.capture:
         install(stage,'capture')
         execute(stage,['--load-game',stage/'saves/_autosave-chests-50000.zip','--disable-audio','--disable-migration-window',

@@ -1,7 +1,7 @@
 # Production Flow (Beta)
 
 The short description is live. The full description below is a development draft
-including the unreleased five-minute stock cooldown; it has not been republished.
+including the unreleased configurable stock cooldown; it has not been republished.
 
 ## Short description
 See where your factory's resources go. Spot imbalances and explore item and fluid production with interactive Sankey charts.
@@ -29,7 +29,7 @@ Compare recorded item and fluid rates, then explore the recipes connecting their
 - **Recipe connections:** The mod samples completed crafts on tracked crafting machines. Ingredient amounts and estimated product yields turn that activity into rates for each recipe link, with adjustments for productivity and expected yields for probabilistic outputs. These estimates can differ from the measured production totals.
 - **Selected-item usage:** The Uses side reports how much of the selected material each consumer takes. For example, 10 normal crafts/s of a recipe using 2 iron plates per craft represents 20 iron plates/s consumed.
 - **Utilisation and status:** Observed normal craft rates are compared with the current machines' capacity, calculated from crafting speed and recipe time. Net differences within 5% of the larger made/used rate count as roughly balanced. Utilisation warnings are diagnostic hints; they do not prove why a machine is waiting. Machine or module changes can affect comparisons with historical activity.
-- **Stock and Empty in:** Physical contents of ordinary and logistic chests on the selected surface, including requester and buffer chests, with all qualities combined. No logistic network is required. Items stored without recent activity appear as **Stock only**. Reads are spread across ticks; each completed scan is followed by at least a 5-minute wait before another starts. Balance shows the stock sample age while production rates refresh every 5 seconds. A dash means unavailable; zero means measured empty. Empty time uses the recent stock drain (up to seven completed samples: about 30 minutes, longer for large scans), otherwise the net production deficit, and assumes that drain continues. Items moving during a scan can affect a sample.
+- **Stock and Empty in:** Physical contents of ordinary and logistic chests on the selected surface, including requester and buffer chests, with all qualities combined. No logistic network is required. Items stored without recent activity appear as **Stock only**. Reads are spread across ticks; each completed scan is followed by a configurable wait (minimum 1 game minute, default 5) before another starts. Balance shows the stock sample age while production rates refresh every 5 seconds. A dash means unavailable; zero means measured empty. Empty time uses the recent stock drain (up to seven completed samples: about 30 minutes at the default interval or 6 at the minimum, longer for large scans), otherwise the net production deficit, and assumes that drain continues. Items moving during a scan can affect a sample.
 - **Ribbon widths:** Proportional mode uses rate-based widths; compressed mode uses a square-root scale. Fluids have a separate visual scale and thin flows have a minimum thickness. Widths across different materials are not a conserved mass balance.
 
 ![Balance: steam inputs and uses](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/09-balance-steam-usage.png)

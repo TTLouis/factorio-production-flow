@@ -19,6 +19,14 @@ data:extend({
   },
   {
     type = "int-setting",
+    name = "ssk-stock-scan-minutes",
+    setting_type = "runtime-global",
+    default_value = 5,
+    minimum_value = 1,
+    order = "b-stock",
+  },
+  {
+    type = "int-setting",
     name = "ssk-auto-export-minutes",
     setting_type = "runtime-global",
     default_value = 0,

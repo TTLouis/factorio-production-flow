@@ -4,9 +4,11 @@
 
 ### Performance
 
-- Wait at least five game minutes after each completed chest-stock scan before
-  starting another. The 32-chest-per-tick budget stays in place, and large maps
-  cannot scan back to back.
+- Make the chest-stock scan cooldown configurable in Mod settings / Map: minimum
+  1 game minute, default 5. The wait starts after each completed scan, so large
+  maps cannot scan back to back. The 32-chest-per-tick budget stays in place.
+- Apply interval changes live, rescheduling idle scans from their last completion
+  and allowing active scans to finish without restarting them.
 - Check the cooldown over three 40,000-update repetitions with 50,000 full chests,
   both with Balance open and closed. Completed scans were about 5 minutes
   26 seconds apart. Measured average stock-script overhead was about 0.08 ms per
@@ -15,8 +17,8 @@
 ### Clarity
 
 - Show the stock sample age separately from the five-second production-rate
-  refresh. Explain that the seven-sample stock trend can cover about 30 minutes,
-  or longer for large scans.
+  refresh. Explain that the seven-sample stock trend depends on the scan interval (about 30 minutes at the
+  default, about 6 at the minimum, longer for large scans).
 - Replace the history/window wording in the short description with an introduction
   focused on production imbalances and interactive item/fluid charts.
 

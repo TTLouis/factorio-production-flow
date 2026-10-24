@@ -1,9 +1,10 @@
-# Unreleased: five-minute stock cooldown
+# Unreleased: configurable stock cooldown
 
 The development branch has not been published or version-bumped.
 
-Chest sampling now waits at least 18,000 game ticks (five minutes) after a
-completed scan before starting another. The 32-entry-per-tick budget is retained.
+Chest sampling waits for a configurable interval after a completed scan before
+starting another: a runtime-global map setting, minimum 1 minute and default 5.
+The longer benchmark below uses the five-minute default. The 32-entry-per-tick budget is retained.
 This prevents back-to-back scans even when a full scan takes longer than the old
 10-second interval. Balance shows the stock sample age separately from its
 five-second production-rate refresh. The stock trend uses up to seven completed
@@ -12,6 +13,10 @@ samples, normally about 30 minutes and longer for large scans.
 A deterministic test asserts that no scan can begin during the five-minute rest
 period, and that scan state survives initialization. The same mixed-quality
 native Space Age stock audit and updated Balance/help/scroll views are rechecked.
+A native settings check additionally verifies the five-minute default, changes
+between 1 and 5 minutes through the real setting-change event, and retention of
+an in-flight scan. Unit tests cover the 1-minute minimum declaration and live
+rescheduling in both directions.
 The changelog explicitly records these performance changes and the stress testing.
 The short description is revised independently of the runtime measurements.
 

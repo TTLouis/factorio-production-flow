@@ -3,7 +3,7 @@ local T={}
 local cfg=require("scripts.stock_stress_config")
 local C=require("scripts.chest_stock")
 local SK=require("scripts.sankey_ui")
-local started, refreshed, last_scan_tick
+local started, refreshed, last_scan_tick, setting_test_tick, setting_scan_start
 local function build()
   local seed=20261024
   local random=game.create_random_generator(seed)
@@ -49,10 +49,37 @@ end
 function T.tick(UI,Sampler)
   started=started or game.tick
   local elapsed=game.tick-started
+  if cfg.mode=="settings" then
+    local name="ssk-stock-scan-minutes"
+    if elapsed==0 then
+      assert(settings.global[name].value==5,"Native setting must default to five minutes")
+      Sampler.rescan()
+      setting_test_tick=game.tick
+      storage.stock[#storage.stock].tick=game.tick
+      storage.chest_stock.next_tick=game.tick+999999
+      settings.global[name]={value=1}
+    elseif elapsed==1 then
+      assert(C.interval()==3600 and storage.chest_stock.next_tick==setting_test_tick+3600,"Native setting event did not shorten the idle cooldown")
+      settings.global[name]={value=5}
+    elseif elapsed==2 then
+      assert(C.interval()==18000 and storage.chest_stock.next_tick==setting_test_tick+18000,"Native setting event did not lengthen the idle cooldown")
+      storage.chest_stock.next_tick=0;C.request(game.tick)
+      setting_scan_start=storage.chest_stock.batch.start
+      settings.global[name]={value=1}
+    elseif elapsed==3 then
+      assert(C.interval()==3600 and storage.chest_stock.batch.start==setting_scan_start and storage.chest_stock.batch.cursor>1,
+        "Native interval edit restarted an active scan")
+      settings.global[name]={value=5}
+    elseif elapsed==4 then
+      assert(C.interval()==18000 and storage.chest_stock.batch.start==setting_scan_start,"Native interval edit lost the active scan")
+      log("STOCK SETTINGS OK: default, 1-minute minimum, runtime changes and active scan retention")
+    end
+    return
+  end
   if cfg.mode=="benchmark" then
     local completed=Sampler.stock_status().last
     if completed and completed.tick~=last_scan_tick then
-      if last_scan_tick then assert(completed.tick-last_scan_tick>=C.INTERVAL,"Stock scans exceed the maximum update rate") end
+      if last_scan_tick then assert(completed.tick-last_scan_tick>=C.interval(),"Stock scans exceed the maximum update rate") end
       last_scan_tick=completed.tick
       log("STOCK SCAN COMPLETE "..helpers.table_to_json(completed))
     end

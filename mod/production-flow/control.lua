@@ -44,6 +44,7 @@ script.on_event(defines.events.on_force_created, function(e) Canvas.on_force_cre
 
 script.on_event(defines.events.on_runtime_mod_setting_changed, function(e)
   if e.setting == "ssk-window-seconds" then Sampler.init() end
+  if e.setting == "ssk-stock-scan-minutes" then Sampler.on_stock_interval_changed() end
   if e.setting == "ssk-debug-tabs" and e.player_index then
     local p = game.get_player(e.player_index)
     if p and UI.is_open(p) then UI.open(p) end

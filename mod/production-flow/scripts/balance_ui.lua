@@ -81,7 +81,7 @@ local COLUMNS = {
   { id = "cu", name = "Consumers", width = 90, numeric = true, detail = true,
     help = "Estimated consumer utilisation: measured crafts / current crafting capacity. Long periods use today's machines; values may exceed 100% after capacity changes." },
   { id = "trend", name = "Stock /min", width = 90, numeric = true, detail = true,
-    help = "Recent change in chest stock per minute (seven samples: about 30 minutes, longer for large scans), independent of the selected production averaging period." },
+    help = "Recent change in chest stock per minute across up to seven complete scans. Its time span depends on the stock scan interval in mod settings (about 30 minutes at the 5-minute default, longer for large scans), independently of the production averaging period." },
 }
 
 local function values(r)
@@ -389,7 +389,7 @@ function BU.fill(player, c, us, scope, only_auto)
   end
   local stock_status=Sampler.stock_status()
   local age=stock_status.updated_tick and time(math.max(0,game.tick-stock_status.updated_tick)/60).." ago" or "first scan pending"
-  context.caption = string.format("%s  ·  Averaged over %s  ·  Rates update every 5 s\nChest stock: %s  ·  At least 5 min between scans", scope, time(secs),age)
+  context.caption = string.format("%s  ·  Averaged over %s  ·  Rates update every 5 s\nChest stock: %s  ·  Wait %s after each scan", scope, time(secs),age,time(stock_status.interval/60))
   for id, el in pairs(summaries) do
     local st = Balance.STATUS[id]
     el.caption = string.format("[color=%s]%s: %d[/color]", st.color, st.label, counts[id] or 0)

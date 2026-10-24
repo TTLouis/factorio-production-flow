@@ -108,3 +108,12 @@ cadence so a run includes more than one complete cycle. The native hook asserts
 that consecutive completed scans are never less than five game minutes apart.
 Keep older high-cadence results separately: the per-active-tick budget remains 32,
 but long-run average work is reduced by the cooldown after each complete scan.
+
+
+`python tests/stock_stress.py --stage PATH_TO_EXISTING_STRESS_STAGE --settings-check`
+checks the runtime-global setting in the native engine using its existing
+1,000-chest fixture. It verifies the default, edits between 1 and 5 minutes,
+rescheduling through the real setting-change event, and retention of an active
+scan. This is a functional check, not a performance benchmark. Offline tests also
+verify the setting declaration (1-minute minimum, 5-minute default), increasing
+and decreasing the cooldown, and applying a new interval after a scan finishes.

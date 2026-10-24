@@ -116,7 +116,7 @@ game = { tick = 0, surfaces = setmetatable({ nauvis }, { __index = function(t, k
          create_random_generator = function(seed) local s = seed
            return function(a, b) s = (s * 1103515245 + 12345) % 2147483648; local f = s / 2147483648
              if a then return a + math.floor(f * (b - a + 1)) end return f end end }
-settings = { global = { ["ssk-entities-per-tick"] = { value = 3 }, ["ssk-window-seconds"] = { value = 60 }, ["ssk-auto-export-minutes"] = { value = 5 } } }
+settings = { global = { ["ssk-stock-scan-minutes"] = { value = 5 }, ["ssk-entities-per-tick"] = { value = 3 }, ["ssk-window-seconds"] = { value = 60 }, ["ssk-auto-export-minutes"] = { value = 5 } } }
 WRITES = {}
 local function tojson(v)
   local t = type(v)

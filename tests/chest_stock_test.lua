@@ -1,5 +1,13 @@
 local Sm, C, B = TREQ("scripts.sampler"), TREQ("scripts.chest_stock"), TREQ("scripts.balance")
 local saved_storage, saved_tick = storage, game.tick
+local saved_interval=settings.global["ssk-stock-scan-minutes"].value
+local saved_data,declared=data,nil
+data={extend=function(_,entries) for _,entry in ipairs(entries) do
+  if entry.name=="ssk-stock-scan-minutes" then declared=entry end
+end end}
+dofile("settings.lua");data=saved_data
+assert(declared and declared.type=="int-setting" and declared.setting_type=="runtime-global"
+  and declared.minimum_value==1 and declared.default_value==5,"expose the 1-minute minimum / 5-minute default as a map setting")
 storage={stock={{tick=0,s={}}},stock_basis="stored-with-reservations-v1"}
 Sm.init()
 assert(#storage.stock==0,"changing stock scope must clear the old trend")
@@ -27,9 +35,9 @@ for tick=2,5 do local before=reads;Sm.on_tick(tick);assert(reads-before<=32) end
 assert(Sm.stock(1)["item/steel-plate"].count==110,"ordinary/logistic and mixed-quality counts once; late additions deferred")
 assert(Sm.stock(2)["item/steel-plate"].count==23 and Sm.stock(nil)["item/steel-plate"].count==133,"surface scopes")
 assert(C.status().tracked==103,"invalid entries removed without dropping late builds")
-assert(C.INTERVAL==18000,"stock updates must wait five full game minutes")
+assert(C.interval()==18000,"stock updates must wait five full game minutes")
 local completed_tick=storage.stock[#storage.stock].tick
-for tick=completed_tick+1,completed_tick+C.INTERVAL-1 do Sm.on_tick(tick) end
+for tick=completed_tick+1,completed_tick+C.interval()-1 do Sm.on_tick(tick) end
 assert(#storage.stock==1 and not C.status().active,"no scan may start during the five-minute cooldown")
 assert(Sm.stock_known(1) and not Sm.stock_known(999),"known zero requires a completed surface sample")
 late.valid=false;b.contents={};a.contents={{name="steel-plate",count=100}}
@@ -46,5 +54,24 @@ local cursor=storage.chest_stock.batch.cursor
 Sm.init();assert(storage.chest_stock.batch.cursor==cursor)
 for tick=36011,36014 do C.tick(tick) end
 assert(Sm.stock(1)["item/steel-plate"].count==100,"resume a partial scan without double counting")
+local last=storage.stock[#storage.stock].tick
+settings.global["ssk-stock-scan-minutes"].value=1
+Sm.on_stock_interval_changed()
+assert(C.status().interval==3600 and storage.chest_stock.next_tick==last+3600,"shortening a setting reschedules from the last completed scan")
+C.tick(last+3599)
+assert(not C.status().active,"the 1-minute minimum is a full cooldown")
+C.tick(last+3600)
+assert(C.status().active,"a shorter cooldown takes effect without rescanning the registry")
+local cursor=storage.chest_stock.batch.cursor
+settings.global["ssk-stock-scan-minutes"].value=10
+Sm.on_stock_interval_changed()
+assert(storage.chest_stock.batch.cursor==cursor,"changing interval must not restart an in-flight scan")
+for tick=last+3601,last+3604 do C.tick(tick) end
+local finished=storage.stock[#storage.stock].tick
+assert(storage.chest_stock.next_tick==finished+36000,"an active scan uses the newly selected cooldown on completion")
+settings.global["ssk-stock-scan-minutes"].value=15
+Sm.on_stock_interval_changed()
+assert(storage.chest_stock.next_tick==finished+54000,"increasing the interval postpones the next scan")
+settings.global["ssk-stock-scan-minutes"].value=saved_interval
 storage,game.tick=saved_storage,saved_tick
-print("CHEST STOCK OK: budget, atomic scans, registry changes, qualities, forces, surfaces, trends, stored-only and resume")
+print("CHEST STOCK OK: budget, atomic scans, registry changes, qualities, forces, surfaces, trends, stored-only, resume and runtime intervals")

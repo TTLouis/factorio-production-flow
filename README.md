@@ -5,7 +5,7 @@
 Production Flow shows what your factory makes, what it consumes, and how recipes
 connect on the selected surface. Public beta: **0.1.2**, by **TTLouis**.
 
-**Unreleased development:** `main` includes a five-minute chest-stock cooldown,
+**Unreleased development:** `main` includes a configurable chest-stock cooldown (1-minute minimum, 5-minute default),
 stock sample age and revised help. These changes are not in the published 0.1.2
 archive; see [the development changelog](CHANGELOG.md).
 
@@ -55,7 +55,8 @@ item/fluid selection and production measurements are independent of storage.
 Player/vehicle inventories, machine buffers, belts, ground items, linked/infinity
 chests and fluid tanks are excluded. Empty-time values are estimates. Large maps
 use staggered inventory scans, publishing only completed results. Each scan is
-followed by at least a five-minute cooldown; Balance shows stock sample age.
+followed by the cooldown selected in Mod settings / Map (1-minute minimum,
+5-minute default); Balance shows stock sample age and the selected interval.
 
 See [how rates are calculated](docs/calculations.md) for the measurements,
 productivity adjustments, utilisation estimates and stock calculations.

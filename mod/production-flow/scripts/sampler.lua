@@ -346,6 +346,7 @@ end
 function Sm.on_stock(tick) ChestStock.request(tick) end
 function Sm.stock_known(sidx) return ChestStock.known(sidx) end
 function Sm.stock_status() return ChestStock.status() end
+function Sm.on_stock_interval_changed() ChestStock.reschedule() end
 function Sm.stock_surfaces()
   local h=storage.stock or {};local last=h[#h];local out={}
   if last then for index,totals in pairs(last.s) do if next(totals) then out[index]=true end end end
