@@ -413,13 +413,13 @@ function T.tick(UI, Sampler)
     local dialog=assert(player.gui.screen.ssk_material_picker)
     local grid=find_named(dialog,"ssk_results")
     assert(grid.type=="table" and grid.tags.total>100,"Incomplete material icon grid")
-    local categories=dialog.ssk_material_inner.ssk_group_scroll.ssk_groups
+    local categories=dialog.ssk_material_inner.ssk_groups
     for _,category in pairs(categories.children) do
       assert(category.tags.group~="other" and category.tags.group~="signals", "Excluded selector category remains visible")
     end
     for _,query in ipairs({"parameter-", "blueprint", "deconstruction planner"}) do
-      dialog.ssk_query.text=query
-      UI.on_text_changed{player_index=player.index,element=dialog.ssk_query}
+      dialog.ssk_title.ssk_query.text=query
+      UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
       for _,key in ipairs(grid.tags.keys) do
         local kind,name=key:match("^(%a+)/(.+)$")
         local proto=prototypes[kind][name]
@@ -437,8 +437,8 @@ function T.tick(UI, Sampler)
       end
       UI.on_click{player_index=player.index,element=assert(group_button(dialog))}
     end
-    dialog.ssk_query.text=c.query or c.pick:match("/(.+)$"):gsub("%-"," ")
-    UI.on_text_changed{player_index=player.index,element=dialog.ssk_query}
+    dialog.ssk_title.ssk_query.text=c.query or c.pick:match("/(.+)$"):gsub("%-"," ")
+    UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
     if c.pick then
       local function material_button(el)
         if el.tags.ssk_picker=="pick" and el.tags.key==c.pick then return el end
