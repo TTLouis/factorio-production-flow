@@ -83,6 +83,11 @@ local function label_toggle(row, us)
     tooltip = "Keep all names and rates visible. Otherwise hover an icon or bar; selected items keep their label. Hover a visible label for detailed flow information." }
 end
 
+local function live_toggle(row, us)
+  return row.add { type = "checkbox", caption = "Auto-update chart", state = us.live, tags = { ssk_sk = "live" },
+    tooltip = "Redraw this chart every 5 seconds. Sampling and Balance values continue when this is off." }
+end
+
 ---------------------------------------------------------------------------
 -- placement (negative-margin absolute positioning, verified in M0)
 ---------------------------------------------------------------------------
@@ -127,14 +132,22 @@ local function button(parent, caption, action, tooltip, extra)
   local t = { ssk_sk = action }
   if extra then for k, v in pairs(extra) do t[k] = v end end
   local b = parent.add { type = "button", caption = caption, tooltip = tooltip, tags = t }
-  if action == "zoom_fit" then b.style.minimal_width = 56
+  if action == "zoom_fit" or action == "center_selection" then b.style.minimal_width = 56
   elseif #caption <= 3 then b.style.width = 32 end
   return b
 end
 
 local function small(parent, caption)
+  return parent.add { type = "label", caption = caption }
+end
+
+-- secondary guidance text: small and grey in every toolbar
+local function hint(parent, caption, width)
   local l = parent.add { type = "label", caption = caption }
-  l.style.left_margin = 8
+  l.style.font = "default-small"
+  l.style.font_color = { 0.65, 0.65, 0.65 }
+  l.style.single_line = false
+  l.style.maximal_width = width
   return l
 end
 
@@ -142,94 +155,115 @@ local function developer_controls(player)
   return player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value
 end
 
+-- Controls shared by the Balance chart, Focus and Full Sankey toolbars. Each one
+-- has the same caption, order, width and tooltip wherever it appears.
+local function option_row(bar)
+  local row = bar.add { type = "flow", direction = "horizontal" }
+  row.style.vertical_align = "center"
+  row.style.horizontal_spacing = 8
+  return row
+end
+
+local function dropdown(row, caption, items, index, action, tooltip)
+  small(row, caption)
+  local d = row.add { type = "drop-down", items = items, selected_index = index, tags = { ssk_sk = action }, tooltip = tooltip }
+  d.style.width = 150
+  return d
+end
+
+local function widths_picker(row, us)
+  return dropdown(row, "Widths:", { "Proportional", "Compressed" }, us.heights == "linear" and 1 or 2, "f_heights",
+    "Proportional: linear rate widths. Compressed: square-root widths, so small flows stay visible. Fluids use a separate scale and thin ribbons keep a visible minimum. Hover for exact rates.")
+end
+
+local function colors_picker(row, us)
+  return dropdown(row, "Colors:", { "Destination", "Source" }, us.color_mode == "source" and 2 or 1, "balance_colors",
+    "Destination: ribbons feeding the same node share its color. Source: ribbons take the color of the material they come from. Ribbons always carry source-material units.")
+end
+
+local function lines_picker(row, us)
+  return dropdown(row, "Lines:", { "Curves", "Right angles" }, us.lines == "metro" and 2 or 1, "f_lines",
+    "Right angles: steep ribbons run vertically and cross others at 90°.")
+end
+
+local function renderer_picker(row, us)
+  return dropdown(row, "Renderer:", { "GUI sprites", "Polygons (beta)" }, us.renderer == "poly" and 2 or 1, "f_renderer",
+    "Compare the same routes: atlas sprites, or one polygon mesh per ribbon drawn on a hidden surface and shown through a camera.")
+end
+
+local function zoom_buttons(row)
+  button(row, "−", "zoom_out", "Zoom out")
+  button(row, "Fit graph", "zoom_fit", "Fit the chart to the window while keeping icons and text readable; dense charts keep scrolling.")
+  button(row, "+", "zoom_in", "Zoom in")
+  button(row, "Center", "center_selection", "Center the selected item, or the whole chart when nothing is selected.")
+end
+
+local function reflow_button(row)
+  button(row, "Reflow", "reflow", "Recalculate node order and spacing. Auto-update otherwise keeps the current layout.")
+end
+
+local function back_button(row)
+  button(row, "◀", "f_back", "Back to the previous item")
+end
+
+local function item_pickers(row, us)
+  small(row, "Item / fluid:")
+  local t, n = nil, nil
+  if us.focus then t, n = string.match(us.focus, "^(%a+)/(.+)$") end
+  row.add { type = "choose-elem-button", elem_type = "item", item = (t == "item") and n or nil,
+            tags = { ssk_sk = "f_item" }, tooltip = "Pick an item to inspect" }
+  row.add { type = "choose-elem-button", elem_type = "fluid", fluid = (t == "fluid") and n or nil,
+            tags = { ssk_sk = "f_fluid" }, tooltip = "Pick a fluid to inspect" }
+end
+
 local function focus_toolbar(bar, us, player)
   bar.clear()
   if us.neighborhood then
-    local title = bar.add { type = "flow", direction = "horizontal" }
-    title.style.vertical_align = "center"
-    local hint = title.add { type = "label", caption = "Item flow", style = "caption_label" }
-    hint.style.width = 65
-    button(title, "Fit graph", "zoom_fit", "Fit the graph while keeping icons and text readable; dense chains retain scrolling")
-    button(title, "Center", "center_selection", "Center the selected item in the viewport")
+    local title = option_row(bar)
+    local heading = title.add { type = "label", caption = "Item flow", style = "caption_label" }
+    heading.style.width = 65
+    zoom_buttons(title)
     local expand = button(title, "Expand inputs", "inputs_more", "Reveal another upstream production step without changing the selected item (up to 6 steps)")
     expand.enabled = (us.input_depth or 1) < View.MAX_INPUT_DEPTH
-    if (us.input_depth or 1) > 1 then button(title, "− inputs", "inputs_less", "Hide the furthest upstream step") end
-    if #(us.focus_hist or {}) > 0 then button(title, "◀", "f_back", "Previous selected item") end
-    local row = bar.add { type = "flow", direction = "horizontal" }
-    row.style.horizontal_spacing = 4
-    row.add { type = "choose-elem-button", elem_type = "item", item = us.focus and us.focus:match("^item/(.+)$"), tags = { ssk_sk = "f_item" } }
-    row.add { type = "choose-elem-button", elem_type = "fluid", fluid = us.focus and us.focus:match("^fluid/(.+)$"), tags = { ssk_sk = "f_fluid" } }
-    if developer_controls(player) then
-      local renderer = row.add { type = "drop-down", items = { "GUI sprites", "Polygons" }, selected_index = us.renderer == "poly" and 2 or 1, tags = { ssk_sk = "f_renderer" } }
-      renderer.style.width = 130
-    end
-    row.add { type = "checkbox", caption = "Auto-update chart", state = us.live, tags = { ssk_sk = "live" },
-      tooltip = "Redraw this chart every 5 seconds. Sampling and Balance values continue when this is off." }
+    if (us.input_depth or 1) > 1 then button(title, "Fewer inputs", "inputs_less", "Hide the furthest upstream step") end
+    if #(us.focus_hist or {}) > 0 then back_button(title) end
+    local row = option_row(bar)
+    item_pickers(row, us)
+    live_toggle(row, us)
     label_toggle(row, us)
-    local options = bar.add {type="flow", direction="horizontal"}
-    local heights=options.add {type="drop-down", items={"Proportional", "Compressed"},
-      selected_index=us.heights=="linear" and 1 or 2, tags={ssk_sk="f_heights"},
-      tooltip="Proportional: linear rate widths (fluids use the configured scale). Compressed: square-root widths; small flows are enlarged. Exact rates remain in tooltips."}
-    heights.style.width=150
-    local colors=options.add {type="drop-down", items={"Destination colors", "Source colors"},
-      selected_index=us.color_mode=="source" and 2 or 1, tags={ssk_sk="balance_colors"},
-      tooltip="Destination: inputs share the receiving node's color. Color does not change the ribbon's source-material units."}
-    colors.style.width=175
-    button(options, "Unpin", "unpin", "Shift-click a node to pin its flow highlight; click normally to inspect it")
+    if developer_controls(player) then renderer_picker(row, us) end
+    local options = option_row(bar)
+    widths_picker(options, us)
+    colors_picker(options, us)
+    button(options, "Unpin", "unpin", "Clear the pinned highlight. Shift-click a node to pin one; click normally to inspect it.")
     local making=bar.add{type="label",name="ssk_producers"}
     making.style.width=math.max(100,(us.canvas_w or 900)-12)
     making.style.font="default-small";making.style.single_line=true
     return
   end
-  local r1 = bar.add { type = "flow", direction = "horizontal" }
-  r1.style.vertical_align = "center"
-  r1.style.horizontal_spacing = 6
-  if #(us.focus_hist or {}) > 0 then button(r1, "◀", "f_back", "Back to the previous item") end
-  small(r1, "Item:")
-  local t, n = nil, nil
-  if us.focus then t, n = string.match(us.focus, "^(%a+)/(.+)$") end
-  r1.add { type = "choose-elem-button", elem_type = "item", item = (t == "item") and n or nil,
-           tags = { ssk_sk = "f_item" }, tooltip = "Item to focus on" }
-  r1.add { type = "choose-elem-button", elem_type = "fluid", fluid = (t == "fluid") and n or nil,
-           tags = { ssk_sk = "f_fluid" }, tooltip = "…or a fluid" }
+  local r1 = option_row(bar)
+  if #(us.focus_hist or {}) > 0 then back_button(r1) end
+  item_pickers(r1, us)
   small(r1, "Steps:")
   r1.add { type = "drop-down", items = { "1", "2", "3" }, selected_index = us.focus_steps or 2,
            tags = { ssk_sk = "f_steps" }, tooltip = "How many items up- and downstream to show (multi-output recipes don't count as a step)" }
-  r1 = bar.add { type = "flow", direction = "horizontal" }
-  r1.style.vertical_align = "center"
-  r1.style.horizontal_spacing = 6
-  small(r1, "Heights:")
-  r1.add { type = "drop-down", items = { "Linear", "Square root" }, selected_index = (us.heights == "sqrt") and 2 or 1,
-           tags = { ssk_sk = "f_heights" }, tooltip = "Square root keeps small flows visible next to big ones (tooltips keep real numbers)" }
-  small(r1, "Lines:")
-  r1.add { type = "drop-down", items = { "Curves", "Right angles" }, selected_index = (us.lines == "metro") and 2 or 1,
-           tags = { ssk_sk = "f_lines" }, tooltip = "Right angles: steep ribbons run vertically and cross others at 90°" }
-  if developer_controls(player) then
-    small(r1, "Renderer:")
-    r1.add { type = "drop-down", items = { "GUI sprites", "Polygons (beta)" }, selected_index = (us.renderer == "poly") and 2 or 1,
-             tags = { ssk_sk = "f_renderer" }, tooltip = "Polygons: smooth shapes drawn on a hidden surface and shown through a camera (experimental)" }
-  end
-  small(r1, "Zoom:")
-  button(r1, "−", "zoom_out", "Zoom out")
-  button(r1, string.format("Fit (%.0f%%)", (us.zoom or 1) * 100), "zoom_fit", "Busiest column fits the window")
-  button(r1, "+", "zoom_in", "Zoom in")
-  local live = r1.add { type = "checkbox", caption = "Auto-update chart", state = us.live, tags = { ssk_sk = "live" },
-                        tooltip = "Redraw this chart every 5 seconds. Sampling and Balance values continue when this is off." }
-  live.style.left_margin = 12
-  local r2 = bar.add { type = "flow", direction = "horizontal" }
-  button(r2, "Reflow", "reflow", "Recalculate node order, spacing and scale. Live updates otherwise keep the current layout.")
-  label_toggle(r2, us)
-  local hint = small(r2, "[color=0.65,0.65,0.65]Click a node to re-centre. Grey ends show flow outside this view.[/color]")
-  hint.style.single_line = false
-  hint.style.maximal_width = math.max(160, (us.canvas_w or 1000) - 160)
+  live_toggle(r1, us)
+  label_toggle(r1, us)
+  local r2 = option_row(bar)
+  zoom_buttons(r2)
+  reflow_button(r2)
+  hint(r2, "Click a node to re-center on it. Grey ends show flow outside this view.", math.max(160, (us.canvas_w or 1000) - 420))
+  local r3 = option_row(bar)
+  widths_picker(r3, us)
+  colors_picker(r3, us)
+  lines_picker(r3, us)
+  if developer_controls(player) then renderer_picker(r3, us) end
 end
 
 local function build_toolbar(bar, us, L, player)
   if us.view == "focus" then return focus_toolbar(bar, us, player) end
   bar.clear()
-  local r1 = bar.add { type = "flow", direction = "horizontal" }
-  r1.style.vertical_align = "center"
-  r1.style.horizontal_spacing = 6
+  local r1 = option_row(bar)
 
   small(r1, "View:")
   local view_picker = r1.add { type = "drop-down", items = { "Grouped (unfinished)", "Item / fluid names" },
@@ -248,16 +282,11 @@ local function build_toolbar(bar, us, L, player)
   local preset_picker = r1.add { type = "drop-down", items = items, selected_index = sel, tags = { ssk_sk = "preset" } }
   preset_picker.style.width = 190
 
-  button(r1, "−", "zoom_out", "Zoom out")
-  button(r1, "Fit graph", "zoom_fit", "Fit readable node headers and ribbon widths; dense graphs keep scrolling")
-  button(r1, "+", "zoom_in", "Zoom in")
-  button(r1, "Center", "center_selection", "Center the selected node, or the whole graph when nothing is selected")
+  zoom_buttons(r1)
   button(r1, us.advanced and "Less" or "Advanced", "advanced", "Layout, tier range and line controls")
   local controls = bar.add { type = "flow", direction = "vertical", name = "ssk_advanced" }
   controls.visible = us.advanced == true
-  r1 = controls.add { type = "flow", direction = "horizontal" }
-  r1.style.vertical_align = "center"
-  r1.style.horizontal_spacing = 6
+  r1 = option_row(controls)
   small(r1, "Tiers by:")
   r1.add { type = "drop-down", items = { "Tech era + depth", "Production depth" },
            selected_index = (us.view == "overview" or us.tier_mode == "depth") and 2 or 1, tags = { ssk_sk = "tier_mode" },
@@ -277,64 +306,38 @@ local function build_toolbar(bar, us, L, player)
   small(r1, "to")
   r1.add { type = "drop-down", items = titems, selected_index = math.max(lo_i, hi_i), tags = { ssk_sk = "tier_hi" } }
 
-  r1 = controls.add { type = "flow", direction = "horizontal" }
-  r1.style.vertical_align = "center"
-  r1.style.horizontal_spacing = 6
+  r1 = option_row(controls)
   r1.add { type = "checkbox", caption = "Split raw inputs", state = us.split_raw ~= false, tags = { ssk_sk = "split_raw" },
            tooltip = "Ores, oil, water… get one copy per lane that uses them, placed next to their consumers" }
-  r1 = controls.add { type = "flow", direction = "horizontal" }
-  r1.style.vertical_align = "center"
-  r1.style.horizontal_spacing = 6
+  r1 = option_row(controls)
   small(r1, "Layout:")
   r1.add { type = "drop-down", items = { "Routed columns", "Swimlanes" }, selected_index = (us.layout == "lanes") and 2 or 1,
            tags = { ssk_sk = "layout" },
            tooltip = "Routed columns reserve item headers and long-link tracks; crossings can remain. Scroll sideways for larger graphs.\nSwimlanes group related items and allow manual ordering; ribbons can overlap." }
-  small(r1, "Lines:")
-  r1.add { type = "drop-down", items = { "Curves", "Right angles" }, selected_index = (us.lines == "metro") and 2 or 1,
-           tags = { ssk_sk = "f_lines" } }
+  lines_picker(r1, us)
   button(r1, "Reset layout", "reset_layout", "Forget manual ordering, hidden items and collapsed groups")
 
-  if developer_controls(player) then
-    local renderer_row = controls.add { type = "flow", direction = "horizontal" }
-    small(renderer_row, "Renderer:")
-    renderer_row.add { type = "drop-down", items = { "GUI sprites", "Polygon mesh (beta)" },
-      selected_index = us.renderer == "poly" and 2 or 1, tags = { ssk_sk = "f_renderer" },
-      tooltip = "Compare the same routes: atlas sprites or a single polygon mesh per complete ribbon." }
-  end
-  local r2 = bar.add { type = "flow", direction = "horizontal" }
-  local widths=r2.add{type="drop-down",items={"Proportional","Compressed"},
-    selected_index=us.heights=="linear" and 1 or 2,tags={ssk_sk="f_heights"},
-    tooltip="Proportional uses linear rate widths; compressed uses square roots. Fluids use a separate scale and thin ribbons retain a visible minimum. Hover for exact rates."}
-  widths.style.width=150
-  local colors=r2.add{type="drop-down",items={"Destination colors","Source colors"},
-    selected_index=us.color_mode=="source" and 2 or 1,tags={ssk_sk="balance_colors"},
-    tooltip="Destination: ribbons feeding the same node share its color, including across intermediate columns. Ribbons still carry source-material units."}
-  colors.style.width=175
-  label_toggle(r2,us)
-  r2.add{type="checkbox",caption="Auto-update chart",state=us.live,tags={ssk_sk="live"},
-    tooltip="Redraw this chart every 5 seconds. Sampling and Balance values continue when this is off."}
-  button(r2,"Reflow","reflow","Recalculate node order and spacing; Live otherwise keeps the layout stable")
-  button(r2,"Unpin","unpin","Clear the selected flow highlight. Click or Shift-click a node to pin it.")
+  if developer_controls(player) then renderer_picker(option_row(controls), us) end
+  local r2 = option_row(bar)
+  widths_picker(r2, us)
+  colors_picker(r2, us)
+  live_toggle(r2, us)
+  label_toggle(r2, us)
+  reflow_button(r2)
+  button(r2, "Unpin", "unpin", "Clear the pinned highlight. Click a node to pin one.")
   if us.view == "overview" then button(r2, "Collapse overview", "overview_reset", "Unfinished grouping: return expanded groups to the overview") end
-  r2 = bar.add { type = "flow", direction = "horizontal" }
-  r2.style.vertical_align = "center"
-  r2.style.horizontal_spacing = 6
+  r2 = option_row(bar)
   local n = us.sel and L.nodes[us.sel]
   local clean = us.layout ~= "lanes"
   if clean and not n then
-    local hint = small(r2, "[color=0.65,0.65,0.65]Hover to trace a chain; click to pin. Select a group to expand it. Scroll for larger graphs.[/color]")
-    hint.style.maximal_width = (us.canvas_w or 1000) - 24
-    hint.style.single_line = false
+    hint(r2, "Hover to trace a chain; click to pin. Select a group to expand it. Scroll for larger graphs.", (us.canvas_w or 1000) - 24)
   elseif not n then
-    local hint = small(r2, "[color=0.65,0.65,0.65]Click a node to select it. ▲/▼ reorders its group; Shift moves to the end.[/color]")
-    hint.style.maximal_width = (us.canvas_w or 1000) - 24
-    hint.style.single_line = false
+    hint(r2, "Click a node to select it. ▲/▼ reorders its group; Shift moves to the end.", (us.canvas_w or 1000) - 24)
   else
-    local selected = small(r2, "Selected: " .. rt(sprite_for(n)) .. " " .. display_name(n) .. "  ·  group: " .. n.ginfo.super_name .. " › " .. n.ginfo.name)
+    local selected = small(r2, "Selected: " .. rt(sprite_for(n)) .. " " .. display_name(n) .. " · group: " .. n.ginfo.super_name .. " › " .. n.ginfo.name)
     selected.style.width = (us.canvas_w or 1000) - 24
     selected.style.single_line = true
-    r2 = bar.add { type = "flow", direction = "horizontal" }
-    r2.style.horizontal_spacing = 6
+    r2 = option_row(bar)
     if not clean then
       button(r2, "▲", "up", "Move up (Shift: to top). At the top it moves the sub-lane, then the lane.")
       button(r2, "▼", "down", "Move down (Shift: to bottom). At the bottom it moves the sub-lane, then the lane.")
@@ -343,7 +346,7 @@ local function build_toolbar(bar, us, L, player)
     if n.kind == "group" then
       button(r2, "Expand group", "expand", "Show this group's members and their immediate production inputs", { gid = n.group })
     elseif n.base then
-      small(r2, "[color=0.65,0.65,0.65](raw input, split per lane — untick 'Split raw inputs' to regroup it)[/color]")
+      hint(r2, "Raw input, split per lane. Untick Split raw inputs under Advanced to regroup it.", 400)
     else
       button(r2, "Collapse group", "collapse", "Merge all visible members of this group into one node", { gid = n.group })
       small(r2, "Move to:")
