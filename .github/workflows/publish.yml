@@ -1,0 +1,100 @@
+name: Publish Mod Portal
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published GitHub release tag
+        required: true
+        default: v0.1.1
+      dry_run:
+        description: Validate only; do not upload or edit the Mod Portal
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-flow-mod-portal
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.repository == 'TTLouis/factorio-production-flow' && (github.event_name == 'release' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Checkout publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: automation
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Select published release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: python automation/tools/publish.py resolve --tag "$INPUT_TAG"
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          path: release-source
+          persist-credentials: false
+      - name: Install Lua test runtime
+        run: python -m pip install lupa==2.8
+      - name: Test release source and publishing logic
+        run: |
+          python release-source/tests/run_lua.py
+          python -m unittest discover -s automation/tests -p publish_test.py -v
+      - name: Prepare and verify exact release archive
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: python automation/tools/publish.py prepare --tag "$RELEASE_TAG" --source release-source --output verified-release
+      - name: Save verified release bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-release
+          path: verified-release/
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    needs: validate
+    if: github.event_name == 'release' || !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: automation
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Download validated archive and page
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-release
+          path: verified-release
+      - name: Publish exact GitHub archive, description, tags and gallery
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          FACTORIO_API_KEY: ${{ secrets.FACTORIO_API_KEY }}
+        run: python automation/tools/publish.py deploy --bundle verified-release
