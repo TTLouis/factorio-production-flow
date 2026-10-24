@@ -164,7 +164,7 @@ local function verify_usage(element, root, result)
   if key and key:match("#use$") then
     local node=find_action(root,"node",key)
     assert(node.tooltip[9]==" consumed", "Uses tooltip lost selected material")
-    assert(element.caption==node.tooltip[6]:gsub("fluid units/s","fluid/s"), "Uses label still shows consumer output")
+    assert(element.caption==node.tooltip[6], "Uses label still shows consumer output")
     result[key]=element.caption
   end
   for _,child in pairs(element.children) do verify_usage(child,root,result) end

@@ -89,8 +89,8 @@ for k,n in pairs(material.nodes) do
   if n.selected_usage then
     local target=find(c,"node",k)
     assert(target.tooltip[9]==" consumed", "consumer tooltip must identify selected material usage")
-    assert(target.tooltip[6]:find(focus:sub(1,5)=="fluid" and "fluid units/s" or "items/s",1,true))
-    assert(find_rate(c,k).caption==target.tooltip[6]:gsub("fluid units/s","fluid/s"),"visible uses label must match selected-material consumption")
+    assert(target.tooltip[6]:find(focus:sub(1,5)=="fluid" and "fluid/s" or "items/s",1,true))
+    assert(find_rate(c,k).caption==target.tooltip[6],"visible uses label must match selected-material consumption")
     if n.kind~="recipe" then assert(target.tooltip[10]:find("Consumer production:",1,true)) end
     checked=checked+1
   end

@@ -61,9 +61,15 @@ local function tabs_for(player)
   return list
 end
 
+-- Same rate formatting as the Balance table and the charts.
 local function fmt(x)
-  if x >= 100 then return string.format("%.0f", x) end
-  if x >= 1 then return string.format("%.2f", x) end
+  local a = math.abs(x)
+  if a >= 1000000 then return string.format("%.2fM", x / 1000000) end
+  if a >= 10000 then return string.format("%.1fk", x / 1000) end
+  if a >= 100 then return string.format("%.0f", x) end
+  if a >= 10 then return string.format("%.1f", x) end
+  if a >= 1 then return string.format("%.2f", x) end
+  if a > 0 and a < 0.001 then return "<0.001" end
   return string.format("%.3f", x)
 end
 

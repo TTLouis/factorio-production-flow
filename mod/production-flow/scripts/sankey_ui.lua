@@ -35,12 +35,15 @@ function SK.defaults(us)
   us.last_order = us.last_order or {}
 end
 
+-- Same rate formatting as the Balance table, so a value reads identically in both.
 local function fmt(x)
-  if x >= 10000 then return string.format("%.1fk", x / 1000) end
-  if x >= 1000 then return string.format("%.2fk", x / 1000) end
-  if x >= 100 then return string.format("%.0f", x) end
-  if x >= 10 then return string.format("%.1f", x) end
-  if x >= 1 then return string.format("%.2f", x) end
+  local a = math.abs(x)
+  if a >= 1000000 then return string.format("%.2fM", x / 1000000) end
+  if a >= 10000 then return string.format("%.1fk", x / 1000) end
+  if a >= 100 then return string.format("%.0f", x) end
+  if a >= 10 then return string.format("%.1f", x) end
+  if a >= 1 then return string.format("%.2f", x) end
+  if a > 0 and a < 0.001 then return "<0.001" end
   return string.format("%.3f", x)
 end
 
@@ -58,7 +61,7 @@ local function display_name(n)
 end
 
 local function units(n)
-  return (n.kind == "fluid" or n.flow_kind == "fluid") and "fluid units/s"
+  return (n.kind == "fluid" or n.flow_kind == "fluid") and "fluid/s"
     or n.kind == "recipe" and "crafts/s" or "items/s"
 end
 
@@ -618,7 +621,7 @@ local function draw(canvas, L, us, st, player, W, H)
         if usage or (n.kind ~= "recipe" and n.kind ~= "group") then
           local rate_w = math.max(1, math.min(260, (L.label_w and L.label_w[n.ci]) or 260) - View.NODE_W - 6)
           late[#late + 1] = { n.x + View.NODE_W + 6, iy + 8, rate_w, 16,
-            { type = "label", caption = rate:gsub("fluid units/s", "fluid/s"),
+            { type = "label", caption = rate,
               visible = show_label == true, ignored_by_interaction = true, tags = { ssk_rate = n.key } },
             font = "default-small", color = { 0.75, 0.75, 0.75 } }
         end
