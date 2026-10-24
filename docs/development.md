@@ -29,7 +29,8 @@ under tests/data are deliberately not included in the repository.
 
 Build with `python tools/build.py`. It reads the name/version from info.json,
 packages a single matching root directory, includes LICENSE and changelog.txt,
-and excludes development tools. Public publishing is a separate manual step.
+and excludes development tools. Building locally does not publish; the GitHub
+release workflow below handles publication.
 
 ## Publishing from GitHub
 

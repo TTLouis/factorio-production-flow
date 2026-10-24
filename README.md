@@ -3,7 +3,7 @@
 **Production balances and interactive Sankey charts for Factorio.**
 
 Production Flow shows what your factory makes, what it consumes, and how recipes
-connect on the selected surface. Beta candidate: **0.1.1**, by **TTLouis**.
+connect on the selected surface. Public beta: **0.1.1**, by **TTLouis**.
 
 ## Views
 
@@ -34,8 +34,10 @@ The default measurement window is
 Requires **Factorio 2.1**. Tested with Factorio **2.1.23** and a Space Age save,
 including planetary and local space-platform production.
 
-The beta is being prepared for publication. For a local installation, build the
-ZIP below and place `production-flow_0.1.1.zip` in your Factorio mods directory.
+Install [Production Flow from the Mod Portal](https://mods.factorio.com/mod/production-flow),
+or download `production-flow_0.1.1.zip` from the
+[GitHub beta release](https://github.com/TTLouis/factorio-production-flow/releases/tag/v0.1.1)
+and place it in your Factorio mods directory.
 Open Production Flow in-game, select a surface, and inspect a Balance row with
 its magnifier button. Expand inputs to follow its recipe chain upstream.
 
@@ -74,6 +76,8 @@ python tools/build.py
 The test harness uses Lupa's Lua 5.2 runtime. It checks Lua syntax, sampling,
 recipe APIs, layout, Balance, Focus and Full Sankey behavior with synthetic data.
 The game is needed for native GUI validation; see [development notes](docs/development.md).
+Publishing a GitHub release runs the validation and Mod Portal publishing workflow.
+Ordinary development pushes do not publish.
 
 `mod/production-flow/` is the installable source. `tests/` contains the offline
 harness and optional native runners. Build output, private saves, diagnostic

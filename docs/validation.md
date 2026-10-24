@@ -51,3 +51,23 @@ fallback logs any remaining negative corrected count; none occurred in this audi
 Fresh-install defaults are tested in a separate private mod directory so older
 saved export settings cannot override the new default. Existing preferences are
 preserved. Original saves and the live Factorio profile retain their input hashes.
+
+## Public release and publishing automation
+
+Production Flow 0.1.1 is published at https://mods.factorio.com/mod/production-flow.
+The installable ZIP on GitHub and the Mod Portal has SHA256
+`934cc0a60a9dd1e264a148adcff6e18aa749207187058c7a735a035468c75c16`.
+Its only addition to the native-tested archive is the 512px thumbnail rendered
+from the existing toolbar icon's curves. The previous runtime files are unchanged.
+
+Eighteen offline publishing checks cover source/version and archive validation,
+checksum mismatches, credential separation, first publication, existing-version
+reruns, partial page-update recovery and eventual public-metadata consistency.
+Text validation permits only CRLF/LF differences from Git checkout normalization;
+binary assets must match exactly. The original release archive is uploaded intact.
+
+[GitHub Actions run 40065531645](https://github.com/TTLouis/factorio-production-flow/actions/runs/40065531645)
+passed tagged-source Lua tests, publishing tests, archive validation and the live
+publication/synchronization job. The public page was also checked in a browser:
+Utilities category, no gameplay-feature tags, MIT license, 0.1.1 download, six
+loaded screenshots and the correct icon. GitHub topics were not changed.
