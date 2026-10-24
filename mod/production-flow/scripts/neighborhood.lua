@@ -79,7 +79,8 @@ function N.build(nodes, links, model, focus, depth)
 end
 
 function N.layout(L, us, W, viewH, V)
-  local available = math.max(100, viewH - V.PAD_TOP - V.PAD_BOTTOM)
+  local top = V.PAD_TOP + 16 -- Reserve both lines of the selected-material Uses heading.
+  local available = math.max(100, viewH - top - V.PAD_BOTTOM)
   -- Solve against complete node/port/header bounds, including minimum ribbons.
   -- Fixed icon and text sizes are the lower bound; oversized graphs scroll.
   local function packed(scale)
@@ -131,7 +132,7 @@ function N.layout(L, us, W, viewH, V)
     H = math.max(H, heights[ci])
   end
   if us.keep_layout and us.layout_snapshot.content_h then
-    H=math.max(H,us.layout_snapshot.content_h-V.PAD_TOP-V.PAD_BOTTOM)
+    H=math.max(H,us.layout_snapshot.content_h-top-V.PAD_BOTTOM)
   end
   local right_label = math.min(148, math.max(80, math.floor(W * 0.22)))
   L.center_ci = L.nodes[us.focus].ci
@@ -143,15 +144,15 @@ function N.layout(L, us, W, viewH, V)
   end
   L.label_above, L.label_w = true, {}
   for ci, col in ipairs(L.cols) do
-    local y = V.PAD_TOP + (H - heights[ci]) / 2
-    if us.keep_layout then y=V.PAD_TOP end
+    local y = top + (H - heights[ci]) / 2
+    if us.keep_layout then y=top end
     L.label_w[ci] = ci < #L.cols and math.min(V.HEADER_W - 8, L.col_x[ci + 1] - L.col_x[ci] - 8) or right_label
     for _, n in ipairs(col) do
       if us.keep_layout and us.layout_snapshot.tops[n.key] then
         y=math.max(y,us.layout_snapshot.tops[n.key])
       end
       n.x, n.top, n.y = L.col_x[ci], y, y + V.NODE_HEAD
-      H=math.max(H,n.top+n.slot-V.PAD_TOP)
+      H=math.max(H,n.top+n.slot-top)
       y = y + n.slot + V.F_GAP
     end
   end
@@ -176,7 +177,7 @@ function N.layout(L, us, W, viewH, V)
   us.auto_rank = {}
   for _, n in pairs(L.nodes) do us.auto_rank[n.key] = n.top end
   L.order, L.lane_order, L.sub_order, L.lane_list = {}, {}, {}, {}
-  L.content_w, L.content_h, L.H, L.clamped = W, math.ceil(V.PAD_TOP + H + V.PAD_BOTTOM), H, 0
+  L.content_w, L.content_h, L.H, L.clamped = W, math.ceil(top + H + V.PAD_BOTTOM), H, 0
 end
 
 return N

@@ -10,6 +10,7 @@ local Diag = require("scripts.diag")
 local SK = require("scripts.sankey_ui")
 local BalanceUI = require("scripts.balance_ui")
 local Su = require("scripts.surfaces")
+local Help = require("scripts.help_ui")
 
 local UI = {}
 local WIN = "ssk_main"
@@ -326,6 +327,18 @@ local function content(player, id)
   return tabs and tabs["content_" .. id]
 end
 
+local function update_history(player,us)
+  local frame=player.gui.screen[WIN]
+  local bar=frame and frame.ssk_window_bar
+  local label=bar and bar.ssk_history
+  if not label then return end
+  local _,seconds=Sampler.rates(us.sidx,us.period)
+  local target=us.period>0 and us.period or settings.global["ssk-window-seconds"].value
+  label.visible=seconds<target
+  label.caption=string.format("History collected: %.0f / %d s",seconds,target)
+  label.tooltip="The selected period is still filling. Rates use the recorded history available so far, not an assumed full window. Recording continues while the factory runs."
+end
+
 -- full = rebuild the Sankey tab from scratch (otherwise its scroll position is kept)
 function UI.refresh(player, only_auto, full)
   local us = ustate(player.index)
@@ -333,6 +346,7 @@ function UI.refresh(player, only_auto, full)
   local c = content(player, id)
   if not c then return end
   us.sidx = sidx_for(player, us)
+  update_history(player,us)
   if id == "focus" then
     local fx = SK.focus_state(us)
     fx.sidx = us.sidx
@@ -353,6 +367,7 @@ function UI.refresh(player, only_auto, full)
 end
 
 function UI.close(player)
+  Help.close(player)
   local f = player.gui.screen[WIN]
   if f then f.destroy() end
 end
@@ -368,7 +383,7 @@ function UI.open(player)
   us.canvas_w = W - 64
   us.canvas_h = math.max(100, H - 240)
 
-  local tb = f.add { type = "flow", direction = "horizontal" }
+  local tb = f.add { type = "flow", name="ssk_window_bar", direction = "horizontal" }
   tb.drag_target = f
   tb.add { type = "label", caption = "Production Flow", style = "frame_title", ignored_by_interaction = true }
   local drag = tb.add { type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true }
@@ -400,10 +415,16 @@ function UI.open(player)
   for i, v in ipairs(Sampler.PERIODS) do if us.period == v then psel = i end end
   local items = {}
   for i, cpt in ipairs(Sampler.PERIOD_CAPTIONS) do items[i] = cpt end
-  items[1] = string.format("Live (%d s)", settings.global["ssk-window-seconds"].value)
+  items[1] = string.format("Recent (%d s)", settings.global["ssk-window-seconds"].value)
   tb.add { type = "drop-down", items = items, selected_index = psel, tags = { ssk_ui = "period" },
            tooltip = "How far back rates are averaged. Longer periods smooth out bursts; history builds up from when the mod was added." }
-  action_button("utility/export_slot", "Export", "Export diagnostics to script-output/production-flow/", "export")
+  local history=tb.add{type="label",name="ssk_history"}
+  history.style.font="default-small-bold";history.style.font_color={1,0.82,0.35}
+  history.style.maximal_width=190
+  action_button("utility/questionmark", "?", "Help: controls, calculations, stock, alerts and chart limits", "help")
+  if player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value then
+    action_button("utility/export_slot", "Export", "Export diagnostics to script-output/production-flow/", "export")
+  end
   action_button("utility/refresh", "Refresh", "Refresh", "refresh")
   action_button("utility/close", "X", "Close", "close")
 
@@ -473,6 +494,13 @@ function UI.on_click(e)
   local a = el.tags and el.tags.ssk_ui
   if not a then return false end
   if a == "close" then UI.close(player)
+  elseif a == "help" then Help.open(player)
+  elseif a == "help_close" then Help.close(player);player.opened=player.gui.screen[WIN]
+  elseif a == "bal_update" then
+    local c=content(player,"balance")
+    local root=c and c.ssk_balance_split and c.ssk_balance_split.ssk_balance_table.ssk_bal_root
+    if root then root.tags={} end
+    UI.refresh(player)
   elseif a == "refresh" then UI.refresh(player)
   elseif a == "export" then Diag.export(player, "manual")
   elseif a == "bal_more" then
@@ -587,8 +615,18 @@ function UI.on_tab_changed(e)
 end
 
 function UI.on_closed(e)
+  if e.element and e.element.valid and e.element.name=="ssk_help" then
+    local player=game.get_player(e.player_index)
+    Help.close(player);player.opened=player.gui.screen[WIN]
+    return true
+  end
   if e.element and e.element.valid and e.element.name == WIN then
-    UI.close(game.get_player(e.player_index))
+    local player=game.get_player(e.player_index)
+    if player.gui.screen.ssk_help then
+      Help.close(player);player.opened=player.gui.screen[WIN]
+      return true
+    end
+    UI.close(player)
     return true
   end
   return false

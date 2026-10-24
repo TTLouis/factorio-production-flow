@@ -3,7 +3,7 @@
 **Production balances and interactive Sankey charts for Factorio.**
 
 Production Flow shows what your factory makes, what it consumes, and how recipes
-connect on the selected surface. First beta: **0.1.0**, by **TTLouis**.
+connect on the selected surface. Beta candidate: **0.1.1**, by **TTLouis**.
 
 ## Views
 
@@ -19,9 +19,12 @@ navigation and readability improvements, especially on dense factories.
 - **Full Sankey — needs more polish:** Grouped production overview, expandable materials and presets.
 
 Destination/source colors, hover highlighting, pinned selections, optional labels,
-Fit and Center help you explore the charts. Live updates preserve selectors and
-row positions; use Refresh to reapply list ordering and filters. The default measurement window is
-**10 minutes**. History survives saves; new installations need time to collect it.
+Fit and Center help you explore the charts. Automatic updates preserve selectors and
+row positions; use **Update list** to reapply list ordering and filters. The **?**
+button opens in-game help for controls, calculations, alerts and stock. **Recent**
+sets a short averaging period; **Auto-update chart** only controls chart redraws.
+The default measurement window is
+**10 minutes**. History survives saves; new installations show a warm-up indicator as it accumulates.
 
 ![Balance item groups](docs/screenshots/02-balance-groups.png)
 ![Full Sankey overview](docs/screenshots/04-full-nauvis.png)
@@ -32,7 +35,7 @@ Requires **Factorio 2.1**. Tested with Factorio **2.1.23** and a Space Age save,
 including planetary and local space-platform production.
 
 The beta is being prepared for publication. For a local installation, build the
-ZIP below and place `production-flow_0.1.0.zip` in your Factorio mods directory.
+ZIP below and place `production-flow_0.1.1.zip` in your Factorio mods directory.
 Open Production Flow in-game, select a surface, and inspect a Balance row with
 its magnifier button. Expand inputs to follow its recipe chain upstream.
 
@@ -41,7 +44,9 @@ its magnifier button. Expand inputs to follow its recipe chain upstream.
 Flows combine observed crafting activity, production statistics and recipe
 relationships. They do not trace belts, pipes or individual shipments.
 Interplanetary logistics tracking is not included. Stock covers logistic
-networks, not every chest or fluid tank.
+provider and storage inventories across all qualities, including robot pickup
+reservations. Other chests, requester inventories, items in transit and fluid
+tanks are excluded. Empty-time values are estimates.
 
 See [how rates are calculated](docs/calculations.md) for the measurements,
 productivity adjustments, utilisation estimates and stock calculations.
@@ -52,8 +57,9 @@ Dense charts can still cross or require scrolling. Modpack compatibility,
 multiplayer and large-factory performance need broader testing.
 
 Diagnostic files remain local under `script-output/production-flow`. Automatic
-exports currently default to every five minutes; set that interval to zero in
-mod settings to disable them. Nothing is uploaded automatically.
+exports are optional and off by default for new installations. Manual exports
+and renderer comparisons are available only with debug controls enabled. Nothing
+is uploaded automatically.
 
 ## Development
 

@@ -13,7 +13,12 @@ python tests/save_test.py --exe "C:/path/to/Factorio/bin/x64/Factorio.exe" --sav
 The save runner copies a Space Age save using only bundled mods, records at least
 600 seconds of history, and takes native screenshots. Original save/profile hashes
 are checked. The isolated stage is under `tests/out/`. Reuse the returned stage
-with `--stage tests/out/<stage> --phase full` or `--phase scroll`.
+with `--stage tests/out/<stage> --phase full` or `--phase scroll`. Additional
+phases are `ux` (controls and help), `audit` (network reservations versus physical
+stored items) and `warmup` (fresh-install defaults and incomplete history).
+Phase-specific evidence records native image hashes and the clean archive hash.
+Development tabs, exports and renderer comparisons are hidden unless the
+per-player **Show development tools** setting is enabled.
 
 The prototype rename to production-flow makes it a separate mod from the old
 unpublished signal-sankey experiments. Do not enable both in the same test.

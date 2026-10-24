@@ -4,6 +4,8 @@
 local S = require("shared.sprites")
 local palette = require("shared.palette")
 local View = require("scripts.view")
+local Graph = require("scripts.graph")
+local Sampler = require("scripts.sampler")
 local Gr = require("scripts.groups")
 local Canvas = require("scripts.canvas")
 local Geometry = require("scripts.ribbon_geometry")
@@ -136,6 +138,10 @@ local function small(parent, caption)
   return l
 end
 
+local function developer_controls(player)
+  return player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value
+end
+
 local function focus_toolbar(bar, us, player)
   bar.clear()
   if us.neighborhood then
@@ -153,9 +159,12 @@ local function focus_toolbar(bar, us, player)
     row.style.horizontal_spacing = 4
     row.add { type = "choose-elem-button", elem_type = "item", item = us.focus and us.focus:match("^item/(.+)$"), tags = { ssk_sk = "f_item" } }
     row.add { type = "choose-elem-button", elem_type = "fluid", fluid = us.focus and us.focus:match("^fluid/(.+)$"), tags = { ssk_sk = "f_fluid" } }
-    local renderer = row.add { type = "drop-down", items = { "GUI sprites", "Polygons" }, selected_index = us.renderer == "poly" and 2 or 1, tags = { ssk_sk = "f_renderer" } }
-    renderer.style.width = 130
-    row.add { type = "checkbox", caption = "Live", state = us.live, tags = { ssk_sk = "live" } }
+    if developer_controls(player) then
+      local renderer = row.add { type = "drop-down", items = { "GUI sprites", "Polygons" }, selected_index = us.renderer == "poly" and 2 or 1, tags = { ssk_sk = "f_renderer" } }
+      renderer.style.width = 130
+    end
+    row.add { type = "checkbox", caption = "Auto-update chart", state = us.live, tags = { ssk_sk = "live" },
+      tooltip = "Redraw this chart every 5 seconds. Sampling and Balance values continue when this is off." }
     label_toggle(row, us)
     local options = bar.add {type="flow", direction="horizontal"}
     local heights=options.add {type="drop-down", items={"Proportional", "Compressed"},
@@ -167,6 +176,9 @@ local function focus_toolbar(bar, us, player)
       tooltip="Destination: inputs share the receiving node's color. Color does not change the ribbon's source-material units."}
     colors.style.width=175
     button(options, "Unpin", "unpin", "Shift-click a node to pin its flow highlight; click normally to inspect it")
+    local making=bar.add{type="label",name="ssk_producers"}
+    making.style.width=math.max(100,(us.canvas_w or 900)-12)
+    making.style.font="default-small";making.style.single_line=true
     return
   end
   local r1 = bar.add { type = "flow", direction = "horizontal" }
@@ -192,15 +204,17 @@ local function focus_toolbar(bar, us, player)
   small(r1, "Lines:")
   r1.add { type = "drop-down", items = { "Curves", "Right angles" }, selected_index = (us.lines == "metro") and 2 or 1,
            tags = { ssk_sk = "f_lines" }, tooltip = "Right angles: steep ribbons run vertically and cross others at 90°" }
-  small(r1, "Renderer:")
-  r1.add { type = "drop-down", items = { "GUI sprites", "Polygons (beta)" }, selected_index = (us.renderer == "poly") and 2 or 1,
-           tags = { ssk_sk = "f_renderer" }, tooltip = "Polygons: smooth shapes drawn on a hidden surface and shown through a camera (experimental)" }
+  if developer_controls(player) then
+    small(r1, "Renderer:")
+    r1.add { type = "drop-down", items = { "GUI sprites", "Polygons (beta)" }, selected_index = (us.renderer == "poly") and 2 or 1,
+             tags = { ssk_sk = "f_renderer" }, tooltip = "Polygons: smooth shapes drawn on a hidden surface and shown through a camera (experimental)" }
+  end
   small(r1, "Zoom:")
   button(r1, "−", "zoom_out", "Zoom out")
   button(r1, string.format("Fit (%.0f%%)", (us.zoom or 1) * 100), "zoom_fit", "Busiest column fits the window")
   button(r1, "+", "zoom_in", "Zoom in")
-  local live = r1.add { type = "checkbox", caption = "Live", state = us.live, tags = { ssk_sk = "live" },
-                        tooltip = "Refresh every 5 s" }
+  local live = r1.add { type = "checkbox", caption = "Auto-update chart", state = us.live, tags = { ssk_sk = "live" },
+                        tooltip = "Redraw this chart every 5 seconds. Sampling and Balance values continue when this is off." }
   live.style.left_margin = 12
   local r2 = bar.add { type = "flow", direction = "horizontal" }
   button(r2, "Reflow", "reflow", "Recalculate node order, spacing and scale. Live updates otherwise keep the current layout.")
@@ -238,7 +252,7 @@ local function build_toolbar(bar, us, L, player)
   button(r1, "Fit graph", "zoom_fit", "Fit readable node headers and ribbon widths; dense graphs keep scrolling")
   button(r1, "+", "zoom_in", "Zoom in")
   button(r1, "Center", "center_selection", "Center the selected node, or the whole graph when nothing is selected")
-  button(r1, us.advanced and "Less" or "Advanced", "advanced", "Layout, rendering and diagnostic controls")
+  button(r1, us.advanced and "Less" or "Advanced", "advanced", "Layout, tier range and line controls")
   local controls = bar.add { type = "flow", direction = "vertical", name = "ssk_advanced" }
   controls.visible = us.advanced == true
   r1 = controls.add { type = "flow", direction = "horizontal" }
@@ -280,11 +294,13 @@ local function build_toolbar(bar, us, L, player)
            tags = { ssk_sk = "f_lines" } }
   button(r1, "Reset layout", "reset_layout", "Forget manual ordering, hidden items and collapsed groups")
 
-  local renderer_row = controls.add { type = "flow", direction = "horizontal" }
-  small(renderer_row, "Renderer:")
-  renderer_row.add { type = "drop-down", items = { "GUI sprites", "Polygon mesh (beta)" },
-    selected_index = us.renderer == "poly" and 2 or 1, tags = { ssk_sk = "f_renderer" },
-    tooltip = "Compare the same routes: atlas sprites or a single polygon mesh per complete ribbon." }
+  if developer_controls(player) then
+    local renderer_row = controls.add { type = "flow", direction = "horizontal" }
+    small(renderer_row, "Renderer:")
+    renderer_row.add { type = "drop-down", items = { "GUI sprites", "Polygon mesh (beta)" },
+      selected_index = us.renderer == "poly" and 2 or 1, tags = { ssk_sk = "f_renderer" },
+      tooltip = "Compare the same routes: atlas sprites or a single polygon mesh per complete ribbon." }
+  end
   local r2 = bar.add { type = "flow", direction = "horizontal" }
   local widths=r2.add{type="drop-down",items={"Proportional","Compressed"},
     selected_index=us.heights=="linear" and 1 or 2,tags={ssk_sk="f_heights"},
@@ -295,7 +311,8 @@ local function build_toolbar(bar, us, L, player)
     tooltip="Destination: ribbons feeding the same node share its color, including across intermediate columns. Ribbons still carry source-material units."}
   colors.style.width=175
   label_toggle(r2,us)
-  r2.add{type="checkbox",caption="Live",state=us.live,tags={ssk_sk="live"}}
+  r2.add{type="checkbox",caption="Auto-update chart",state=us.live,tags={ssk_sk="live"},
+    tooltip="Redraw this chart every 5 seconds. Sampling and Balance values continue when this is off."}
   button(r2,"Reflow","reflow","Recalculate node order and spacing; Live otherwise keeps the layout stable")
   button(r2,"Unpin","unpin","Clear the selected flow highlight. Click or Shift-click a node to pin it.")
   if us.view == "overview" then button(r2, "Collapse overview", "overview_reset", "Unfinished grouping: return expanded groups to the overview") end
@@ -618,11 +635,13 @@ local function draw(canvas, L, us, st, player, W, H)
     local heading = View.tier_label(t)
     if us.neighborhood then
       local center = L.center_ci or 2
-      heading = ci == center and "Selected item" or ci > center and "Uses · consumption"
+      local material=us.focus and localised_name({key=us.focus,kind=us.focus:match("^(%a+)/")}) or "selected material"
+      heading = ci == center and "Selected material" or ci > center and {"","Uses · consumed /s\n",material}
         or ci == center - 1 and "Materials" or "Inputs " .. (center - ci)
     end
-    late[#late + 1] = { cx[ci], 6, us.neighborhood and math.min(148, L.label_w[ci]) or 60, 18, { type = "label", caption = heading, ignored_by_interaction = true },
-                        font = "default-small-bold", color = { 0.6, 0.6, 0.6 } }
+    late[#late + 1] = { cx[ci], 6, us.neighborhood and L.label_w[ci] or 60, us.neighborhood and 40 or 18,
+      { type = "label", caption = heading, tooltip=heading, tags={ssk_column=us.neighborhood and ci>(L.center_ci or 2) and "uses" or "other"} },
+      single_line=not us.neighborhood, font = "default-small-bold", color = { 0.6, 0.6, 0.6 } }
   end
 
   -- 5. deferred labels / buttons, each in a fixed-size wrapper
@@ -631,7 +650,7 @@ local function draw(canvas, L, us, st, player, W, H)
     if d.font then e.style.font = d.font end
     if d.color then e.style.font_color = d.color end
     if d.fill or d[5].type == "label" then e.style.width, e.style.height = d[3], d[4] end
-    if d[5].type == "label" then e.style.single_line = true end
+    if d[5].type == "label" then e.style.single_line = d.single_line~=false end
     if d.toggled then e.toggled = true end
     count = count + 1
   end
@@ -648,9 +667,47 @@ local function rstate(pi, view)
 end
 
 function SK.toolbar_height(us)
-  if us.neighborhood then return 108 end
+  if us.neighborhood then return 136 end
   if us.view == "focus" then return 112 end
   return (us.advanced and 272 or 96) + (us.sel and 32 or 0)
+end
+
+local function update_producers(bar,us,L)
+  local label=bar.ssk_producers
+  if not label then return end
+  local names,contribution={},{}
+  local graph=Graph.get()
+  local node=graph.nodes[us.focus]
+  for _,name in ipairs(node and node.producers or {}) do
+    local rate=L.recipe_rates[name]
+    if rate and rate.cps>0 then
+      names[#names+1]=name
+      local prod=rate.prod or 0
+      local normal=Sampler.PF_INCLUDES_BONUS and rate.cps/(1+prod) or rate.cps
+      local total=0
+      for _,product in ipairs(graph.recipes[name].products) do
+        if product.key==us.focus then total=total+normal*(product.amount+product.prod*prod) end
+      end
+      contribution[name]=total
+    end
+  end
+  table.sort(names,function(a,b)
+    if contribution[a]~=contribution[b] then return contribution[a]>contribution[b] end
+    return a<b
+  end)
+  local caption,tooltip={"","Making: "},{"","Recorded recipes producing this material:"}
+  for i,name in ipairs(names) do
+    local proto=prototypes.recipe[name]
+    local text=proto and proto.localised_name or name:gsub("%-"," ")
+    if i<=3 then
+      if i>1 then caption[#caption+1]=" · " end
+      caption[#caption+1]={"","[recipe="..name.."] ",text}
+    end
+    tooltip[#tooltip+1]={"","\n[recipe="..name.."] ",text}
+  end
+  if #names==0 then caption[#caption+1]="No recorded crafting recipe (may be mining, pumping or outside tracked machines)." end
+  if #names>3 then caption[#caption+1]=" +"..(#names-3).." more" end
+  label.caption=caption;label.tooltip=tooltip;label.tags={ssk_recipes=names}
 end
 
 -- c: tab content (vertical flow). full=false keeps the scroll-pane (and its scroll position).
@@ -691,6 +748,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   end
   local L = View.build(player, us, W, viewH)
   if not only_auto or #c.ssk_bar.children==0 then build_toolbar(c.ssk_bar, us, L, player) end
+  update_producers(c.ssk_bar,us,L)
   us.last_order = L.order
   us.last_lanes = L.lane_order
   us.last_subs = L.sub_order

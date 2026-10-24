@@ -28,6 +28,12 @@ local function nbins()
 end
 
 function Sm.init()
+  if storage.stock_basis~="stored-with-reservations-v1" then
+    -- Available-network counts and physical stored counts have different baselines.
+    -- Never turn that upgrade into a spurious stock trend.
+    storage.stock={}
+    storage.stock_basis="stored-with-reservations-v1"
+  end
   storage.machines = storage.machines or {} -- unit_number -> {e, u, s, r, pf}
   storage.mlist = storage.mlist or {}       -- array of unit_numbers (round-robin order)
   storage.mcursor = storage.mcursor or 1
@@ -56,7 +62,7 @@ end
 -- observation periods offered in the UI (seconds; "window" = the fine window setting)
 Sm.PERIODS = { 0, 600, 3600, 36000 }
 Sm.DEFAULT_PERIOD = 600
-Sm.PERIOD_CAPTIONS = { "Live (window)", "10 min", "1 hour", "10 hours" }
+Sm.PERIOD_CAPTIONS = { "Recent (window)", "10 min", "1 hour", "10 hours" }
 
 local function add_into(dst, src)
   for s, recs in pairs(src.rec) do
@@ -340,6 +346,41 @@ end
 ---------------------------------------------------------------------------
 local STOCK_KEEP = 7 -- samples kept (every 600 ticks -> ~60 s of history)
 
+-- Network contents are available counts: stored items minus pending robot
+-- pickups. Add pickup reservations back to measure physical stored stock.
+function Sm.network_stock(net)
+  local ok,contents=pcall(function() return net.get_contents() end)
+  if not ok or not contents then return nil end
+  local totals={}
+  for k,v in pairs(contents) do
+    local name,count
+    if type(v)=="table" then name,count=v.name,v.count else name,count=k,v end
+    if name and count then totals["item/"..name]=(totals["item/"..name] or 0)+count end
+  end
+  local seen={}
+  for _,points in ipairs({net.provider_points or {},net.storage_points or {}}) do
+    for _,point in pairs(points) do
+      -- A storage owner can occur in both lists; count its reservations once.
+      local owner=point.owner
+      local id=owner and (owner.unit_number or owner) or point
+      if not seen[id] then
+        seen[id]=true
+        for _,entry in pairs(point.targeted_items_pickup or {}) do
+          local key="item/"..entry.name
+          totals[key]=(totals[key] or 0)+entry.count
+        end
+      end
+    end
+  end
+  for key,count in pairs(totals) do
+    if count<0 then
+      log("stock: unresolved negative stored count for "..key.." after reservation correction: "..count)
+      totals[key]=0
+    end
+  end
+  return totals
+end
+
 function Sm.on_stock(tick)
   local force = game.forces["player"]
   if not force then return end
@@ -349,16 +390,9 @@ function Sm.on_stock(tick)
     if surf then
       local tot = {}
       for _, net in pairs(nets) do
-        local ok, contents = pcall(function() return net.get_contents() end)
-        if ok and contents then
-          for k, v in pairs(contents) do
-            local name, count
-            if type(v) == "table" then name, count = v.name, v.count else name, count = k, v end
-            if name and count then
-              local key = "item/" .. name
-              tot[key] = (tot[key] or 0) + count
-            end
-          end
+        local contents=Sm.network_stock(net)
+        if contents then
+          for key,count in pairs(contents) do tot[key]=(tot[key] or 0)+count end
         end
       end
       snap.s[surf.index] = tot

@@ -114,7 +114,14 @@ def install_hook(stage, phase):
 
 def run(stage, args, phase):
     install_hook(stage, phase)
-    common = [str(args.exe), '--config', str(stage / 'config.ini'), '--mod-directory', str(stage / 'mods')]
+    active_mods = stage / 'mods'
+    if phase == 'warmup':
+        # A fresh installation must not inherit this stage's older saved
+        # diagnostic-export preference. Keep those settings intact for reload tests.
+        active_mods = stage / 'warmup-mods' / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+        shutil.copytree(stage / 'mods/production-flow', active_mods / 'production-flow')
+        shutil.copyfile(stage / 'mods/mod-list.json', active_mods / 'mod-list.json')
+    common = [str(args.exe), '--config', str(stage / 'config.ini'), '--mod-directory', str(active_mods)]
     environment = dict(os.environ, SteamAppId='427520', SteamGameId='427520')
     startup = subprocess.STARTUPINFO()
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -132,7 +139,7 @@ def run(stage, args, phase):
                    '--disable-audio', '--disable-migration-window', '--force-graphics-preset', 'low']
         marker = 'SANKEY SAVE HISTORY OK'
     else:
-        warmed = stage / 'saves/_autosave-sankey-warmed.zip'
+        warmed = stage / ('input.zip' if phase == 'warmup' else 'saves/_autosave-sankey-warmed.zip')
         if not warmed.is_file():
             raise FileNotFoundError(f'Run history phase first: {warmed}')
         command = [*common, '--load-game', str(warmed), '--window-size', '1920x1080',
@@ -168,6 +175,10 @@ def run(stage, args, phase):
                             shot = folder / f'{name}.png'
                             if not shot.is_file() or shot.stat().st_mtime < started or shot.stat().st_size < 10000:
                                 raise RuntimeError(f'Missing, stale or empty screenshot: {shot}')
+                        evidence = dict(result, phase=phase,
+                            candidate_sha256=json.loads((stage / 'manifest.json').read_text())['candidate_sha256'],
+                            captures_sha256={name: digest(folder / f'{name}.png') for name in result['captures']})
+                        (folder / f'evidence-{phase}.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
                     print(f'PASS {phase}', flush=True)
                     return
                 if process.poll() is not None or 'Error while' in log or 'Error ModManager' in log:
@@ -185,7 +196,7 @@ def main():
     parser.add_argument('--save', type=Path, default=PROFILE / 'saves/_autosave4.zip')
     parser.add_argument('--exe', type=Path, default=Path(r'D:\SteamLibrary\steamapps\common\Factorio\bin\x64\Factorio.exe'))
     parser.add_argument('--stage', type=Path, help='Reuse a previously isolated stage for iteration')
-    parser.add_argument('--phase', choices=['all', 'history', 'gui', 'balance', 'full', 'scroll', 'names'], default='all')
+    parser.add_argument('--phase', choices=['all', 'history', 'gui', 'balance', 'full', 'scroll', 'names', 'audit', 'ux', 'warmup'], default='all')
     parser.add_argument('--timeout', type=int, default=1200)
     args = parser.parse_args()
     stage = args.stage.resolve() if args.stage else prepare(args)

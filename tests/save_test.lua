@@ -82,6 +82,84 @@ if mode=="names" then
   }
 end
 
+if mode=="audit" then
+  cases={{name="stock-audit",surface="nauvis",tab="balance",focus="item/steel-plate",depth=1}}
+end
+
+local function audit_stock(Sampler)
+  local report={tick=game.tick,networks={},negative_entries=0}
+  for sname,nets in pairs(game.forces.player.logistic_networks) do
+    for _,net in pairs(nets) do
+      local contents=net.get_contents()
+      for _,entry in pairs(contents) do
+        if entry.count<0 then
+          report.negative_entries=report.negative_entries+1
+          local quality=entry.quality or "normal"
+          local name=entry.name
+          local rec={surface=sname,network=net.network_id,item=name,quality=quality,
+            network_count=entry.count,physical=0,targeted_pickup=0,targeted_deliver=0,owners={}}
+          local seen={}
+          for _,points in ipairs({net.provider_points,net.storage_points}) do
+            for _,point in pairs(points) do
+              local owner=point.owner
+              if owner.valid and not seen[owner.unit_number or owner] then
+                seen[owner.unit_number or owner]=true
+                local inv=owner.get_inventory(defines.inventory.chest)
+                local n=inv and inv.get_item_count{name=name,quality=quality} or 0
+                local pick,deliver=0,0
+                for _,x in pairs(point.targeted_items_pickup) do if x.name==name and x.quality==quality then pick=pick+x.count end end
+                for _,x in pairs(point.targeted_items_deliver) do if x.name==name and x.quality==quality then deliver=deliver+x.count end end
+                rec.physical=rec.physical+n;rec.targeted_pickup=rec.targeted_pickup+pick;rec.targeted_deliver=rec.targeted_deliver+deliver
+                if n~=0 or pick~=0 or deliver~=0 then rec.owners[#rec.owners+1]={name=owner.name,count=n,pickup=pick,deliver=deliver} end
+              end
+            end
+          end
+          local corrected=Sampler.network_stock(net)
+          rec.corrected_stored=corrected["item/"..name]
+          -- The UI combines qualities, so compare the corrected result against
+          -- all physical qualities of this item in the same owners.
+          local physical_all=0;local owners_seen={}
+          for _,points in ipairs({net.provider_points,net.storage_points}) do
+            for _,point in pairs(points) do
+              local owner=point.owner
+              if owner.valid and not owners_seen[owner.unit_number or owner] then
+                owners_seen[owner.unit_number or owner]=true
+                local inv=owner.get_inventory(defines.inventory.chest)
+                if inv then for _,x in pairs(inv.get_contents()) do if x.name==name then physical_all=physical_all+x.count end end end
+              end
+            end
+          end
+          rec.physical_all_qualities=physical_all
+          assert(rec.corrected_stored==physical_all,"Reservation correction does not match physical stock")
+          rec.providers=net.get_contents("providers");rec.storage=net.get_contents("storage")
+          report.networks[#report.networks+1]=rec
+        end
+      end
+    end
+  end
+  helpers.write_file("save-test/stock-audit.json",helpers.table_to_json(report),false)
+  log("STOCK AUDIT negatives="..report.negative_entries)
+end
+
+if mode=="ux" then
+  cases={
+    {name="ux-water",surface="vulcanus",tab="balance",focus="fluid/water",depth=1},
+    {name="ux-stock",surface="nauvis",tab="balance",focus="item/steel-plate",depth=1,details=true},
+    {name="ux-copper",surface="vulcanus",tab="balance",focus="item/copper-plate",depth=1},
+    {name="ux-list-update",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,update_list=true},
+    {name="ux-help-basics",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,help_tab=1},
+    {name="ux-help-stock",surface="nauvis",tab="balance",focus="item/steel-plate",depth=1,help_tab=2},
+    {name="ux-help-alerts",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,help_tab=3},
+    {name="ux-recent",surface="vulcanus",tab="balance",focus="fluid/steam",depth=1,recent=true},
+  }
+elseif mode=="warmup" then
+  cases={{name="ux-warmup",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1}}
+end
+local function find_ui(el,action)
+  if el.tags and el.tags.ssk_ui==action then return el end
+  for _,child in pairs(el.children) do local x=find_ui(child,action);if x then return x end end
+end
+
 local function find_node(element)
   if element.tags and element.tags.ssk_sk == "node" then return element end
   for _, child in pairs(element.children) do
@@ -141,9 +219,12 @@ function T.tick(UI, Sampler)
     return
   end
   if elapsed == 0 then
+    if mode=="audit" then audit_stock(Sampler) end
     game.speed = 1
     local _, seconds = Sampler.rates(game.surfaces.nauvis.index, 600)
-    assert(seconds == 600, "Ten-minute history did not survive save/reload")
+    if mode~="warmup" then assert(seconds == 600, "Ten-minute history did not survive save/reload")
+    else assert(seconds<600,"Warm-up case must use a fresh installation's history") end
+    Sampler.on_stock(game.tick)
     log("SANKEY SAVE RELOAD HISTORY OK")
   end
   if elapsed % 60 ~= 0 then return end
@@ -151,7 +232,8 @@ function T.tick(UI, Sampler)
   assert(player, "Graphical test has no connected player")
   if capture then
     assert(player.gui.screen.ssk_main, "Missing native GUI")
-    player.gui.screen.ssk_main.bring_to_front()
+    if player.gui.screen.ssk_help then player.gui.screen.ssk_help.bring_to_front()
+    else player.gui.screen.ssk_main.bring_to_front() end
     if mode=="scroll" and cases[step].bottom then
       -- Live sampling can reorder rows between setup and capture. Exercise the
       -- current list after that refresh, immediately before engine rendering.
@@ -206,7 +288,7 @@ function T.tick(UI, Sampler)
   us.surface, us.tab_id, us.view = c.surface, c.tab, c.view or "overview"
   us.live, us.advanced = false, c.advanced or false
   us.renderer = c.renderer or "poly"
-  if mode=="scroll" then
+  if mode=="scroll" or mode=="ux" or mode=="warmup" then
     us.bal_filter="all"; us.bal_details=c.details or false; us.bal_sort=c.groups and "groups" or "priority"; us.bal_group=nil
   end
   if (mode=="full" or mode=="names") then
@@ -238,7 +320,7 @@ function T.tick(UI, Sampler)
     for _,n in pairs(L.nodes) do assert(n.kind~="group","plain copper chain still has a category node") end
   end
   assert(us.surface_names[find_scope(player.gui.screen.ssk_main).selected_index]==c.surface,"Surface picker does not identify rendered surface")
-  if mode=="balance" or mode=="scroll" or ((mode=="full" or mode=="names") and c.tab~="focus") then
+  if mode=="balance" or mode=="scroll" or mode=="ux" or mode=="warmup" or ((mode=="full" or mode=="names") and c.tab~="focus") then
     for _,action in ipairs({"center_selection","zoom_fit"}) do
       local button=find_action(player.gui.screen.ssk_main,action)
       assert(button, "Missing Balance action "..action)
@@ -257,7 +339,7 @@ function T.tick(UI, Sampler)
     local left=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table
     local root=left.ssk_bal_root
     assert(left.type=="flow" and root.ssk_bal_items.type=="scroll-pane")
-    assert(root.ssk_bal_summary and root.ssk_bal_context and root.ssk_bal_count)
+    assert(root.ssk_bal_summary and root.ssk_bal_context and root.ssk_bal_footer.ssk_bal_count)
     if c.bottom then
       local sections=root.ssk_bal_items.children
       local table=sections[#sections].ssk_bal_table
@@ -286,6 +368,40 @@ function T.tick(UI, Sampler)
     UI.on_hover({element=node,player_index=player.index},false)
   end
   fx.live=was_live
+
+  if mode=="ux" or mode=="warmup" then
+    local help_button=find_ui(root,"help")
+    assert(help_button.type=="sprite-button" and help_button.sprite=="utility/questionmark","Help must use built-in icon")
+    assert(not find_ui(root,"export") and not find_action(root,"f_renderer"),"Normal menus expose development tools")
+    if c.name=="ux-stock" then
+      local making=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus.ssk_bar.ssk_producers
+      assert(making.tags.ssk_recipes[1]=="steel-plate","Main producing recipe must precede recycling")
+    end
+    if c.recent then
+      local period=find_ui(root,"period");period.selected_index=1
+      UI.on_selection({player_index=player.index,element=period})
+      assert(us.period==0,"Recent period action failed")
+    end
+    if c.update_list then
+      local old=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root
+      UI.on_click({player_index=player.index,element=find_ui(root,"bal_update")})
+      assert(old.valid==false and SK.balance_state(us).focus==c.focus,"Update list interrupted inspected material")
+    end
+    if c.help_tab then
+      UI.on_click({player_index=player.index,element=find_ui(root,"help")})
+      assert(player.gui.screen.ssk_help,"Help action did not open")
+      player.gui.screen.ssk_help.ssk_help_tabs.selected_tab_index=c.help_tab
+    end
+    if c.name=="ux-copper" then
+      local making=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus.ssk_bar.ssk_producers
+      local found=false;for _,name in pairs(making.tags.ssk_recipes) do if name=="casting-copper" then found=true end end
+      assert(found,"Copper inspector must identify its recorded casting recipe")
+    end
+    if mode=="warmup" then
+      assert(root.ssk_window_bar.ssk_history.visible,"Fresh-install history indicator missing")
+      assert(settings.global["ssk-auto-export-minutes"].value==0,"Fresh installs must not export automatically")
+    end
+  end
   capture = c.name
 end
 return T

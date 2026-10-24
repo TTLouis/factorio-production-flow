@@ -800,7 +800,7 @@ function V.build(player, us, W, viewH)
   end
 
   local L = { nodes = nodes, links = link_list, cols = cols, col_tiers = col_tiers, all_tiers = all_tiers,
-              seconds = m.seconds, W = W, fluid_factor = ff,
+              seconds = m.seconds, recipe_rates=m.rates and m.rates.recipes or {}, W = W, fluid_factor = ff,
               min_t = player.mod_settings["ssk-min-ribbon-px"].value }
   -- Rates change every sample; topology and explicit layout controls define when
   -- it is useful to optimise again. Renderer changes do not invalidate geometry.

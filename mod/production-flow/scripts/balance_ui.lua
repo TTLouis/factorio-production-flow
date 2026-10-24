@@ -5,7 +5,7 @@ local Groups = require("scripts.groups")
 
 local BU = {}
 BU.FILTERS = { "problems", "all", "shortages", "surpluses", "capacity" }
-local FILTER_NAMES = { "Problems only", "Everything", "Shortages", "Surpluses", "Spare capacity" }
+local FILTER_NAMES = { "Problems only", "Everything", "Supply/activity", "Surpluses", "Spare capacity" }
 local SHORTAGE = { deficit = true, limited = true, starved = true }
 local LIMIT = 200
 
@@ -70,7 +70,7 @@ local COLUMNS = {
   { id = "net", name = "Net /s", width = 80, numeric = true,
     help = "Production minus consumption per second. Positive = surplus; negative = shortage." },
   { id = "stock", name = "Stock", width = 85, numeric = true,
-    help = "Items in logistic networks on this surface, across all qualities. Belts, chests outside networks and fluid tanks are excluded. — means no stock sample for this item." },
+    help = "Stored items in provider/storage inventories on this surface, across all qualities, including robot pickup reservations. Other chests, requester inventories, items in transit and fluid tanks are excluded. — means no stock data; 0 means measured empty." },
   { id = "eta", name = "Empty in", width = 90, numeric = true,
     help = "Estimated time until logistic stock is empty if its current drain continues. Recent stock trend takes precedence over production minus consumption." },
   { id = "netp", name = "Net %", width = 70, numeric = true, detail = true,
@@ -88,7 +88,7 @@ local function values(r)
   return {
     item = item_name(r.key), status = r.inactive and "[color=0.65,0.65,0.65]Inactive[/color]" or string.format("[color=%s]%s[/color]", st.color, st.label),
     prod = fmt(r.prod), cons = fmt(r.cons), net = signed(r.net),
-    stock = r.stock and fmt(r.stock) or "—", eta = time(r.eta),
+    stock = r.stock and fmt(r.stock) or "—", eta = r.eta and "≈ "..time(r.eta) or "—",
     netp = string.format("%+.0f%%", r.netp * 100), pu = pct(r.pu), cu = pct(r.cu),
     trend = r.trend and signed(r.trend) or "—",
   }
@@ -97,7 +97,7 @@ end
 local function columns(details, width)
   local out = {}
   width = width or 900
-  local compact = { focus=24, status=112, prod=60, cons=60, net=62, stock=65, eta=66 }
+  local compact = { focus=24, status=146, prod=60, cons=60, net=62, stock=65, eta=66 }
   local detail = { prod="pu", cons="cu", net="netp", stock="trend" }
   local subhead = { prod="Util. %", cons="Util. %", net="Net %", stock="/min" }
   local total = 0
@@ -266,7 +266,7 @@ function BU.fill(player, c, us, scope, only_auto)
   local root, summaries, cells, context, counter
   if same then
     root = c.ssk_bal_root
-    context, counter = root.ssk_bal_context, root.ssk_bal_count
+    context, counter = root.ssk_bal_context, root.ssk_bal_footer.ssk_bal_count
     summaries, cells = {}, {}
     for _, id in ipairs({ "deficit", "limited", "starved", "surplus", "overbuilt", "ok", "source" }) do
       summaries[id] = root.ssk_bal_summary["ssk_bal_" .. id]
@@ -328,7 +328,8 @@ function BU.fill(player, c, us, scope, only_auto)
       summaries[id].style.width = math.floor((us.bal_width or 900) / 2) - 18
       summaries[id].style.single_line = true
     end
-    local hint = text(root, "Rates /s. Select a magnifier to inspect materials and uses on the right. Stock covers logistic networks only.")
+    local hint = text(root, "Rates /s · stored logistic stock, all qualities · — unavailable · ≈ estimated empty time")
+    hint.style.font="default-small"
     hint.style.font_color = { 0.65, 0.65, 0.65 }
     hint.style.single_line = false
     hint.style.maximal_width = us.bal_width or 900
@@ -372,10 +373,17 @@ function BU.fill(player, c, us, scope, only_auto)
       text(items, #rows == 0 and "No measured production or consumption yet. Let the factory run, then refresh."
         or "No items match this view. Try Everything or All groups.")
     end
-    counter = root.add { type = "label", name = "ssk_bal_count" }
+    local footer=root.add{type="flow",name="ssk_bal_footer",direction="horizontal"}
+    footer.style.vertical_align="center"
+    counter=footer.add{type="label",name="ssk_bal_count"}
+    counter.style.width=math.max(100,(us.bal_width or 900)-120)
+    counter.style.single_line=false
+    local update=footer.add{type="button",caption="Update list",tags={ssk_ui="bal_update"},
+      tooltip="Reapply filters and sorting, and include new items. Measured values keep updating while row order is held."}
+    update.style.width=110
     if shown < #filtered then root.add { type = "button", caption = "Show 200 more", tags = { ssk_ui = "bal_more" } } end
   end
-  context.caption = string.format("%s  ·  Averaged over %s  ·  Live refresh every 5 s", scope, time(secs))
+  context.caption = string.format("%s  ·  Averaged over %s  ·  Values update every 5 s", scope, time(secs))
   for id, el in pairs(summaries) do
     local st = Balance.STATUS[id]
     el.caption = string.format("[color=%s]%s: %d[/color]", st.color, st.label, counts[id] or 0)
@@ -386,16 +394,16 @@ function BU.fill(player, c, us, scope, only_auto)
       if col.id~="focus" then cells[i][col.id].caption=caption(v,col) end
     end
     if cells[i].status then
-      cells[i].status.tooltip=filtered[i].inactive and "No measured activity in the current window. Refresh to update the list."
+      cells[i].status.tooltip=filtered[i].inactive and "No measured activity in the current window. Update list to reapply filters and sorting."
         or Balance.STATUS[filtered[i].status].help
     end
     local net = filtered[i].net
     cells[i].net.style.font_color = net < 0 and { 1, 0.45, 0.4 } or net > 0 and { 1, 0.85, 0.35 } or { 1, 1, 1 }
     cells[i].focus.toggled = us.bal_fx and us.bal_fx.focus == filtered[i].key or false
   end
-  counter.caption = live_reuse and string.format("%d rows · %d currently match · Refresh to re-sort",shown,matching_count)
+  counter.caption = live_reuse and string.format("List order held · %d rows · %d match now",shown,matching_count)
     or string.format("Showing %d of %d matching items", shown, #filtered)
-  counter.tooltip="Live updates keep rows in place while updating values. Refresh or change a filter to reapply row membership and ordering."
+  counter.tooltip="Live updates keep rows in place while updating values. Update list or change a filter to reapply row membership and ordering."
   return filtered[1] and filtered[1].key
 end
 

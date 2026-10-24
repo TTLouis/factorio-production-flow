@@ -43,14 +43,19 @@ cases have separate handling when machine or stock data is unavailable.
 
 ## Stock, trend and time to empty
 
-Stock sums logistic-network contents on the surface, combining item qualities.
-Other chests, belts and fluid tanks are excluded. Stock is sampled every ten
-seconds; the recent trend uses about one minute of samples, independently of
+Stock combines all qualities in logistic provider and storage inventories on the
+surface. Factorio's available network count subtracts pending robot pickups and
+can be negative. The sampler adds those pickup reservations back once per owner
+to report physically stored stock, including reserved items. Requester
+inventories, other chests, items in transit and fluid tanks are excluded. A dash
+means no stock data; zero means measured empty stock. On upgrade, the old stock
+trend baseline is cleared so the definition change does not create a false drain.
+Stock is sampled every ten seconds; the recent trend uses about one minute of samples, independently of
 the selected production window.
 
 Time to empty divides stock by the drain rate. A negative recent stock trend is
 preferred; otherwise a production deficit supplies the drain estimate. This
-assumes the current drain continues.
+assumes the current drain continues. The UI prefixes estimated times with ≈.
 
 ## Widths, names and grouping
 
@@ -61,6 +66,8 @@ their widths are not a conserved mass balance.
 
 Charts default to individual item/fluid names. A molten-copper material is named
 Molten copper; copper-plate output is Copper plate. The single-output casting
-recipe is represented by that material connection. Optional grouping is
+recipe is represented by that material connection. The inspector's Making line
+lists recorded producing recipes, ordered by estimated output contribution.
+Optional grouping is
 unfinished and can aggregate those materials under broad categories such as
 Vulcanus; those are category names, not recipe names or production locations.

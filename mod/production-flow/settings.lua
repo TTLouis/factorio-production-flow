@@ -21,7 +21,7 @@ data:extend({
     type = "int-setting",
     name = "ssk-auto-export-minutes",
     setting_type = "runtime-global",
-    default_value = 5,
+    default_value = 0,
     minimum_value = 0,
     maximum_value = 120,
     order = "c",
