@@ -513,6 +513,9 @@ function UI.on_click(e)
   elseif el.tags and el.tags.ssk_picker == "close" then
     MaterialPicker.close(player)
     return true
+  elseif el.tags and el.tags.ssk_picker == "search" then
+    MaterialPicker.toggle_search(player)
+    return true
   end
   if el.name == "ssk_toggle" then UI.toggle(player); return true end
   local r = SK.on_click(e, (function()

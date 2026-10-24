@@ -61,14 +61,15 @@ for _, tab in ipairs({ "balance", "focus" }) do
   assert(UI.on_click { element = open, player_index = 1 })
   local dialog = player.gui.screen.ssk_material_picker
   assert(player.opened == main, "picker must retain the native main-window ownership")
+  assert(results(dialog).column_count == 10, "the material grid must have ten columns like the base game selector")
   assert(results(dialog).tags.total == 4 and #results(dialog).tags.keys == 2, "catalog must include items and fluids, excluding hidden materials")
   UI.on_click { element = find(dialog, function(e) return e.tags.ssk_picker == "group" and e.tags.group == "fluids" end), player_index = 1 }
   assert(#results(dialog).tags.keys == 2, "category filter must restrict the visible slots")
   assert(not find(dialog, function(e) return e.tags.ssk_picker == "group"
     and (e.tags.group == "other" or e.tags.group == "signals") end), "signal/miscellaneous categories must be absent")
   for _, query in ipairs({ "parameter", "signal-material", "misc-material" }) do
-    dialog.ssk_query.text = query
-    UI.on_text_changed { element = dialog.ssk_query, player_index = 1 }
+    dialog.ssk_title.ssk_query.text = query
+    UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
     assert(#results(dialog).tags.keys == 0, "excluded material leaked through search: " .. query)
   end
   UI.refresh(player, true)
@@ -76,14 +77,20 @@ for _, tab in ipairs({ "balance", "focus" }) do
   for id, s in pairs(requests) do
     UI.on_string_translated { player_index = 1, id = id, translated = true, result = s == "wood" and "Bois" or s }
   end
-  dialog.ssk_query.text = "bois"
-  assert(UI.on_text_changed { element = dialog.ssk_query, player_index = 1 })
+  dialog.ssk_title.ssk_query.text = "bois"
+  assert(UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 })
   assert(#results(dialog).tags.keys == 2, "translated-name search failed")
-  dialog.ssk_query.text = "does not exist"
-  UI.on_text_changed { element = dialog.ssk_query, player_index = 1 }
+  dialog.ssk_title.ssk_query.text = "does not exist"
+  UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
   assert(#results(dialog).tags.keys == 0, "no-match state failed")
-  dialog.ssk_query.text = "water"
-  UI.on_text_changed { element = dialog.ssk_query, player_index = 1 }
+  local search = find(dialog, function(e) return e.tags.ssk_picker == "search" end)
+  UI.on_click { element = search, player_index = 1 }
+  assert(dialog.ssk_title.ssk_query.visible == false and dialog.ssk_title.ssk_query.text == ""
+    and #results(dialog).tags.keys > 0, "hiding the search field must clear the search")
+  UI.on_click { element = search, player_index = 1 }
+  assert(dialog.ssk_title.ssk_query.visible, "the search button must show the field again")
+  dialog.ssk_title.ssk_query.text = "water"
+  UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
   assert(#results(dialog).tags.keys == 2, "item/fluid names must coexist")
   local chosen = find(dialog, function(e) return e.tags.ssk_picker == "pick" and e.tags.key == "fluid/water" end)
   assert(chosen.type == "sprite-button" and not find(dialog, function(e) return e.type == "list-box" end), "materials must use an icon grid")

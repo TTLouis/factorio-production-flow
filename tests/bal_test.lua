@@ -29,7 +29,8 @@ local original = root()
 local item_pane = original.ssk_bal_list.ssk_bal_items
 assert(content().ssk_balance_split.ssk_balance_table.type == "flow", "outer Balance pane must stay fixed")
 assert(item_pane.type == "scroll-pane", "only the item list should scroll")
-assert(original.ssk_bal_summary and original.ssk_bal_context and original.ssk_bal_footer.ssk_bal_count, "summary and footer must remain outside the item scroller")
+assert(original.ssk_bal_summary and original.ssk_bal_context and original.ssk_bal_controls.ssk_bal_refresh
+  and not original.ssk_bal_footer, "refresh must be in the header and the footer must be absent")
 assert(item_pane.ssk_bal_section_1, "item tables must live inside the scroller")
 UI.refresh(player, true)
 assert(root() == original and root().ssk_bal_list.ssk_bal_items == item_pane, "unchanged live refresh must preserve the item scroller")
@@ -77,7 +78,7 @@ click({ ssk_ui = "bal_fav", key = hidden })
 assert(us.bal_favs.items[hidden] and keys()[1] == hidden, "favourite item must lead the list despite the filter")
 local pane = root().ssk_bal_list.ssk_bal_items
 assert(pane.ssk_bal_section_1.ssk_bal_group_header and pane.ssk_bal_section_2.ssk_bal_group_header, "favourites and other items need headers")
-assert(root().ssk_bal_footer.ssk_bal_count.caption:find("1 favourite$"), "counter should mention favourites")
+assert(not root().ssk_bal_footer, "favourites must not restore the removed footer")
 for _, e in ipairs(find(root(), function(e) return e.tags.ssk_ui == "bal_fav" and e.tags.key == hidden end)) do
   assert(e.sprite == "ssk-star", "favourite star should be filled")
 end
@@ -111,7 +112,7 @@ prototypes.item["test-1"] = { name = "test-1", subgroup = { name = "x" }, locali
 B.rows = function() return fixture, 60 end
 us.bal_group, us.bal_sort, us.bal_details, us.bal_limit = nil, "priority", false, nil
 UI.refresh(player)
-assert(#links() == 200 and root().ssk_bal_footer.ssk_bal_count.caption == "Showing 200 of 205 matching items", "truncation must be visible")
+assert(#links() == 200 and #find(root(), function(e) return e.tags.ssk_ui == "bal_more" end) > 0, "pagination must offer the remaining items")
 UI.on_click({ player_index = 1, element = { name = "x", tags = { ssk_ui = "bal_more" } } })
 assert(#links() == 205, "show more must expose all remaining rows")
 local t = tables()[1]
@@ -138,7 +139,7 @@ UI.refresh(player)
 assert(root()~=reuse, "manual Refresh must reapply list membership")
 fixture = {}
 UI.refresh(player)
-assert(root().ssk_bal_footer.ssk_bal_count.caption == "Showing 0 of 0 matching items", "empty data state")
+assert(#links() == 0 and not root().ssk_bal_footer, "empty data state")
 B.rows = saved_rows
 prototypes.item["test-1"] = old_proto
 us.bal_details, us.bal_filter, us.bal_limit = false, "problems", nil

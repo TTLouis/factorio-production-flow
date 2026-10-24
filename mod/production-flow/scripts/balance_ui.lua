@@ -393,13 +393,13 @@ function BU.fill(player, c, us, scope, only_auto)
   -- Reuse existing cells while the visible rows stay the same. Live sampling
   -- updates values without destroying the table, dropdowns or scroll position.
   local same = live_reuse or (c.ssk_bal_root and c.ssk_bal_root.tags.signature == signature)
-  local root, summaries, summary_heads, cells, context, counter
+  local root, summaries, summary_heads, cells, context, refresh
   local cols = columns(us.bal_details, us.bal_width)
   local list_w = list_width(us.bal_width)
   cols.list_width = list_w
   if same then
     root = c.ssk_bal_root
-    context, counter = root.ssk_bal_context, root.ssk_bal_footer.ssk_bal_count
+    context, refresh = root.ssk_bal_context, root.ssk_bal_controls.ssk_bal_refresh
     summaries, summary_heads, cells = {}, {}, {}
     for _, group in ipairs(SUMMARY_GROUPS) do
       local column = root.ssk_bal_summary["ssk_bal_" .. group.id]
@@ -430,7 +430,7 @@ function BU.fill(player, c, us, scope, only_auto)
     root.style.vertical_spacing = 8
     root.style.width = (us.bal_width or 900) + 24
     root.style.height = us.bal_height or 600
-    local toolbar = root.add { type = "flow", direction = "horizontal" }
+    local toolbar = root.add { type = "flow", name = "ssk_bal_controls", direction = "horizontal" }
     toolbar.style.vertical_align = "center"
     toolbar.style.horizontal_spacing = 8
     text(toolbar, "Show:")
@@ -450,10 +450,12 @@ function BU.fill(player, c, us, scope, only_auto)
       if g.id == us.bal_group then gi = i + 1 end
     end
     local picker = toolbar.add { type = "drop-down", items = names, selected_index = gi, tags = { ssk_ui = "bal_group" } }
-    picker.style.width = math.min(240, math.max(120, (us.bal_width or 900) - 322))
+    picker.style.width = math.min(240, math.max(120, (us.bal_width or 900) - 358))
     if us.bal_group then
       star_button(toolbar, favs.groups[us.bal_group], { ssk_ui = "bal_fav_group", gid = us.bal_group }, "this group")
     end
+    refresh = toolbar.add { type = "sprite-button", name = "ssk_bal_refresh", style = "tool_button", sprite = "utility/refresh",
+      tags = { ssk_ui = "bal_update" }, tooltip = "Refresh table" }
     toolbar = root.add { type = "flow", direction = "horizontal" }
     toolbar.style.vertical_align = "center"
     toolbar.style.horizontal_spacing = 8
@@ -554,13 +556,6 @@ function BU.fill(player, c, us, scope, only_auto)
         or "No items match this view. Try Everything or All groups.")
       if shown > 0 then note.style.top_margin = 8 end
     end
-    local footer=root.add{type="flow",name="ssk_bal_footer",direction="horizontal"}
-    footer.style.vertical_align="center"
-    counter=footer.add{type="label",name="ssk_bal_count"}
-    counter.style.width=math.max(100,(us.bal_width or 900)-28)
-    counter.style.single_line=false
-    local update=footer.add{type="sprite-button",style="tool_button",sprite="utility/refresh",tags={ssk_ui="bal_update"},
-      tooltip="Reapply filters and sorting, and include new items. Measured values keep updating while row order is held."}
     if limit < #normal then
       -- the one text button: a long-form command centred under the list, as vanilla does
       local more = root.add { type = "flow", direction = "horizontal" }
@@ -599,10 +594,7 @@ function BU.fill(player, c, us, scope, only_auto)
     cells[i].net.style.font_color = net < 0 and { 1, 0.45, 0.4 } or net > 0 and { 1, 0.85, 0.35 } or { 1, 1, 1 }
     cells[i].focus.ssk_bal_inspect.toggled = us.bal_fx and us.bal_fx.focus == list[i].key or false
   end
-  counter.caption = live_reuse and string.format("List order held · %d rows · %d match now",shown,matching_count)
-    or string.format("Showing %d of %d matching items", shown, matching_count)
-      .. (nfav > 0 and string.format(" · %d favourite%s", nfav, nfav == 1 and "" or "s") or "")
-  counter.tooltip="Automatic updates keep rows in place while updating values. Update list or change a filter to reapply row membership and ordering."
+  refresh.tooltip = "Refresh table"
   return list[1] and list[1].key
 end
 

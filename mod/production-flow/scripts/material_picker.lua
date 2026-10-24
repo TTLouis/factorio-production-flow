@@ -2,6 +2,9 @@
 -- and native item slots. Its searchable contents include only items and fluids.
 local P = {}
 local NAME = "ssk_material_picker"
+-- Same proportions as the base game's item selector: six group tabs per row over
+-- a ten-column slot grid.
+local COLUMNS, GROUP_COLUMNS, SLOT = 10, 6, 40
 
 -- Blueprint parameters and signal/miscellaneous categories are not production
 -- materials. Apply the same rule to browsing, search and translation requests.
@@ -42,8 +45,8 @@ end
 local function populate(player)
   local f = player.gui.screen[NAME]
   if not f then return end
-  local s, entries, groups, total = state(player), {}, {}, 0
-  local query = f.ssk_query.text:lower()
+  local s, entries, groups, matched, total = state(player), {}, {}, {}, 0
+  local query = f.ssk_title.ssk_query.text:lower()
   local chosen_group = query == "" and f.tags.group or ""
   for _, kind in ipairs({ "item", "fluid" }) do
     for name, proto in pairs(prototypes[kind]) do
@@ -58,6 +61,7 @@ local function populate(player)
         local display = s.names[key] or name:gsub("%-", " ")
         if query == "" or display:lower():find(query, 1, true)
           or name:lower():gsub("%-", " "):find(query, 1, true) then
+          matched[group.name] = true
           entries[#entries + 1] = { key = key, name = name, kind = kind, group = group.name,
             subgroup = group.name .. "/" .. subgroup.name,
             sort = (group.order or "") .. "\t" .. group.name .. "\t"
@@ -82,12 +86,14 @@ local function populate(player)
     for _, entry in ipairs(entries) do if entry.group == chosen_group then visible[#visible + 1] = entry end end
     entries = visible
   end
-  local tabs = f.ssk_material_inner.ssk_group_scroll.ssk_groups
+  local tabs = f.ssk_material_inner.ssk_groups
   tabs.clear()
   for _, group in ipairs(group_list) do
-    tabs.add { type = "sprite-button", style = "filter_group_button_tab_slightly_larger", sprite = "item-group/" .. group.name,
-      toggled = chosen_group == group.name, tooltip = group.localised_name or group.name,
+    -- While searching, results span every group; groups without a match grey out.
+    local tab = tabs.add { type = "sprite-button", style = "filter_group_button_tab_slightly_larger", sprite = "item-group/" .. group.name,
+      toggled = query == "" and chosen_group == group.name, tooltip = group.localised_name or group.name,
       tags = { ssk_picker = "group", group = group.name } }
+    tab.enabled = query == "" or matched[group.name] == true
   end
   local grid = f.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll.ssk_results
   grid.clear()
@@ -97,7 +103,7 @@ local function populate(player)
     if last and entry.subgroup ~= last then
       while occupied % columns ~= 0 do
         local gap = grid.add { type = "empty-widget" }
-        gap.style.width, gap.style.height = 40, 40
+        gap.style.width, gap.style.height = SLOT, SLOT
         occupied = occupied + 1
       end
     end
@@ -119,7 +125,7 @@ function P.on_group(e)
   local tags = f.tags
   tags.group = e.element.tags.group
   f.tags = tags
-  f.ssk_query.text = ""
+  f.ssk_title.ssk_query.text = ""
   populate(player)
 end
 
@@ -130,11 +136,25 @@ function P.close(player)
   if main then player.opened = main end
 end
 
+-- The search field sits in the title bar and the search button shows or hides it,
+-- as in the base game's selectors. Hiding it clears the search.
+function P.toggle_search(player)
+  local f = player.gui.screen[NAME]
+  if not f then return end
+  local query = f.ssk_title.ssk_query
+  query.visible = query.visible == false
+  if query.visible then
+    if query.focus then query.focus() end
+  elseif query.text ~= "" then
+    query.text = ""
+    populate(player)
+  end
+end
+
 function P.open(player, target, current)
   P.close(player)
   local res, scale = player.display_resolution, player.display_scale
-  local width = math.min(480, math.floor(res.width / scale) - 60)
-  local height = math.min(640, math.floor(res.height / scale) - 100)
+  local rows = math.max(4, math.min(10, math.floor((math.floor(res.height / scale) - 360) / SLOT)))
   local group = ""
   if current then
     local kind, name = current:match("^(%a+)/(.+)$")
@@ -142,35 +162,31 @@ function P.open(player, target, current)
     group = kind == "fluid" and "fluids" or proto and proto.group and proto.group.name or ""
   end
   local f = player.gui.screen.add { type = "frame", name = NAME, direction = "vertical", tags = { target = target, group = group, current = current or "" } }
-  f.style.width, f.style.height = width, height
-  local title = f.add { type = "flow", direction = "horizontal" }
-  title.style.horizontally_stretchable = true
+  local title = f.add { type = "flow", name = "ssk_title", direction = "horizontal" }
+  title.style.horizontal_spacing = 8
   title.add { type = "label", caption = "Select item / fluid", style = "frame_title" }
   local drag = title.add { type = "empty-widget", style = "draggable_space_header" }
   drag.style.horizontally_stretchable = true
   drag.style.height = 24
+  drag.style.minimal_width = 24
   drag.drag_target = f
+  local query = title.add { type = "textfield", name = "ssk_query", text = "", style = "search_popup_textfield",
+    tags = { ssk_picker = "query" }, tooltip = "Search item and fluid names" }
+  query.style.width = 150
+  title.add { type = "sprite-button", sprite = "utility/search", style = "frame_action_button",
+    tags = { ssk_picker = "search" }, tooltip = "Search item and fluid names" }
   title.add { type = "sprite-button", sprite = "utility/close", style = "frame_action_button",
     tags = { ssk_picker = "close" }, tooltip = "Close material picker" }
-  local query = f.add { type = "textfield", name = "ssk_query", text = "",
-    tags = { ssk_picker = "query" }, tooltip = "Search item and fluid names" }
-  query.style.width = width - 24
-  local inner = f.add { type = "frame", name = "ssk_material_inner", style = "inside_shallow_frame", direction = "vertical" }
-  inner.style.horizontally_stretchable, inner.style.vertically_stretchable = true, true
-  local groups = inner.add { type = "scroll-pane", name = "ssk_group_scroll", style = "naked_scroll_pane",
-    horizontal_scroll_policy = "auto", vertical_scroll_policy = "never" }
-  groups.style.horizontally_stretchable = true
-  groups.style.height = 88
-  local tabs = groups.add { type = "flow", name = "ssk_groups", direction = "horizontal" }
-  tabs.style.horizontal_spacing = 0
-  local slots = inner.add { type = "frame", name = "ssk_slot_frame", style = "slot_button_deep_frame", direction = "vertical" }
-  slots.style.padding = 0
-  slots.style.horizontally_stretchable, slots.style.vertically_stretchable = true, true
-  local scroll = slots.add { type = "scroll-pane", name = "ssk_slot_scroll", style = "naked_scroll_pane",
+  local inner = f.add { type = "frame", name = "ssk_material_inner", style = "inside_deep_frame", direction = "vertical" }
+  local tabs = inner.add { type = "table", name = "ssk_groups", style = "slot_table", column_count = GROUP_COLUMNS }
+  tabs.style.horizontal_spacing, tabs.style.vertical_spacing = 0, 0
+  local slots = inner.add { type = "frame", name = "ssk_slot_frame", style = "filter_frame", direction = "vertical" }
+  slots.style.horizontally_stretchable = true
+  slots.style.horizontal_align = "center"
+  local scroll = slots.add { type = "scroll-pane", name = "ssk_slot_scroll", style = "deep_slots_scroll_pane",
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
-  scroll.style.horizontally_stretchable, scroll.style.vertically_stretchable = true, true
-  local grid = scroll.add { type = "table", name = "ssk_results", style = "filter_slot_table",
-    column_count = math.max(1, math.floor((width - 52) / 40)) }
+  scroll.style.width, scroll.style.height = COLUMNS * SLOT, rows * SLOT
+  local grid = scroll.add { type = "table", name = "ssk_results", style = "filter_slot_table", column_count = COLUMNS }
   grid.style.horizontal_spacing, grid.style.vertical_spacing = 0, 0
   local count = f.add { type = "label", name = "ssk_count", style = "grey_label" }
   count.style.font = "default-small"

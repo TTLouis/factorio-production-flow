@@ -377,8 +377,8 @@ function T.tick(UI, Sampler)
       end
       UI.on_click{element=assert(matching(root,function(el) return el.tags.ssk_picker=="open" end)),player_index=player.index}
       local dialog=assert(player.gui.screen.ssk_material_picker)
-      dialog.ssk_query.text=c.pick:match("/(.+)$"):gsub("%-"," ")
-      UI.on_text_changed{element=dialog.ssk_query,player_index=player.index}
+      dialog.ssk_title.ssk_query.text=c.pick:match("/(.+)$"):gsub("%-"," ")
+      UI.on_text_changed{element=dialog.ssk_title.ssk_query,player_index=player.index}
       local slot=assert(matching(dialog,function(el) return el.tags.ssk_picker=="pick" and el.tags.key==c.pick end))
       assert(UI.on_click{element=slot,player_index=player.index})
     elseif c.back then
@@ -426,7 +426,7 @@ function T.tick(UI, Sampler)
     local left=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table
     local root=left.ssk_bal_root
     assert(left.type=="flow" and root.ssk_bal_list.ssk_bal_items.type=="scroll-pane")
-    assert(root.ssk_bal_summary and root.ssk_bal_context and root.ssk_bal_footer.ssk_bal_count)
+    assert(root.ssk_bal_summary and root.ssk_bal_context and root.ssk_bal_controls.ssk_bal_refresh and not root.ssk_bal_footer)
     if c.bottom then
       local sections=root.ssk_bal_list.ssk_bal_items.children
       local table=sections[#sections].ssk_bal_table
@@ -464,6 +464,9 @@ function T.tick(UI, Sampler)
     local toolbar_h,chart_h=bar.style.minimal_height,chart.ssk_sp.style.minimal_height
     assert(not chart.ssk_settings,"Chart settings should start closed")
     local list_before=find_named(root,"ssk_bal_root")
+    if list_before then
+      assert(not list_before.ssk_bal_footer and list_before.ssk_bal_controls.ssk_bal_refresh.tags.ssk_ui=="bal_update", "Refresh belongs in the Balance header with no footer")
+    end
     UI.on_click{player_index=player.index,element=find_action(root,"chart_settings")}
     assert(chart.ssk_settings and find_action(chart.ssk_settings,"f_heights"),"Chart settings did not open")
     assert(bar.style.minimal_height==toolbar_h and chart.ssk_sp.style.minimal_height==chart_h,"Chart settings moved the chart")
@@ -486,13 +489,13 @@ function T.tick(UI, Sampler)
     local dialog=assert(player.gui.screen.ssk_material_picker)
     local grid=find_named(dialog,"ssk_results")
     assert(grid.type=="table" and grid.tags.total>100,"Incomplete material icon grid")
-    local categories=dialog.ssk_material_inner.ssk_group_scroll.ssk_groups
+    local categories=dialog.ssk_material_inner.ssk_groups
     for _,category in pairs(categories.children) do
       assert(category.tags.group~="other" and category.tags.group~="signals", "Excluded selector category remains visible")
     end
     for _,query in ipairs({"parameter-", "blueprint", "deconstruction planner"}) do
-      dialog.ssk_query.text=query
-      UI.on_text_changed{player_index=player.index,element=dialog.ssk_query}
+      dialog.ssk_title.ssk_query.text=query
+      UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
       for _,key in ipairs(grid.tags.keys) do
         local kind,name=key:match("^(%a+)/(.+)$")
         local proto=prototypes[kind][name]
@@ -502,6 +505,8 @@ function T.tick(UI, Sampler)
     UI.refresh(player,true)
     assert(dialog.valid,"Live refresh destroyed open material picker")
     if c.group_material then
+      dialog.ssk_title.ssk_query.text=""
+      UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
       local kind,name=c.group_material:match("^(%a+)/(.+)$")
       local wanted=kind=="fluid" and "fluids" or prototypes[kind][name].group.name
       local function group_button(el)
@@ -510,8 +515,8 @@ function T.tick(UI, Sampler)
       end
       UI.on_click{player_index=player.index,element=assert(group_button(dialog))}
     end
-    dialog.ssk_query.text=c.query or c.pick:match("/(.+)$"):gsub("%-"," ")
-    UI.on_text_changed{player_index=player.index,element=dialog.ssk_query}
+    dialog.ssk_title.ssk_query.text=c.query or c.pick:match("/(.+)$"):gsub("%-"," ")
+    UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
     if c.pick then
       local function material_button(el)
         if el.tags.ssk_picker=="pick" and el.tags.key==c.pick then return el end
