@@ -274,17 +274,31 @@ local function open(player)
   local W = math.floor(res.width / sc) - 70
   local viewH = math.floor(res.height / sc) - 190
 
-  local frame = player.gui.screen.add { type = "frame", name = FRAME, direction = "vertical",
-                                         caption = "Production Flow — M0 render test [" .. st.mode .. "]" }
+  local frame = player.gui.screen.add { type = "frame", name = FRAME, direction = "vertical" }
+  -- Same title bar as the main and help windows.
+  local header = frame.add { type = "flow", direction = "horizontal" }
+  header.drag_target = frame
+  header.style.vertical_align = "center"
+  header.add { type = "label", caption = "Production Flow render test (" .. st.mode .. " mode)", style = "frame_title",
+               ignored_by_interaction = true }
+  local drag = header.add { type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true }
+  drag.style.horizontally_stretchable = true
+  drag.style.height = 24
+  if helpers.is_valid_sprite_path("utility/close") then
+    header.add { type = "sprite-button", style = "frame_action_button", sprite = "utility/close", tooltip = "Close",
+                 tags = { ssk_rt = "close" } }
+  else
+    header.add { type = "button", caption = "X", tooltip = "Close", tags = { ssk_rt = "close" } }
+  end
   local bar = frame.add { type = "flow", direction = "horizontal" }
   bar.style.vertical_align = "center"
+  bar.style.horizontal_spacing = 8
   bar.add { type = "button", caption = "Randomize", tags = { ssk_rt = "randomize" } }
   bar.add { type = "button", caption = "Switch to " .. (st.mode == "margin" and "screen" or "margin"),
             tags = { ssk_rt = "mode" } }
-  bar.add { type = "button", caption = "Close", tags = { ssk_rt = "close" } }
   bar.add { type = "button", caption = "Ordering: " .. (st.order and "on" or "off"), tags = { ssk_rt = "order" } }
   bar.add { type = "button", caption = "−", tooltip = "Zoom out", tags = { ssk_rt = "zoom_out" } }.style.width = 32
-  bar.add { type = "button", caption = string.format("Fit (%.0f%%)", st.zoom * 100), tooltip = "Fit busiest column to window", tags = { ssk_rt = "zoom_fit" } }
+  bar.add { type = "button", caption = "Fit graph", tooltip = "Fit the busiest column to the window", tags = { ssk_rt = "zoom_fit" } }
   bar.add { type = "button", caption = "+", tooltip = "Zoom in", tags = { ssk_rt = "zoom_in" } }.style.width = 32
   local info = bar.add { type = "label" }
 
@@ -313,7 +327,7 @@ local function open(player)
     count = draw(player.gui.screen, screen_placer(origin, sc), g, st, st.screen)
   end
 
-  info.caption = string.format("  seed %d · %d cols · %d nodes · %d ribbons · %d elements · %.2f px/unit · %d clamped · canvas %dx%d",
+  info.caption = string.format("seed %d · %d cols · %d nodes · %d ribbons · %d elements · %.2f px/unit · %d clamped · canvas %dx%d",
     st.seed, #g.cols, #g.nodes, #g.links, count, scale, clamped, W, content_h)
 end
 

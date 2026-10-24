@@ -372,7 +372,7 @@ function T.tick(UI, Sampler)
     if c.help_tab then
       UI.on_click({player_index=player.index,element=find_ui(root,"help")})
       assert(player.gui.screen.ssk_help,"Help action did not open")
-      player.gui.screen.ssk_help.ssk_help_tabs.selected_tab_index=c.help_tab
+      player.gui.screen.ssk_help.ssk_help_inner.ssk_help_tabs.selected_tab_index=c.help_tab
     end
     if c.name=="ux-copper" then
       local making=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus.ssk_bar.ssk_producers

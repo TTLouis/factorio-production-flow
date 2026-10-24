@@ -38,11 +38,19 @@ function H.open(player)
   f.style.width,f.style.height=W,height
   local header=f.add{type="flow",direction="horizontal"}
   header.drag_target=f
-  header.add{type="label",caption="Production Flow help",style="frame_title"}
-  local drag=header.add{type="empty-widget",style="draggable_space_header"}
+  header.style.vertical_align="center"
+  header.add{type="label",caption="Production Flow help",style="frame_title",ignored_by_interaction=true}
+  local drag=header.add{type="empty-widget",style="draggable_space_header",ignored_by_interaction=true}
   drag.style.horizontally_stretchable=true;drag.style.height=24
-  header.add{type="button",caption="Close",tags={ssk_ui="help_close"}}
-  local tabs=f.add{type="tabbed-pane",name="ssk_help_tabs"}
+  -- Same close control as the main window's title bar.
+  if helpers.is_valid_sprite_path("utility/close") then
+    header.add{type="sprite-button",style="frame_action_button",sprite="utility/close",tooltip="Close",tags={ssk_ui="help_close"}}
+  else
+    header.add{type="button",caption="X",tooltip="Close",tags={ssk_ui="help_close"}}
+  end
+  local inner=f.add{type="frame",name="ssk_help_inner",style="inside_deep_frame",direction="vertical"}
+  inner.style.horizontally_stretchable=true;inner.style.vertically_stretchable=true
+  local tabs=inner.add{type="tabbed-pane",name="ssk_help_tabs"}
   tabs.style.horizontally_stretchable=true;tabs.style.vertically_stretchable=true
   for i,topic in ipairs(topics) do
     local tab=tabs.add{type="tab",caption=topic.name}
@@ -52,8 +60,7 @@ function H.open(player)
     local body=scroll.add{type="flow",direction="vertical"}
     body.style.vertical_spacing=10
     for _,section in ipairs(topic.sections) do
-      local title=body.add{type="label",caption=section[1]}
-      title.style.font="default-bold";title.style.font_color={0.95,0.85,0.65}
+      body.add{type="label",caption=section[1],style="caption_label"}
       local text=body.add{type="label",caption=section[2]}
       text.style.single_line=false;text.style.width=W-70
     end
