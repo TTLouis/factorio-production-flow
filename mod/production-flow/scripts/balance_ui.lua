@@ -177,7 +177,10 @@ end
 local function make_header(parent, cols)
   local header = parent.add { type = "frame", name = "ssk_bal_header", style = "ssk_balance_header", direction = "vertical" }
   header.style.width = cols.list_width
-  header.style.height = cols[1].details and 88 or 68
+  -- subheader_frame inherits a fixed 36 px height; two compact heading rows
+  -- need their own height so the text and divider stay above the scroller.
+  header.style.height = cols[1].details and 72 or 52
+  header.style.bottom_padding = 4
   -- A band brackets related columns without spending any extra list width.
   local groups = {}
   for _,col in ipairs(cols) do
@@ -190,6 +193,7 @@ local function make_header(parent, cols)
   local band=header.add {type="table",name="ssk_bal_column_groups",style="ssk_balance_grid",
     column_count=#groups,draw_vertical_lines=true}
   band.style.horizontal_spacing=0
+  band.style.top_cell_padding, band.style.bottom_cell_padding = 2, 2
   for _,g in ipairs(groups) do
     local title=g.id=="item" and "Item & status" or g.id=="stock" and "Chest stock"
       or cols[1].details and "Rates & utilisation" or "Production rates"
@@ -198,6 +202,7 @@ local function make_header(parent, cols)
     heading.style.horizontal_align="center"
   end
   local t = grid(header, "ssk_bal_columns", cols)
+  t.style.top_cell_padding, t.style.bottom_cell_padding = 2, 2
   for _, col in ipairs(cols) do
     local l = text(t, col.name, col.help, "bold_label")
     l.style.width = col.width

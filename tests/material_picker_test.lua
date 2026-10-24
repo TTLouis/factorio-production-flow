@@ -142,13 +142,15 @@ for i = 1, 30 do
     subgroup = { name = "modded-sub-" .. i, order = "a" } })
 end
 local MaterialPickerTest = TREQ("scripts.material_picker")
-MaterialPickerTest.open(player, "focus", nil)
+MaterialPickerTest.open(player, "focus", "item/wood")
 local dialog = player.gui.screen.ssk_material_picker
 local inner = dialog.ssk_material_inner
 local tab_count = #inner.ssk_group_scroll.ssk_groups.children
 assert(tab_count >= 31 and inner.ssk_group_scroll.ssk_groups.column_count == 6, "every modded group needs a tab, six per row")
-assert(inner.ssk_group_scroll.style.height == 4 * 71 and inner.ssk_group_scroll.style.width == 6 * 71 + 12,
-  "past four rows the group tabs must scroll beside a scrollbar")
+assert(inner.ssk_group_scroll.style.height == 4 * 65 and inner.ssk_group_scroll.style.width == 10 * 40 + 2,
+  "short material groups must not reserve an unused material scrollbar gutter")
+assert(inner.ssk_slot_frame.ssk_slot_scroll.vertical_scroll_policy == "auto",
+  "material scrollbars must only occupy space while needed")
 assert(results(dialog).column_count == 10 and inner.ssk_slot_frame.ssk_slot_scroll.style.height >= 4 * 40,
   "the grid must stay ten wide and keep at least four rows")
 MaterialPickerTest.close(player)

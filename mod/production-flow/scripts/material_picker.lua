@@ -2,10 +2,9 @@
 -- and native item slots. Its searchable contents include only items and fluids.
 local P = {}
 local NAME = "ssk_material_picker"
--- Same proportions as the base game's item selector: six square 71 px group tabs
--- per row over a ten-column slot grid. Tabs and grid share one width:
--- 6 * 71 = 7 + 10 * 40 + 12 (scrollbar) + 7.
-local COLUMNS, GROUP_COLUMNS, SLOT, TAB, SCROLLBAR, SIDE = 10, 6, 40, 71, 12, 7
+-- Six square category tabs over ten native slots. Only a one-pixel frame edge
+-- surrounds the grid; category padding must not create a spare strip beside it.
+local COLUMNS, GROUP_COLUMNS, SLOT, SCROLLBAR, SIDE = 10, 6, 40, 12, 1
 -- Mods can add any number of item groups: tabs wrap onto new rows and, past
 -- MAX_TAB_ROWS, the tab area scrolls so the grid keeps its space. The grid takes
 -- the remaining screen height, between MIN_ROWS and MAX_ROWS.
@@ -45,17 +44,26 @@ local function state(player)
   return s
 end
 
-local function fit(player, f, group_count)
+local function fit(player, f, group_count, material_rows)
   local inner = f.ssk_material_inner
   local tab_rows = math.max(1, math.ceil(group_count / GROUP_COLUMNS))
   local shown = math.min(tab_rows, MAX_TAB_ROWS)
-  local width = GROUP_COLUMNS * TAB + (tab_rows > MAX_TAB_ROWS and SCROLLBAR or 0)
-  inner.ssk_group_scroll.style.width, inner.ssk_group_scroll.style.height = width, shown * TAB
-  local slots = inner.ssk_slot_frame
-  slots.style.left_padding, slots.style.right_padding = SIDE, width - SIDE - COLUMNS * SLOT - SCROLLBAR
   local screen = math.floor(player.display_resolution.height / player.display_scale)
-  local rows = math.max(MIN_ROWS, math.min(MAX_ROWS, math.floor((screen - CHROME - shown * TAB) / SLOT)))
+  local function measure(scrollbar)
+    local width = COLUMNS * SLOT + (scrollbar and SCROLLBAR or 0) + 2 * SIDE
+    local tab_size = (width - (tab_rows > MAX_TAB_ROWS and SCROLLBAR or 0)) / GROUP_COLUMNS
+    local rows = math.max(MIN_ROWS, math.min(MAX_ROWS, math.floor((screen - CHROME - shown * tab_size) / SLOT)))
+    return width, tab_size, rows
+  end
+  -- Deep slot panes draw the scrollbar outside their fixed-width content. Do
+  -- not reserve that strip for a short category, such as the vanilla Fluids.
+  local width, tab_size, rows = measure(false)
+  if material_rows > rows then width, tab_size, rows = measure(true) end
+  inner.ssk_group_scroll.style.width, inner.ssk_group_scroll.style.height = width, shown * tab_size
+  local slots = inner.ssk_slot_frame
+  slots.style.left_padding, slots.style.right_padding = SIDE, SIDE
   slots.ssk_slot_scroll.style.height = rows * SLOT
+  return tab_size
 end
 
 -- Use the game's filter-group buttons and deep slot grid, populated exclusively
@@ -104,19 +112,6 @@ local function populate(player)
     for _, entry in ipairs(entries) do if entry.group == chosen_group then visible[#visible + 1] = entry end end
     entries = visible
   end
-  fit(player, f, #group_list)
-  local tabs = f.ssk_material_inner.ssk_group_scroll.ssk_groups
-  tabs.clear()
-  for _, group in ipairs(group_list) do
-    -- While searching, results span every group; groups without a match grey out.
-    local tab = tabs.add { type = "sprite-button", style = "filter_group_button_tab_slightly_larger", sprite = "item-group/" .. group.name,
-      toggled = query == "" and chosen_group == group.name, tooltip = group.localised_name or group.name,
-      tags = { ssk_picker = "group", group = group.name } }
-    tab.enabled = query == "" or matched[group.name] == true
-    tab.style.width, tab.style.height = TAB, TAB
-    -- 64 px left for the group icon, as in the vanilla tab
-    tab.style.left_padding, tab.style.right_padding, tab.style.top_padding, tab.style.bottom_padding = 3, 4, 4, 3
-  end
   local grid = f.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll.ssk_results
   grid.clear()
   local keys, last, occupied = {}, nil, 0
@@ -135,6 +130,19 @@ local function populate(player)
       tags = { ssk_picker = "pick", key = entry.key } }
     keys[#keys + 1] = entry.key
     occupied, last = occupied + 1, entry.subgroup
+  end
+  local tab_size = fit(player, f, #group_list, math.ceil(occupied / columns))
+  local tabs = f.ssk_material_inner.ssk_group_scroll.ssk_groups
+  tabs.clear()
+  for _, group in ipairs(group_list) do
+    local tab = tabs.add { type = "sprite-button", style = "filter_group_button_tab_slightly_larger", sprite = "item-group/" .. group.name,
+      toggled = query == "" and chosen_group == group.name, tooltip = group.localised_name or group.name,
+      tags = { ssk_picker = "group", group = group.name } }
+    tab.enabled = query == "" or matched[group.name] == true
+    tab.style.width, tab.style.height = tab_size, tab_size
+    local before = math.floor((tab_size - 64) / 2)
+    local after = tab_size - 64 - before
+    tab.style.left_padding, tab.style.right_padding, tab.style.top_padding, tab.style.bottom_padding = before, after, before, after
   end
   grid.tags = { keys = keys, total = total }
   f.ssk_count.caption = #entries == 0 and "No matching materials" or (#entries .. " materials")
@@ -204,7 +212,7 @@ function P.open(player, target, current)
   tabs.style.horizontal_spacing, tabs.style.vertical_spacing = 0, 0
   local slots = inner.add { type = "frame", name = "ssk_slot_frame", style = "filter_frame", direction = "vertical" }
   local scroll = slots.add { type = "scroll-pane", name = "ssk_slot_scroll", style = "deep_slots_scroll_pane",
-    horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
+    horizontal_scroll_policy = "never", vertical_scroll_policy = "auto" }
   scroll.style.width = COLUMNS * SLOT
   local grid = scroll.add { type = "table", name = "ssk_results", style = "filter_slot_table", column_count = COLUMNS }
   grid.style.horizontal_spacing, grid.style.vertical_spacing = 0, 0

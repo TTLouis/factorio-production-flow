@@ -176,14 +176,20 @@ right sound.
     reopening the window.
 17. The item/fluid picker copies the base game's item selector: the search field
     (`search_popup_textfield`) and a `utility/search` button in the title bar,
-    six `filter_group_button_tab_slightly_larger` group tabs per row (square,
-    71 px like the vanilla filter tab's width; further groups wrap onto a new
-    row), and a ten-column `filter_slot_table` in a `deep_slots_scroll_pane` inside
-    a `filter_frame`, padded so the grid and scrollbar match the tab row's
-    width. Mods may add any number of item groups: tabs wrap six per row, and
+    six square `filter_group_button_tab_slightly_larger` group tabs per row,
+    keeping the native 64 px icons, and a ten-column `filter_slot_table` in a
+    `deep_slots_scroll_pane` inside a `filter_frame`. The grid has a 1 px side
+    edge. Size the tabs to that same width, reserving their scrollbar inside
+    it when needed; do not add a spare strip beside the material grid.
+    The material scroller uses `auto`, without reserving an unused scrollbar
+    gutter; the category row fits the resulting width.
+    Mods may add any number of item groups: tabs wrap six per row, and
     past four rows the tab area scrolls so the grid keeps its space. The grid
     stays ten wide and takes the remaining screen height (4 to 12 rows). While
     searching, groups without a match are disabled.
+18. Balance's fixed table headings use 2 px top/bottom cell padding and a
+    compact 52 px height (72 px with Details). Keep the raised frame and bottom
+    divider, without adding blank height above or between the heading rows.
 
 ## Known exceptions to fix
 
