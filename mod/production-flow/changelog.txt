@@ -1,0 +1,12 @@
+---------------------------------------------------------------------------------------------------
+Version: 0.1.0
+Date: 2026-10-23
+  Features:
+    - First beta of Production Flow: Balance, Focus and Full Sankey views.
+    - Ten-minute default production history retained across saves.
+    - Item and fluid input inspection and selected-material consumption rates.
+    - Destination/source colors, highlighting, pinning, Fit and Center controls.
+    - Vertical-only Balance list with paired Details values and item-group dividers.
+  Info:
+    - Targets Factorio 2.1; tested on a Space Age save.
+    - MIT licensed. Charts describe recipe relationships, not transport routes.

@@ -1,0 +1,20 @@
+# Local runs, saves, build archives and private exports
+/tests/out/
+/tests/.runtime/
+/tests/data/
+/backups/
+/dist/
+/previews/
+/.playwright-cli/
+/.playwright/
+/release/
+__pycache__/
+*.pyc
+*.zip
+.env
+.env.*
+# Development history and review drafts remain local
+/docs/*
+!/docs/development.md
+!/docs/validation.md
+!/docs/screenshots/

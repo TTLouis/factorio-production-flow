@@ -1,0 +1,11 @@
+{
+  "name": "production-flow",
+  "version": "0.1.0",
+  "title": "Production Flow (Beta)",
+  "author": "TTLouis",
+  "factorio_version": "2.1",
+  "dependencies": [
+    "base >= 2.1"
+  ],
+  "description": "Measured production balances and interactive Sankey charts for items and fluids, with a 10-minute default history window."
+}

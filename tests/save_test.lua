@@ -1,0 +1,274 @@
+-- Injected into an isolated copy only. Never included in release packages.
+local T = {}
+local mode = require("scripts.save_test_mode")
+local SK = require("scripts.sankey_ui")
+local Model = require("scripts.model")
+local Diag = require("scripts.diag")
+local start, step, capture = nil, 0, nil
+local captures, skipped, products, usage_labels = {}, {}, {}, {}
+
+local cases = {
+  {name="nauvis-balance", surface="nauvis", tab="balance"},
+  {name="nauvis-overview", surface="nauvis", tab="sankey", view="overview"},
+  {name="nauvis-items", surface="nauvis", tab="sankey", view="detail"},
+  {name="nauvis-inputs", surface="nauvis", tab="balance", focus="item/iron-plate", depth=3},
+  {name="vulcanus-overview", surface="vulcanus", tab="sankey", view="overview"},
+  {name="fulgora-overview", surface="fulgora", tab="sankey", view="overview"},
+  {name="gleba-overview", surface="gleba", tab="sankey", view="overview"},
+  {name="aquilo-overview", surface="aquilo", tab="sankey", view="overview"},
+  {name="nauvis-focus", surface="nauvis", tab="focus", focus="item/electronic-circuit"},
+  {name="platform-overview", surface="platform-6", tab="sankey", view="overview"},
+  {name="nauvis-advanced", surface="nauvis", tab="sankey", view="overview", advanced=true},
+  {name="nauvis-sprites", surface="nauvis", tab="sankey", view="overview", renderer="sprites"},
+}
+if mode == "balance" then
+  cases = {
+    {name="balance-iron", surface="nauvis", tab="balance", focus="item/iron-plate", depth=3},
+    {name="balance-circuit", surface="nauvis", tab="balance", focus="item/electronic-circuit", depth=2},
+    {name="balance-steel", surface="nauvis", tab="balance", focus="item/steel-plate", depth=1},
+    {name="balance-condensation", surface="vulcanus", tab="balance", focus="fluid/water", depth=1},
+    {name="balance-steam", surface="vulcanus", tab="balance", focus="fluid/steam", depth=1},
+    {name="balance-acid", surface="vulcanus", tab="balance", focus="fluid/sulfuric-acid", depth=1},
+    {name="balance-molten-iron", surface="vulcanus", tab="balance", focus="fluid/molten-iron", depth=1},
+    {name="balance-lubricant", surface="vulcanus", tab="balance", focus="fluid/lubricant", depth=1},
+    {name="balance-petroleum", surface="nauvis", tab="balance", focus="fluid/petroleum-gas", depth=1},
+    {name="balance-ice-melting", surface="platform-6", tab="balance", focus="fluid/water", depth=1},
+    {name="balance-condensation-pinned", surface="vulcanus", tab="balance", focus="fluid/water", depth=1, pin="fluid/steam#input"},
+    {name="balance-condensation-proportional", surface="vulcanus", tab="balance", focus="fluid/water", depth=1, heights="linear"},
+  }
+end
+if mode == "full" then
+  cases={
+    {name="full-nauvis",surface="nauvis",tab="sankey",view="overview"},
+    {name="full-vulcanus",surface="vulcanus",tab="sankey",view="overview"},
+    {name="full-fulgora",surface="fulgora",tab="sankey",view="overview"},
+    {name="full-gleba",surface="gleba",tab="sankey",view="overview"},
+    {name="full-aquilo",surface="aquilo",tab="sankey",view="overview"},
+    {name="full-platform",surface="platform-6",tab="sankey",view="overview"},
+    {name="full-nauvis-oil",surface="nauvis",tab="sankey",view="detail",preset="super:oil"},
+    {name="full-vulcanus-oil",surface="vulcanus",tab="sankey",view="detail",preset="super:oil"},
+    {name="full-nauvis-items",surface="nauvis",tab="sankey",view="detail"},
+    {name="full-oil-pinned",surface="nauvis",tab="sankey",view="detail",preset="super:oil",pin="fluid/petroleum-gas"},
+    {name="full-nauvis-sprites",surface="nauvis",tab="sankey",view="overview",renderer="sprites"},
+    {name="full-nauvis-proportional",surface="nauvis",tab="sankey",view="overview",heights="linear"},
+    {name="focus-circuit",surface="nauvis",tab="focus",focus="item/electronic-circuit"},
+    {name="focus-condensation",surface="vulcanus",tab="focus",focus="fluid/water"},
+    {name="focus-petroleum",surface="nauvis",tab="focus",focus="fluid/petroleum-gas"},
+    {name="full-balance-regression",surface="vulcanus",tab="balance",focus="fluid/water",depth=1},
+    {name="balance-iron-usage",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1},
+    {name="balance-steam-usage",surface="vulcanus",tab="balance",focus="fluid/steam",depth=1},
+  }
+end
+
+if mode == "scroll" then
+  cases={
+    {name="balance-scroll-top",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1},
+    {name="balance-scroll-bottom",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,bottom=true},
+    {name="balance-scroll-details",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,bottom=true,details=true},
+    {name="balance-groups-top",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,groups=true},
+    {name="balance-groups-details",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,groups=true,details=true},
+    {name="balance-scroll-groups",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,bottom=true,groups=true},
+    {name="balance-beta-water",surface="vulcanus",tab="balance",focus="fluid/water",depth=1},
+  }
+end
+
+local function find_node(element)
+  if element.tags and element.tags.ssk_sk == "node" then return element end
+  for _, child in pairs(element.children) do
+    local found = find_node(child)
+    if found then return found end
+  end
+end
+
+local function find_action(element, action, key)
+  if element.tags and element.tags.ssk_sk==action and (not key or element.tags.key==key) then return element end
+  for _, child in pairs(element.children) do
+    local found=find_action(child,action,key); if found then return found end
+  end
+end
+
+local function find_scope(element)
+  if element.tags and element.tags.ssk_ui=="surface" then return element end
+  for _,child in pairs(element.children) do local found=find_scope(child); if found then return found end end
+end
+
+local function verify_usage(element, root, result)
+  local key=element.tags and element.tags.ssk_rate
+  if key and key:match("#use$") then
+    local node=find_action(root,"node",key)
+    assert(node.tooltip[9]==" consumed", "Uses tooltip lost selected material")
+    assert(element.caption==node.tooltip[6]:gsub("fluid units/s","fluid/s"), "Uses label still shows consumer output")
+    result[key]=element.caption
+  end
+  for _,child in pairs(element.children) do verify_usage(child,root,result) end
+end
+
+function T.tick(UI, Sampler)
+  start = start or game.tick
+  local elapsed = game.tick - start
+  if mode == "history" then
+    if elapsed == 0 then
+      game.speed = 64
+      for _, p in pairs(game.players) do UI.close(p) end
+      log("SANKEY SAVE START tick="..game.tick)
+    end
+    if elapsed % 3600 == 0 then log("SANKEY SAVE progress="..elapsed.."/36060") end
+    if elapsed == 36060 then
+      local report = {tick=game.tick, elapsed_ticks=elapsed, surfaces={}, mods=script.active_mods}
+      for _, s in pairs(game.surfaces) do
+        if s.name ~= "ssk-canvas" then
+          local rates, secs = Sampler.rates(s.index, 600)
+          assert(secs == 600, s.name.." history is "..secs.." seconds")
+          local m = Model.build(s.index, 600)
+          local n = 0; for _ in pairs(rates.recipes) do n=n+1 end
+          report.surfaces[#report.surfaces+1]={name=s.name, seconds=secs, recipes=n, edges=#m.edges}
+        end
+      end
+      helpers.write_file("save-test/history.json", helpers.table_to_json(report), false)
+      game.auto_save("sankey-warmed")
+      log("SANKEY SAVE HISTORY OK")
+    end
+    return
+  end
+  if elapsed == 0 then
+    game.speed = 1
+    local _, seconds = Sampler.rates(game.surfaces.nauvis.index, 600)
+    assert(seconds == 600, "Ten-minute history did not survive save/reload")
+    log("SANKEY SAVE RELOAD HISTORY OK")
+  end
+  if elapsed % 60 ~= 0 then return end
+  local player = game.connected_players[1]
+  assert(player, "Graphical test has no connected player")
+  if capture then
+    assert(player.gui.screen.ssk_main, "Missing native GUI")
+    player.gui.screen.ssk_main.bring_to_front()
+    if mode=="scroll" and cases[step].bottom then
+      -- Live sampling can reorder rows between setup and capture. Exercise the
+      -- current list after that refresh, immediately before engine rendering.
+      local root=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root
+      local sections=root.ssk_bal_items.children
+      local table=sections[#sections].ssk_bal_table
+      local rows=table.children
+      root.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
+    end
+    local usage={}
+    verify_usage(player.gui.screen.ssk_main,player.gui.screen.ssk_main,usage)
+    if next(usage) then usage_labels[capture]=usage end
+    local node = find_node(player.gui.screen.ssk_main)
+    if node then
+      assert(node.tooltip ~= nil, "Node has no tooltip")
+      assert(UI.on_hover({element=node, player_index=player.index}, true))
+      assert(UI.on_hover({element=node, player_index=player.index}, false))
+    end
+    -- The hidden native window can inherit the desktop cursor position. Clear
+    -- tooltip properties only after assertions so that incidental hover popups
+    -- do not cover the review captures. The next case reconstructs the GUI.
+    local function suppress_tooltips(el)
+      el.tooltip=nil
+      for _,child in pairs(el.children) do suppress_tooltips(child) end
+    end
+    suppress_tooltips(player.gui.screen.ssk_main)
+    game.take_screenshot{player=player, path="save-test/"..capture..".png",
+      resolution={1920,1080}, show_gui=true, force_render=true}
+    log("SANKEY SAVE captured="..capture)
+    captures[#captures+1] = capture
+    capture = nil
+    return
+  end
+  step = step+1
+  local c = cases[step]
+  if not c then
+    if step == #cases+1 then
+      Diag.export(player, "save-test")
+      helpers.write_file("save-test/gui.json", helpers.table_to_json({captures=captures, skipped=skipped, products=products, usage_labels=usage_labels}), false)
+      log("SANKEY SAVE GUI OK")
+    end
+    return
+  end
+  if not game.surfaces[c.surface] then
+    log("SANKEY SAVE skipped absent="..c.surface)
+    skipped[#skipped+1]=c.name
+    return
+  end
+  UI.open(player)
+  local us = storage.ui[player.index]
+  assert(us.period == 600, "10m is not the initial default")
+  us.surface, us.tab_id, us.view = c.surface, c.tab, c.view or "overview"
+  us.live, us.advanced = false, c.advanced or false
+  us.renderer = c.renderer or "poly"
+  if mode=="scroll" then
+    us.bal_filter="all"; us.bal_details=c.details or false; us.bal_sort=c.groups and "groups" or "priority"; us.bal_group=nil
+  end
+  if mode=="full" then
+    us.preset=c.preset or "all"; us.sel=nil; us.layout_snapshot=nil; us.auto_rank=nil
+    us.show_labels=true; us.heights=c.heights or "sqrt"; us.color_mode="destination"
+    us.layout="clean"; us.tier_mode="depth"; us.tier_lo=nil; us.tier_hi=nil
+  end
+  if c.tab == "balance" and c.focus then
+    local fx=SK.balance_state(us); fx.focus=c.focus; fx.input_depth=c.depth; fx.show_labels=true; fx.live=false
+    fx.heights=c.heights or "sqrt"; fx.pinned=nil; fx.color_mode="destination"
+    local rates, seconds=Sampler.rates(game.surfaces[c.surface].index,600)
+    local producers={}
+    for _,rn in ipairs(storage.graph.nodes[c.focus].producers) do
+      if rates.recipes[rn] and rates.recipes[rn].cps>0 then producers[rn]=rates.recipes[rn].cps end
+    end
+    products[c.name]={surface=c.surface,focus=c.focus,seconds=seconds,producers=producers}
+    if c.name=="balance-condensation" then assert(producers["steam-condensation"], "No measured steam condensation") end
+  elseif c.tab == "focus" then
+    local fx=SK.focus_state(us); fx.focus=c.focus; fx.live=false
+    if mode=="full" then fx.show_labels=true; fx.focus_steps=2; fx.layout_snapshot=nil; fx.auto_rank=nil end
+  end
+  UI.open(player)
+  assert(us.sidx==game.surfaces[c.surface].index,"Wrong rendered surface")
+  assert(us.surface_names[find_scope(player.gui.screen.ssk_main).selected_index]==c.surface,"Surface picker does not identify rendered surface")
+  if mode=="balance" or mode=="scroll" or (mode=="full" and c.tab~="focus") then
+    for _,action in ipairs({"center_selection","zoom_fit"}) do
+      local button=find_action(player.gui.screen.ssk_main,action)
+      assert(button, "Missing Balance action "..action)
+      UI.on_click({player_index=player.index,element=button})
+    end
+    if c.pin then
+      local target=find_action(player.gui.screen.ssk_main,"node",c.pin)
+      assert(target,"Missing pin target")
+      UI.on_click({player_index=player.index,element=target,shift=true})
+      assert((c.tab=="balance" and SK.balance_state(us).pinned or us.sel)==c.pin,"Native pin action failed")
+      local center=find_action(player.gui.screen.ssk_main,"center_selection")
+      UI.on_click({player_index=player.index,element=center})
+    end
+  end
+  if mode=="scroll" then
+    local left=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table
+    local root=left.ssk_bal_root
+    assert(left.type=="flow" and root.ssk_bal_items.type=="scroll-pane")
+    assert(root.ssk_bal_summary and root.ssk_bal_context and root.ssk_bal_count)
+    if c.bottom then
+      local sections=root.ssk_bal_items.children
+      local table=sections[#sections].ssk_bal_table
+      local rows=table.children
+      root.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
+    end
+  end
+  -- Native GUI identity check: a live refresh must retain the controls used by
+  -- open selectors, and a hovered node must survive until the pointer leaves.
+  local root=player.gui.screen.ssk_main
+  local function find_named(el,name)
+    if el.name==name then return el end
+    for _,child in pairs(el.children) do local x=find_named(child,name); if x then return x end end
+  end
+  local bar=find_named(root,"ssk_bar")
+  local control=bar.children[1]
+  local fx=c.tab=="balance" and SK.balance_state(us) or c.tab=="focus" and SK.focus_state(us) or us
+  local was_live=fx.live; fx.live=true
+  UI.refresh(player,true)
+  assert(control.valid and bar.children[1]==control,"Live refresh destroyed selector controls")
+  local node=find_node(root)
+  if node then
+    UI.on_hover({element=node,player_index=player.index},true)
+    UI.refresh(player,true)
+    assert(node.valid,"Live refresh destroyed hovered selection")
+    UI.on_hover({element=node,player_index=player.index},false)
+  end
+  fx.live=was_live
+  capture = c.name
+end
+return T
