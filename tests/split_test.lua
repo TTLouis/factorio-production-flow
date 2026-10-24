@@ -18,7 +18,7 @@ for _, size in ipairs({ { 1920, 1080 }, { 1366, 768 }, { 1280, 720 } }) do
     local t=table_root.ssk_bal_list.ssk_bal_items.ssk_bal_section_1.ssk_bal_table
     local used=(t.column_count-1)*t.style.horizontal_spacing+t.column_count*((t.style.left_cell_padding or 0)+(t.style.right_cell_padding or 0))
     for i=1,t.column_count do used=used+t.children[i].style.width end
-    assert(used==us.bal_width+4, "rows must fit within the list frame padding and reserved scrollbar")
+    assert(used+t.parent.style.right_padding==us.bal_width+4, "rows and right gutter must fit within the frame padding and reserved scrollbar")
     UI.on_click({ player_index = 1, element = { name = "x", tags = { ssk_ui = "focus_item", key = "item/electronic-circuit" } } })
     assert(us.tab_id == "balance" and table_root == split.ssk_balance_table.ssk_bal_root, "selection must preserve table and tab")
     for _, focus in ipairs({ "item/electronic-circuit", "item/iron-ore", "fluid/water", "fluid/petroleum-gas", "item/idle-test" }) do

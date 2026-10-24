@@ -1,6 +1,5 @@
--- Diagnostics: a mod log (ring buffer + script-output/production-flow/log.txt) and JSON exports.
---   script-output/production-flow/latest.json          auto every N minutes (setting) and on demand
---   script-output/production-flow/export-<tick>.json   on demand (/sankey-export, window button)
+-- Local diagnostic fixture, loaded only by offline/native test harnesses.
+-- Never packaged in the mod. Exports test snapshots for local replay and evidence.
 
 local Graph = require("scripts.graph")
 local Sampler = require("scripts.sampler")
@@ -196,13 +195,6 @@ function D.export(player, reason)
     helpers.write_file(name, json, false, pi)
     if player then player.print("[Production Flow] Exported diagnostics to script-output/" .. name) end
   end
-end
-
-function D.auto(tick)
-  local mins = settings.global["ssk-auto-export-minutes"].value
-  if mins <= 0 then return end
-  if tick % (mins * 3600) ~= 0 then return end
-  D.export(nil, "auto")
 end
 
 return D

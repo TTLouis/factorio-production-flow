@@ -2,9 +2,9 @@
 -- and native item slots. Its searchable contents include only items and fluids.
 local P = {}
 local NAME = "ssk_material_picker"
--- Six square category tabs over ten native slots. Only a one-pixel frame edge
--- surrounds the grid; category padding must not create a spare strip beside it.
-local COLUMNS, GROUP_COLUMNS, SLOT, SCROLLBAR, SIDE = 10, 6, 40, 12, 1
+-- Keep the native filter-frame side insets. The right inset becomes the
+-- scrollbar rail when needed, rather than adding a second gutter beside it.
+local COLUMNS, GROUP_COLUMNS, SLOT, SCROLLBAR, SIDE = 10, 6, 40, 12, 12
 -- Mods can add any number of item groups: tabs wrap onto new rows and, past
 -- MAX_TAB_ROWS, the tab area scrolls so the grid keeps its space. The grid takes
 -- the remaining screen height, between MIN_ROWS and MAX_ROWS.
@@ -49,19 +49,20 @@ local function fit(player, f, group_count, material_rows)
   local tab_rows = math.max(1, math.ceil(group_count / GROUP_COLUMNS))
   local shown = math.min(tab_rows, MAX_TAB_ROWS)
   local screen = math.floor(player.display_resolution.height / player.display_scale)
-  local function measure(scrollbar)
-    local width = COLUMNS * SLOT + (scrollbar and SCROLLBAR or 0) + 2 * SIDE
-    local tab_size = (width - (tab_rows > MAX_TAB_ROWS and SCROLLBAR or 0)) / GROUP_COLUMNS
-    local rows = math.max(MIN_ROWS, math.min(MAX_ROWS, math.floor((screen - CHROME - shown * tab_size) / SLOT)))
-    return width, tab_size, rows
-  end
-  -- Deep slot panes draw the scrollbar outside their fixed-width content. Do
-  -- not reserve that strip for a short category, such as the vanilla Fluids.
-  local width, tab_size, rows = measure(false)
-  if material_rows > rows then width, tab_size, rows = measure(true) end
+  -- Keep the content width fixed, like vanilla logistics sections. The deep
+  -- slot pane adds its scrollbar outside the grid only while it is needed.
+  local width = COLUMNS * SLOT + 2 * SIDE
+  local tab_width = width - (tab_rows > MAX_TAB_ROWS and SCROLLBAR or 0)
+  local tab_size = math.floor(tab_width / GROUP_COLUMNS)
+  local rows = math.max(MIN_ROWS, math.min(MAX_ROWS, math.floor((screen - CHROME - shown * tab_size) / SLOT)))
   inner.ssk_group_scroll.style.width, inner.ssk_group_scroll.style.height = width, shown * tab_size
+  local spare = tab_width - GROUP_COLUMNS * tab_size
+  local tabs = inner.ssk_group_scroll.ssk_groups
+  tabs.style.left_margin, tabs.style.right_margin = math.floor(spare / 2), math.ceil(spare / 2)
   local slots = inner.ssk_slot_frame
-  slots.style.left_padding, slots.style.right_padding = SIDE, SIDE
+  slots.style.left_padding = SIDE
+  slots.style.right_padding = material_rows > rows and 0 or SIDE
+  slots.style.width = width
   slots.ssk_slot_scroll.style.height = rows * SLOT
   return tab_size
 end

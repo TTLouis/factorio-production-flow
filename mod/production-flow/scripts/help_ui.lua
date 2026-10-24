@@ -24,7 +24,7 @@ local topics={
     {"Utilisation", "Estimated utilisation compares recorded normal crafts with current crafting capacity from machine speed and recipe time. Changing machines, recipes or modules can make historical utilisation exceed 100%. Check inputs, power, transport, output space and demand before treating an alert as a diagnosis."},
     {"Links versus totals", "Recipe links are estimated from completed crafts, ingredients, productivity and expected product yields. They can differ from production-statistic totals. Grey ends represent sources or uses outside the drawn connections, such as mining, fuel, labs or filtered activity."},
     {"Widths, colors and navigation", "Compressed widths use a square-root scale; Proportional uses rate-based widths. Fluids have a separate visual scale and thin flows have a minimum thickness. Widths across materials are not a mass balance. Colors can follow destinations or sources. Hover highlights connections; click to inspect or select, and Shift-click pins a Balance chain. Fit and Center help navigate; dense charts still scroll."},
-    {"Scope and diagnostics", "Each view covers one surface. Interplanetary shipments and physical belt or pipe routes are not traced. Diagnostic exports are local files under script-output/production-flow. Automatic exports are optional and off by default for new installations."},
+    {"Scope", "Each view covers one surface. Interplanetary shipments and physical belt or pipe routes are not traced."},
   }},
 }
 function H.close(player)

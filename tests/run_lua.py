@@ -14,7 +14,7 @@ except ImportError:
 
 lua = LuaRuntime()
 check = lua.eval("function(s,n) local f,e=load(s,n); if not f then error(e) end end")
-paths = sorted(MOD.rglob("*.lua")) + sorted(TESTS.glob("*.lua"))
+paths = sorted(MOD.rglob("*.lua")) + sorted(TESTS.glob("*.lua")) + sorted((TESTS / "development").glob("*.lua"))
 for path in paths:
     check(path.read_text(encoding="utf-8"), str(path))
 print(f"Syntax OK: {len(paths)} Lua files", flush=True)

@@ -88,7 +88,7 @@ local root = new_elem({ type = "flow" })
 local W, H = tonumber(os.getenv("W") or "3296"), tonumber(os.getenv("H") or "1060")
 SK.fill(player, root, us, W, H, true)
 local function find(el, name) if el.name == name then return el end for _, c in ipairs(el.children) do local r = find(c, name) if r then return r end end end
-print(find(root, "ssk_info").caption)
+print("Replay canvas rendered")
 local cv = find(root, "ssk_canvas")
 local f = io.open(OUT, "w")
 f:write(string.format("canvas %d %d 0\n", cv.style.width, cv.style.height))

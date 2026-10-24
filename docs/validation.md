@@ -1,6 +1,40 @@
-# Unreleased: configurable stock cooldown
+# Local 0.1.3 candidate
 
-The development branch has not been published or version-bumped.
+Version 0.1.3 is prepared locally and has not been published. The current UI
+preview covers selector margins with and without a scrollbar, settings fly-out
+bottom spacing, fixed Balance headings and Focus navigation at **100% only**.
+See the [candidate UI previews](ui-preview-0.1.3.md).
+
+The Lua regression suite and 19 offline publisher tests pass. Native Factorio
+2.1.23 checks pass with 25 captures (scroll and picker) at 100%, no skipped cases, and the configuration
+event recording **0.1.0 → 0.1.3**. The saved ten-minute history survives the upgrade.
+A direct 0.1.2 → 0.1.3 upgrade was not separately exercised.
+
+Candidate `dist/production-flow_0.1.3.zip` SHA256:
+`ca2d586588c681c50a33afa51c8792df1f5531884d5d5fb370d3523a9573e312`
+
+All 31 archive members match the final source. Runtime code and assets match the
+native-tested source exactly; only changelog.txt was updated afterward to record
+the approved heading and scrollbar refinements. The manifest, LICENSE, changelog
+and 512 px thumbnail validate. Test hooks and development tools
+are excluded. The six candidate gallery images match the native captures. Original
+save/profile hashes and the published 0.1.2 archive remain unchanged. Following
+the approved UI work, development tabs, test commands, export settings, logging
+and renderer comparisons were removed from the runtime and validated again.
+Standalone helpers remain under `tests/development/` and are injected only into
+private test copies. Balance now has one aligned column-heading row and an 8 px
+gutter before the scrollbar, checked in normal, Details and grouped views.
+The native run asserts that the shipped command/settings
+surface contains no development entries and that only three tabs remain.
+The final ZIP differs from the native test archive only in changelog.txt and ZIP
+entry order; no runtime code changed after native validation. Native harness checks invoke GUI handlers rather than
+physically clicking every control.
+
+This candidate is committed locally for release preparation and remains unpublished.
+No release tag, push or publishing workflow was created. No fresh UPS benchmark was run for
+these UI changes; the stock measurements below are historical.
+
+# Configurable stock cooldown — historical measurements
 
 Chest sampling waits for a configurable interval after a completed scan before
 starting another: a runtime-global map setting, minimum 1 minute and default 5.
@@ -49,9 +83,9 @@ with about 0.923 ms in the earlier high-cadence 0.1.2 test below. Individual act
 scan ticks still perform the same bounded work; the cooldown reduces average load.
 
 Local evidence: `tests/out/stock-cooldown-20261024/results.json` and raw native
-logs with completion timestamps. Stock and Balance source hashes match the
-benchmarked code. A subsequent help-text punctuation correction does not affect
-those paths; final native captures use the packaged help text.
+logs with completion timestamps. The recorded source hashes identify the code
+used for those measurements. Balance UI code has since changed for 0.1.3;
+these historical results are not performance measurements of its final UI.
 
 # Beta 0.1.2 validation
 

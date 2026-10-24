@@ -1,4 +1,4 @@
--- M0 render test (fake graph). Opened from the main window or /sankey-test [margin|screen]
+-- Local M0 rendering fixture, loaded directly by tests; never packaged in the mod.
 --   margin : ribbons placed inside a scroll-pane canvas with negative margins (primary approach)
 --   screen : ribbons as screen-level elements with absolute `location` (fallback approach)
 -- Hover a node icon to highlight its ribbons.

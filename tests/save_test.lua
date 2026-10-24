@@ -88,6 +88,7 @@ if mode == "picker" then
   cases={
     {name="picker-balance-browse",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,query=""},
     {name="picker-fluid-group",surface="nauvis",tab="balance",focus="fluid/water",depth=1,query="",group_material="fluid/water"},
+    {name="picker-scroll-results",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,query="e",expect_scroll=true},
     {name="picker-balance-catalog",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,query="iron"},
     {name="picker-balance-history",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water"},
     {name="picker-balance-groups",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water",groups=true,
@@ -102,6 +103,7 @@ if mode == "picker" then
     {name="picker-focus-wood-empty",surface="nauvis",tab="focus",focus="item/electronic-circuit",pick="item/wood",stay_pick=true},
     {name="picker-focus-six-visits",surface="nauvis",tab="focus",focus="item/electronic-circuit",pick="item/wood",six_visits=true},
     {name="picker-full-controls",surface="nauvis",tab="sankey",view="detail"},
+    {name="picker-full-settings",surface="nauvis",tab="sankey",view="detail",advanced=true},
   }
 end
 
@@ -322,7 +324,7 @@ function T.tick(UI, Sampler)
   if not c then
     if step == #cases+1 then
       Diag.export(player, "save-test")
-      helpers.write_file("save-test/gui.json", helpers.table_to_json({captures=captures, skipped=skipped, products=products, usage_labels=usage_labels, display_scale=player.display_scale, display_resolution=player.display_resolution}), false)
+      helpers.write_file("save-test/gui.json", helpers.table_to_json({captures=captures, skipped=skipped, products=products, usage_labels=usage_labels, display_scale=player.display_scale, display_resolution=player.display_resolution, upgrade=storage.ssk_save_test_upgrade}), false)
       log("SANKEY SAVE GUI OK")
     end
     return
@@ -333,6 +335,9 @@ function T.tick(UI, Sampler)
     return
   end
   UI.open(player)
+  assert(not commands.commands["sankey-export"] and not commands.commands["sankey-probe"] and not commands.commands["sankey-test"],"Release has development commands")
+  assert(not settings.global["ssk-auto-export-minutes"] and not player.mod_settings["ssk-debug-tabs"],"Release has development settings")
+  assert(#player.gui.screen.ssk_main.ssk_inner.ssk_tabs.tabs==3,"Release must have only Balance, Focus and Full Sankey")
   local us = storage.ui[player.index]
   assert(us.period == 600, "10m is not the initial default")
   us.surface, us.tab_id, us.view = c.surface, c.tab, c.view or "overview"
@@ -426,7 +431,20 @@ function T.tick(UI, Sampler)
     local left=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table
     local root=left.ssk_bal_root
     assert(left.type=="flow" and root.ssk_bal_list.ssk_bal_items.type=="scroll-pane")
-    assert(root.ssk_bal_summary and root.ssk_bal_context and root.ssk_bal_controls.ssk_bal_refresh and not root.ssk_bal_footer)
+    assert(root.ssk_bal_summary and not root.ssk_bal_context and root.ssk_bal_controls.ssk_bal_refresh and not root.ssk_bal_footer)
+    local heading=root.ssk_bal_list.ssk_bal_header
+    assert(not heading.ssk_bal_column_groups,"Redundant upper column headings remain")
+    local columns=heading.ssk_bal_columns
+    for _,section in ipairs(root.ssk_bal_list.ssk_bal_items.children) do
+      local rows=section.ssk_bal_table
+      if rows then
+        assert(section.style.right_padding>=8,"Last column is too close to the scrollbar")
+        assert(rows.column_count==columns.column_count,"Header and rows have different columns")
+        for i,column in ipairs(columns.children) do
+          assert(column.style.minimal_width==rows.children[i].style.minimal_width,"Header and row column widths differ")
+        end
+      end
+    end
     if c.bottom then
       local sections=root.ssk_bal_list.ssk_bal_items.children
       local table=sections[#sections].ssk_bal_table
@@ -517,6 +535,11 @@ function T.tick(UI, Sampler)
     end
     dialog.ssk_title.ssk_query.text=c.query or c.pick:match("/(.+)$"):gsub("%-"," ")
     UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
+    if c.expect_scroll then
+      local scroll=dialog.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll
+      assert(math.ceil(#grid.children/grid.column_count)*40 > scroll.style.minimal_height,
+        "Scrollbar reference case must contain more rows than fit")
+    end
     if c.pick then
       local function material_button(el)
         if el.tags.ssk_picker=="pick" and el.tags.key==c.pick then return el end
@@ -589,7 +612,7 @@ function T.tick(UI, Sampler)
       local chart=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus
       assert(not find_action(chart,"f_back") and not find_action(chart,"f_history"),"Balance chart must not show Focus history")
       local context=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root.ssk_bal_context
-      assert(not context.visible,"Balance list must not repeat the surface and period")
+      assert(not context,"Balance list must not repeat the surface and period")
     end
     if c.recent then
       local period=find_ui(root,"period");period.selected_index=1
@@ -608,7 +631,7 @@ function T.tick(UI, Sampler)
     end
     if mode=="warmup" then
       assert(root.ssk_window_bar.ssk_history.visible,"Fresh-install history indicator missing")
-      assert(settings.global["ssk-auto-export-minutes"].value==0,"Fresh installs must not export automatically")
+      assert(not settings.global["ssk-auto-export-minutes"],"Release must not declare development export settings")
     end
   end
   capture = c.name

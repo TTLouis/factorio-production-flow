@@ -103,12 +103,19 @@ def install_hook(stage, phase):
     manifest['candidate_sha256'] = digest(package)
     (stage / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     shutil.copyfile(ROOT / 'tests/save_test.lua', target / 'scripts/save_test.lua')
+    shutil.copyfile(ROOT / 'tests/development/diag.lua', target / 'scripts/diag.lua')
     (target / 'scripts/save_test_mode.lua').write_text(f'return "{phase}"\n', encoding='utf-8')
     control = (source / 'control.lua').read_text(encoding='utf-8')
     needle = '  Sampler.on_tick(e.tick)'
     assert control.count(needle) == 1
     control = 'local SaveTest = require("scripts.save_test")\n' + control.replace(
         needle, needle + '\n  SaveTest.tick(UI, Sampler)')
+    config = 'script.on_configuration_changed(function()'
+    assert control.count(config) == 1
+    control = control.replace(config, 'script.on_configuration_changed(function(event)\n'
+        '  storage.ssk_save_test_upgrade = event.mod_changes and event.mod_changes["production-flow"]\n'
+        '  local change = storage.ssk_save_test_upgrade\n'
+        '  if change then log("SANKEY SAVE UPGRADE: " .. tostring(change.old_version) .. " -> " .. tostring(change.new_version)) end')
     (target / 'control.lua').write_text(control, encoding='utf-8')
 
 
@@ -117,7 +124,7 @@ def run(stage, args, phase):
     active_mods = stage / 'mods'
     if phase == 'warmup':
         # A fresh installation must not inherit this stage's older saved
-        # diagnostic-export preference. Keep those settings intact for reload tests.
+        # mod settings. Keep those settings intact for reload tests.
         active_mods = stage / 'warmup-mods' / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
         shutil.copytree(stage / 'mods/production-flow', active_mods / 'production-flow')
         shutil.copyfile(stage / 'mods/mod-list.json', active_mods / 'mod-list.json')

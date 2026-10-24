@@ -9,7 +9,7 @@ local function find(el, pred, out)
   return out
 end
 local function canvas() return find(player.gui.screen, function(e) return e.name == "ssk_canvas" end)[1] end
-local function info() return find(player.gui.screen, function(e) return e.name == "ssk_info" end)[1].caption end
+local function info() local L=TREQ("scripts.view").build(player,storage.ui[1],1200,800);return string.format("%d flows · %.0f s recorded",#L.links,L.seconds) end
 local function dumpc(path)
   local cv = canvas(); local f = io.open(path, "w")
   f:write(string.format("canvas %d %d 0\n", cv.style.width, cv.style.height))

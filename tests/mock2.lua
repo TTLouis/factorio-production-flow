@@ -137,6 +137,8 @@ commands = { add_command = function(n, h, f) handlers["cmd_" .. n] = f end }
 
 dofile(TESTDIR .. "/render_mock.lua")
 dofile("control.lua")
+local Diag = dofile(TESTDIR .. "/development/diag.lua")
+local RenderTest = dofile(TESTDIR .. "/development/render_test.lua")
 local real_require = require
 require = function(name) error("Require can't be used outside of control.lua parsing (" .. name .. ")", 2) end
 TREQ = function(name) return package.loaded[name] or real_require(name) end
@@ -187,13 +189,13 @@ local r = m.residuals["item/iron-plate"]
 print(string.format("iron-plate: prod %.3f measIn %.3f otherSrc %.3f | cons %.3f measOut %.3f otherSink %.3f",
   r.prod, r.meas_in, r.other_src, r.cons, r.meas_out, r.other_sink))
 
--- exercise the UI: open, every tab, lookup, checkbox, render test, close
+-- Exercise the release UI, including saved preferences from old development builds.
 local UI = TREQ("scripts.ui")
 handlers.on_gui_click({ element = player.gui.top.ssk_toggle, player_index = 1 })
 local win = player.gui.screen.ssk_main; assert(win, "window not open")
 assert(storage.ui[1].tab_id == "balance", "balance should be the default tab")
 assert(storage.ui[1].period == 600, "10 minutes should be the default period")
-for _, id in ipairs({ "balance", "focus", "sankey", "graph", "sampler", "model", "render" }) do
+for _, id in ipairs({ "balance", "focus", "sankey" }) do
   storage.ui[1].tab_id = id; local before = LABELS; UI.refresh(player)
   if id == "balance" then
     assert(win.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root, "balance content missing")
@@ -201,8 +203,13 @@ for _, id in ipairs({ "balance", "focus", "sankey", "graph", "sampler", "model",
     assert(LABELS > before, "tab " .. id .. " rendered nothing")
   end
 end
-storage.ui[1].lookup = { type = "item", name = "iron-plate" }; storage.ui[1].tab_id = "graph"; UI.refresh(player)
-storage.ui[1].tab_id = "model"; UI.refresh(player)
+assert(#win.ssk_inner.ssk_tabs.children == 6, "Release must only have three tabs even with old debug preference")
+for _, name in ipairs({"sankey-test", "sankey-probe", "sankey-export"}) do
+  assert(not handlers["cmd_"..name], "Release registered development command: "..name)
+end
+assert(not nth[3600] and not next(WRITES), "Release scheduled diagnostic exports or wrote diagnostic files")
+storage.ui[1].tab_id="graph"; UI.open(player)
+assert(storage.ui[1].tab_id=="balance", "Old development tab must fall back to Balance")
 -- observation periods
 local Sampler = TREQ("scripts.sampler")
 local live = Sampler.rates(1, 0)
@@ -221,18 +228,15 @@ local g = storage.graph
 print("eras:", g.nodes["item/inserter"].era, g.nodes["item/logistic-science-pack"].era, g.nodes["item/plastic-bar"].era, g.nodes["item/uranium-238"].era)
 print("depth:", g.nodes["item/iron-plate"].depth, g.nodes["item/electronic-circuit"].depth, g.nodes["item/inserter"].depth, g.nodes["item/logistic-science-pack"].depth)
 assert(g.nodes["item/inserter"].era == 1 and g.nodes["item/plastic-bar"].era == 2 and g.nodes["item/uranium-238"].era == 2)
-handlers.on_gui_click({ element = { valid = true, name = "x", tags = { ssk_ui = "rt_margin" } }, player_index = 1 })
-assert(player.gui.screen.ssk_test_frame, "render test not open")
-handlers.on_gui_click({ element = { valid = true, name = "x", tags = { ssk_rt = "mode" } }, player_index = 1 })
-handlers.on_gui_click({ element = { valid = true, name = "x", tags = { ssk_rt = "randomize" } }, player_index = 1 })
-handlers["cmd_sankey-probe"]({ player_index = 1 })
-for _, mm in ipairs(machines) do mm.force = FORCE end; player.selected = machines[1]; handlers["cmd_sankey-probe"]({ player_index = 1 })
-for t = game.tick + 1, game.tick + 601 do game.tick = t; machines[1].products_finished = machines[1].products_finished + (t % 96 == 0 and 1 or 0); handlers.on_tick({ tick = t }) end
+-- Standalone development helpers remain usable outside the release runtime.
+RenderTest.open(player,"margin")
+assert(player.gui.screen.ssk_test_frame, "Local render fixture did not open")
+RenderTest.on_click({element={valid=true,tags={ssk_rt="mode"}},player_index=1})
+RenderTest.on_click({element={valid=true,tags={ssk_rt="randomize"}},player_index=1})
+RenderTest.on_closed({element=player.gui.screen.ssk_test_frame,player_index=1})
 handlers.cc()
-handlers["cmd_sankey-export"]({ player_index = 1 })
-nth[3600]({ tick = 18000 })
-for n, d in pairs(WRITES) do print("WROTE", n, #d) end
-local f = io.open(TESTDIR .. "/out/latest.json", "w"); f:write(WRITES["production-flow/latest.json"]); f:close()
+Diag.export(player,"manual")
+local f=io.open(TESTDIR .. "/out/latest.json","w");f:write(WRITES["production-flow/latest.json"]);f:close()
 dofile(TESTDIR .. "/sk_test.lua")
 dofile(TESTDIR .. "/bal_test.lua")
 dofile(TESTDIR .. "/groups_test.lua")

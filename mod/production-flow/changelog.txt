@@ -1,4 +1,27 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.1.3
+Date: 2026-10-24
+  Features:
+    - Choose items and fluids in one searchable icon selector, with familiar item categories and a Fluids section.
+    - Add item and group favourites to Balance, with Underproducing, OK and Overproducing summary columns.
+    - Add Focus Back/Forward navigation, six-material Last visits, a clickable trail and Clear history.
+    - Make the chest-stock scan cooldown configurable: minimum 1 game minute, default 5 minutes after each completed scan.
+  Changes:
+    - Use compact vanilla-style controls, with zoom and labels kept visible and other chart settings in a gear fly-out.
+    - Use one fixed Balance heading row aligned with the data, removing the upper category headings.
+    - Add space between Empty in and the scrollbar while retaining framed list boundaries and aligned Details.
+    - Move Refresh table into the Balance header and remove the footer counters.
+    - Keep selector side margins, use the right margin for its scrollbar, and restore chart-settings bottom spacing.
+    - Exclude signal-only categories, blueprint parameters and hidden entries from material selection.
+    - Remove development tabs, renderer comparison controls, test commands and diagnostic exports from the release.
+  Optimizations:
+    - Wait for the configured cooldown after each complete chest scan while retaining the 32-entry-per-tick budget.
+    - Apply interval changes live without restarting an active scan.
+  Bugfixes:
+    - Show an empty Focus result for an unrecorded material instead of an unrelated full-factory chart.
+    - Preserve the Balance list and scroll position when inspecting a row after live values change.
+    - Correct oversized navigation arrows, clipped selector scrollbars and settings fly-out frame spacing.
+---------------------------------------------------------------------------------------------------
 Version: 0.1.2
 Date: 2026-10-24
   Optimizations:

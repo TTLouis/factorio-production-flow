@@ -5,9 +5,11 @@
 Production Flow shows what your factory makes, what it consumes, and how recipes
 connect on the selected surface. Public beta: **0.1.2**, by **TTLouis**.
 
-**Unreleased development:** `main` includes a configurable chest-stock cooldown (1-minute minimum, 5-minute default),
-stock sample age and revised help. These changes are not in the published 0.1.2
-archive; see [the development changelog](CHANGELOG.md).
+**Local 0.1.3 candidate:** compact chart controls, a combined item/fluid icon
+selector, Focus navigation, Balance favourites and framed headings, plus the
+configurable chest-stock cooldown (1-minute minimum, 5-minute default).
+It has not been published; the public download remains 0.1.2.
+See [candidate UI previews](docs/ui-preview-0.1.3.md) and [the changelog](CHANGELOG.md).
 
 ## Views
 
@@ -24,14 +26,16 @@ navigation and readability improvements, especially on dense factories.
 
 Destination/source colors, hover highlighting, pinned selections, optional labels,
 Fit and Center help you explore the charts. Automatic updates preserve selectors and
-row positions; use **Update list** to reapply list ordering and filters. The **?**
+row positions; use the **Refresh table** icon to reapply list ordering and filters. The **?**
 button opens in-game help for controls, calculations, alerts and stock. **Recent**
 sets a short averaging period; **Auto-update chart** only controls chart redraws.
 The default measurement window is
 **10 minutes**. History survives saves; new installations show a warm-up indicator as it accumulates.
 
-![Balance item groups](docs/screenshots/02-balance-groups.png)
-![Full Sankey overview](docs/screenshots/04-full-nauvis.png)
+**0.1.3 candidate UI:**
+
+![Balance summaries, fixed headings and compact controls](docs/screenshots/24-balance-controls.png)
+![Focus navigation and material history](docs/screenshots/27-focus-navigation.png)
 
 ## Install
 

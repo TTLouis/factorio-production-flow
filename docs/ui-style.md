@@ -174,22 +174,30 @@ right sound.
     corner. It takes no layout height, so the chart never moves. Clicking the
     gear again, the close button or Esc closes it; so do tab changes and
     reopening the window.
+    Include the native 4 px spacing between title and content when calculating
+    the overlay height. Its bottom padding also accounts for the inner frame's
+    8 px outer graphic and leaves an 8 px visible inset below it.
 17. The item/fluid picker copies the base game's item selector: the search field
     (`search_popup_textfield`) and a `utility/search` button in the title bar,
     six square `filter_group_button_tab_slightly_larger` group tabs per row,
     keeping the native 64 px icons, and a ten-column `filter_slot_table` in a
-    `deep_slots_scroll_pane` inside a `filter_frame`. The grid has a 1 px side
-    edge. Size the tabs to that same width, reserving their scrollbar inside
-    it when needed; do not add a spare strip beside the material grid.
+    `deep_slots_scroll_pane` inside a `filter_frame`. Restore the native 12 px
+    left and right side insets. The right inset becomes the scrollbar rail
+    when scrolling is needed, instead of leaving a second gap beside it.
     The material scroller uses `auto`, without reserving an unused scrollbar
-    gutter; the category row fits the resulting width.
+    gutter. Keep the grid and category content width fixed; let the native deep
+    slot pane add its scrollbar outside the grid only when needed, as vanilla
+    logistics sections do. Category buttons must not resize on group changes.
+    Keep the parent frame width fixed and remove only its right padding while
+    the outside scrollbar is visible, so the scrollbar occupies that margin.
     Mods may add any number of item groups: tabs wrap six per row, and
     past four rows the tab area scrolls so the grid keeps its space. The grid
     stays ten wide and takes the remaining screen height (4 to 12 rows). While
     searching, groups without a match are disabled.
-18. Balance's fixed table headings use 2 px top/bottom cell padding and a
-    compact 52 px height (72 px with Details). Keep the raised frame and bottom
-    divider, without adding blank height above or between the heading rows.
+18. Balance's fixed table headings use one row, with 2 px top/bottom cell
+    padding and a compact 32 px height (52 px with Details). Keep the raised frame
+    and bottom divider. Do not add an upper category-heading band. Header and row
+    cells share the same widths; reserve an 8 px gutter before the scrollbar.
 
 ## Known exceptions to fix
 

@@ -178,10 +178,6 @@ local function hint(parent, caption, width)
   return l
 end
 
-local function developer_controls(player)
-  return player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value
-end
-
 -- Controls shared by the Balance chart, Focus and Full Sankey toolbars. Each one
 -- has the same caption, order, width and tooltip wherever it appears.
 -- Toolbar strip spacing, the same on every chart: 12 px at the sides, 8 px above,
@@ -230,11 +226,6 @@ local function lines_picker(row, us)
     "Right angles: steep ribbons run vertically and cross others at 90°.")
 end
 
-local function renderer_picker(row, us)
-  return dropdown(row, "Renderer:", { "GUI sprites", "Polygons (beta)" }, us.renderer == "poly" and 2 or 1, "f_renderer",
-    "Compare the same routes: atlas sprites, or one polygon mesh per ribbon drawn on a hidden surface and shown through a camera.")
-end
-
 local function zoom_buttons(row, compact)
   button(row, "−", "zoom_out", "Zoom out")
   button(row, "Fit", "zoom_fit", "Fit the chart to the window while keeping icons and text readable; dense charts keep scrolling.")
@@ -259,6 +250,9 @@ local function settings_panel(c, us, L, player, W, viewH)
   if not us.settings_open then return end
   local full = us.view ~= "focus"
   local panel = c.add { type = "frame", name = "ssk_settings", style = "frame", direction = "vertical" }
+  -- The inner frame draws 8 px outside its bounds. Leave another 8 px visible
+  -- below that graphic, matching the outer frame's side inset.
+  panel.style.bottom_padding = 16
   local title = panel.add { type = "flow", direction = "horizontal" }
   title.style.vertical_align = "center"
   title.style.height = 24
@@ -334,12 +328,9 @@ local function settings_panel(c, us, L, player, W, viewH)
   reflow_button(actions)
   button(actions, "Unpin", "unpin", full and "Clear the pinned highlight. Click a node to pin one." or "Clear the pinned chain highlight")
   if full then button(actions, "Reset layout", "reset_layout", "Forget manual ordering, hidden items and collapsed groups") end
-  if developer_controls(player) then
-    picker("Renderer:", { "GUI sprites", "Polygons (beta)" }, us.renderer == "poly" and 2 or 1, "f_renderer",
-      "Compare the same routes: atlas sprites, or one polygon mesh per ribbon drawn on a hidden surface and shown through a camera.")
-  end
-  -- frame: 4 top + 24 title + 8 + inner (12 + rows + 12) + 8 bottom
-  local width, height = full and 360 or 330, 4 + 24 + 8 + 24 + rows * 28 + (rows - 1) * 8 + 8
+  -- Include the native 4 px gap between the title and content, so the inner
+  -- frame and last controls stay inside the outer frame's bottom padding.
+  local width, height = full and 360 or 330, 4 + 24 + 8 + 4 + 24 + rows * 28 + (rows - 1) * 8 + 16
   local top = -viewH + 8
   panel.style.width, panel.style.height = width, height
   panel.style.left_margin = math.max(0, W - width - 24)
@@ -822,9 +813,6 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   if full or not c.ssk_sp then
     c.clear()
     c.add { type = "scroll-pane", name = "ssk_bar", style = "naked_scroll_pane", horizontal_scroll_policy = "auto", vertical_scroll_policy = "auto" }
-    local info = c.add { type = "label", name = "ssk_info" }
-    info.style.font = "default-small"
-    info.style.font_color = { 0.65, 0.65, 0.65 }
     local sp = c.add { type = "scroll-pane", name = "ssk_sp", style = "naked_scroll_pane",
                        horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
     sp.style.horizontally_stretchable = true
@@ -837,8 +825,6 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   c.ssk_sp.style.height = viewH
   c.ssk_bar.style.height = SK.toolbar_height(us)
   c.ssk_bar.style.padding = 0
-  -- chart statistics (flows, recorded seconds, scales) are for development only
-  c.ssk_info.visible = developer_controls(player) == true
   local canvas = c.ssk_sp.ssk_canvas
   if us.view == "focus" and not us.focus then
     if not only_auto or #c.ssk_bar.children==0 then
@@ -850,7 +836,6 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     local l = canvas.add { type = "label", caption = us.neighborhood and "Pick an item or fluid above, or use a row's magnifier to inspect its materials and uses." or "Pick an item or fluid above, or use a row's magnifier in the Balance tab." }
     l.style.single_line = false
     place(l, 24, 40, math.max(100, W - 48), 60)
-    c.ssk_info.caption = ""
     return
   end
   local L = View.build(player, us, W, viewH)
@@ -869,7 +854,6 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   c.ssk_sp.horizontal_scroll_policy = (CW > W) and "auto" or "never"
   local nn = 0
   for _ in pairs(L.nodes) do nn = nn + 1 end
-  local count = 0
   if nn == 0 then
     Canvas.clear(player.index)
     local caption = (L.seconds < 2)
@@ -883,7 +867,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     l.style.single_line = false
     place(l, 24, 40, math.max(100, W - 48), 80)
   else
-    count = draw(canvas, L, us, rstate(player.index, us.view), player, CW, math.max(viewH - 4, L.content_h))
+    draw(canvas, L, us, rstate(player.index, us.view), player, CW, math.max(viewH - 4, L.content_h))
     if us.center_pending or (us.neighborhood and (us.centered_focus ~= us.focus or full)) then
       local n=L.nodes[us.view=="focus" and us.focus or us.sel]
       do
@@ -900,21 +884,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
       us.fit_pending=nil
     end
   end
-  c.ssk_info.caption = string.format(
-    "%d items/groups · %d flows · %d lanes · %d columns (%s–%s of %d tiers) · %.0f s recorded · %.4f px per item/s · fluids drawn ×%g · %d thin flows at %d px min · crossing cost %.0f · %d elements · ribbons carry the source item's units",
-    nn, #L.links, L.lane_list and #L.lane_list or 0, #L.cols,
-    L.col_tiers[1] and View.tier_label(L.col_tiers[1]) or "-", L.col_tiers[#L.col_tiers] and View.tier_label(L.col_tiers[#L.col_tiers]) or "-",
-    #L.all_tiers, L.seconds, L.scale or 0, L.fluid_factor or 1, L.clamped or 0, L.min_t or 0, L.crossing_cost or 0, count)
-  c.ssk_info.style.width = W
-  c.ssk_info.style.single_line = true
-  c.ssk_info.tooltip = c.ssk_info.caption
-  if not us.settings_open then
-    c.ssk_info.caption = string.format("%d items/groups · %d flows · %.0f s recorded · %s widths · %s colors · hover for details", nn, #L.links, L.seconds, us.heights=="linear" and "proportional" or "compressed", us.color_mode=="source" and "source" or "destination")
-  end
-  if us.neighborhood then
-    c.ssk_info.caption = string.format("%d input step(s) · %.0f s recorded · %s widths · %s colors · Shift-click to pin", (L.center_ci or 2)-1, L.seconds, us.heights=="linear" and "proportional" or "compressed", us.color_mode=="source" and "source" or "destination")
-    c.ssk_info.tooltip = "Colors follow the "..(us.color_mode=="source" and "source" or "destination")..". Ribbons carry source-material units. Fluids drawn ×"..tostring(L.fluid_factor)..". Thin flows are enlarged to "..L.min_t.." px. Hover for exact rates."
-  end
+
 end
 
 ---------------------------------------------------------------------------
@@ -1067,7 +1037,6 @@ function SK.on_selection(e, us)
   elseif a == "f_heights" then us.heights = (i == 2) and "sqrt" or "linear"
   elseif a == "balance_colors" then us.color_mode = i==2 and "source" or "destination"
   elseif a == "f_lines" then us.lines = (i == 2) and "metro" or "curves"
-  elseif a == "f_renderer" then us.renderer = (i == 2) and "poly" or "sprites"
   elseif a == "preset" then us.preset = us.preset_ids and us.preset_ids[i] or "all"; us.tier_lo, us.tier_hi = nil, nil
   elseif a == "tier_mode" then
     us.tier_mode = (i == 2) and "depth" or "tech"

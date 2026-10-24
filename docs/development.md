@@ -20,8 +20,10 @@ stored items), `focus` (active and empty Focus flows, both renderers and Back),
 history, compact/expanded Balance and Focus controls, framed list headers and
 grouped activity counts), and `warmup` (fresh-install defaults and incomplete history).
 Phase-specific evidence records native image hashes and the clean archive hash.
-Development tabs, exports and renderer comparisons are hidden unless the
-per-player **Show development tools** setting is enabled.
+Release packages contain only the Balance, Focus and Full Sankey views. Local
+diagnostic and render fixtures live under `tests/development/`; the native harness
+injects its diagnostic helper into an isolated test copy after creating the clean
+candidate archive. These helpers and test hooks are excluded from release ZIPs.
 
 GUI changes follow the vanilla button, frame and label rules in
 [ui-style.md](ui-style.md).

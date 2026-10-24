@@ -9,7 +9,7 @@ local us = { view = "overview", renderer = "poly", period = 600, canvas_w = 1200
 SK.fill(player, c, us, 1200, 800, true)
 assert(us.tier_mode == "depth" and SK.toolbar_height(us) < 120, "compact production-depth defaults")
 assert(not c.ssk_settings, "Chart settings start closed")
-assert(not c.ssk_info.caption:find("crossing cost", 1, true) and c.ssk_info.tooltip:find("crossing cost", 1, true), "diagnostics hidden in compact mode")
+assert(not c.ssk_info, "Release chart must not construct development statistics")
 local group = find(c, function(e) return e.tags.ssk_label and e.tags.ssk_label:sub(1, 6) == "group/" end)
 assert(group and group.visible, "overview groups need visible names")
 local expanded_us = { view = "overview", period = 600, overview_open = { components = true } }
@@ -18,7 +18,7 @@ local expanded_group = V.build(player, expanded_us, 1200, 800)
 assert(expanded_group.nodes["item/iron-plate"] and expanded_group.nodes["group/@smelting"], "expanded group must expose its input while retaining unrelated grouped materials")
 SK.on_click({ player_index = 1, element = { tags = { ssk_sk = "chart_settings" } } }, us)
 SK.fill(player, c, us, 1200, 800, false)
-assert(c.ssk_settings and c.ssk_info.caption:find("crossing cost", 1, true), "Chart settings reveal diagnostics")
+assert(c.ssk_settings and not c.ssk_info and not find(c.ssk_settings,function(e)return e.tags.ssk_sk=="f_renderer" end), "Release chart settings must exclude development statistics and renderer comparisons")
 for _, name in ipairs({ "layout", "tier_mode", "tier_lo", "tier_hi", "split_raw", "reset_layout", "f_lines", "live" }) do
   assert(find(c.ssk_settings, function(e) return e.tags.ssk_sk == name end), "Full Sankey settings lack " .. name)
 end

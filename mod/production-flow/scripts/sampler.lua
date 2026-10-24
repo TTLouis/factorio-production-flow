@@ -17,8 +17,6 @@ local BIN_TICKS = 60
 Sm.PF_INCLUDES_BONUS = true
 
 Sm.TYPES = TYPES
-Sm.logger = nil -- set by control.lua (Diag.log)
-local function log(msg) if Sm.logger then Sm.logger(msg) end end
 
 ---------------------------------------------------------------------------
 -- storage
@@ -35,7 +33,6 @@ function Sm.init()
   storage.mcursor = storage.mcursor or 1
   storage.stat_last = storage.stat_last or {} -- [surface][key] = cumulative {i, o}
   storage.cycle = storage.cycle or { start = game.tick, last = 0 }
-  storage.probes = storage.probes or {}
   if storage.nbins ~= nbins() or not storage.bins then
     local old = storage.bins or {}
     storage.nbins = nbins()
@@ -156,7 +153,6 @@ function Sm.rescan()
     for _, e in pairs(s.find_entities_filtered { type = TYPES }) do Sm.add(e) end
   end
   storage.cycle = { start = game.tick, last = 0 }
-  log("rescan: " .. #storage.mlist .. " crafting machines")
   return #storage.mlist
 end
 
@@ -386,64 +382,6 @@ function Sm.status()
     cycle = storage.cycle.last,
     window = storage.nbins,
   }
-end
-
----------------------------------------------------------------------------
--- /sankey-probe : verify what products_finished counts
----------------------------------------------------------------------------
-local PROBE_TICKS = 600
-
-function Sm.probe_start(player)
-  local e = player.selected
-  if not (e and e.valid and TYPESET[e.type]) then
-    player.print("[Production Flow] Hover a crafting machine (running at full speed, not output-blocked) and run /sankey-probe again.")
-    return
-  end
-  local r = Sm.current_recipe(e)
-  local fr = r and e.force.recipes[r]
-  storage.probes[#storage.probes + 1] = {
-    player = player.index, e = e, recipe = r, pf = e.products_finished, tick = game.tick,
-  }
-  log(string.format("probe start: %s unit %d recipe %s speed %.3f entity_prod %.3f force_recipe_prod %.3f pf %d",
-    e.name, e.unit_number, tostring(r), e.crafting_speed, e.productivity_bonus or 0, fr and fr.productivity_bonus or 0, e.products_finished))
-  player.print(string.format(
-    "[Production Flow] Probing [entity=%s] recipe=%s  crafting_speed=%.3f  entity.productivity_bonus=%.3f  force recipe productivity_bonus=%.3f  products_finished=%d. Result in %d s...",
-    e.name, tostring(r), e.crafting_speed, e.productivity_bonus or 0, fr and fr.productivity_bonus or 0,
-    e.products_finished, PROBE_TICKS / 60))
-end
-
-function Sm.probe_tick(tick)
-  local keep = {}
-  for _, p in ipairs(storage.probes) do
-    if tick - p.tick < PROBE_TICKS then
-      keep[#keep + 1] = p
-    else
-      local player = game.get_player(p.player)
-      local e = p.e
-      if player and e.valid and p.recipe then
-        local proto = prototypes.recipe[p.recipe]
-        local secs = (tick - p.tick) / 60
-        local d = e.products_finished - p.pf
-        local base = e.crafting_speed * secs / proto.energy
-        local prod = e.productivity_bonus or 0
-        local verdict
-        if base <= 0 then verdict = "?"
-        elseif prod < 0.05 then
-          verdict = "INCONCLUSIVE: machine has no productivity bonus - probe one with productivity modules"
-        elseif math.abs(d / base - 1) < math.abs(d / (base * (1 + prod)) - 1) then
-          verdict = "counts NORMAL crafts only (assumption holds)"
-        else
-          verdict = "INCLUDES productivity bonus crafts (flip PF_INCLUDES_BONUS)"
-        end
-        log(string.format("probe result: %s recipe %s pf +%d in %.0fs, expected %.2f normal / %.2f incl bonus, prod %.3f -> %s",
-          e.name, p.recipe, d, secs, base, base * (1 + prod), prod, verdict))
-        player.print(string.format(
-          "[Production Flow] Probe result: products_finished +%d in %.0f s. Expected at 100%% uptime: %.1f normal / %.1f incl. bonus (prod %.0f%%). Ratio %.3f -> %s",
-          d, secs, base, base * (1 + prod), prod * 100, base > 0 and d / base or 0, verdict))
-      end
-    end
-  end
-  storage.probes = keep
 end
 
 return Sm

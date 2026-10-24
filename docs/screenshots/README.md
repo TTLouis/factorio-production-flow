@@ -1,5 +1,15 @@
 # Beta screenshots
 
+## Local 0.1.3 candidate
+
+The [candidate UI gallery](../ui-preview-0.1.3.md) uses native captures from the
+100% upgrade check: 24–29 cover Balance controls/groups, the item/fluid selector,
+Focus history, chart settings and a scrolling material search. The Balance photos
+show the latest single heading row and 8 px scrollbar gap. These previews
+are prepared locally and have not been published.
+
+## Earlier published versions and development measurements
+
 Native Factorio 2.1.23 captures. Balance and help are refreshed for Production Flow 0.1.2 on Space Age; unchanged Full Sankey/Focus examples are retained from 0.1.1. The stress map is generated with bundled Space Age mods.
 
 Charts default to individual item/fluid names. Focus, Full Sankey and grouping need more polish.

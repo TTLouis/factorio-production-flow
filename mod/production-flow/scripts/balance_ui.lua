@@ -10,10 +10,12 @@ local FILTER_NAMES = { "Problems only", "Everything", "Supply/activity", "Surplu
 local SHORTAGE = { deficit = true, limited = true, starved = true }
 local LIMIT = 200
 -- The item list pane is bal_width + 24 wide and always reserves its scrollbar,
--- so rows, group headers and the column header all fill the remaining width.
+-- with an 8 px inner gutter between the last column and the scrollbar.
+-- Headers and rows share the same content width.
 local SCROLLBAR = 12
 local LIST_PADDING = 4
-local function list_width(width) return (width or 900) + 24 - SCROLLBAR - 2 * LIST_PADDING end
+local LIST_GUTTER = 8
+local function list_width(width) return (width or 900) + 24 - SCROLLBAR - 2 * LIST_PADDING - LIST_GUTTER end
 
 -- Favourites stay at the top of the list whatever the filters; saved per player.
 function BU.favourites(us)
@@ -21,11 +23,6 @@ function BU.favourites(us)
   us.bal_favs.items = us.bal_favs.items or {}
   us.bal_favs.groups = us.bal_favs.groups or {}
   return us.bal_favs
-end
-
--- scan cadence and the column legend are development detail; Help explains both
-local function developer(player)
-  return player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value == true
 end
 
 local function text(parent, caption, tooltip, style)
@@ -177,30 +174,9 @@ end
 local function make_header(parent, cols)
   local header = parent.add { type = "frame", name = "ssk_bal_header", style = "ssk_balance_header", direction = "vertical" }
   header.style.width = cols.list_width
-  -- subheader_frame inherits a fixed 36 px height; two compact heading rows
-  -- need their own height so the text and divider stay above the scroller.
-  header.style.height = cols[1].details and 72 or 52
+  -- Keep one heading row, with paired sublabels only when Details is enabled.
+  header.style.height = cols[1].details and 52 or 32
   header.style.bottom_padding = 4
-  -- A band brackets related columns without spending any extra list width.
-  local groups = {}
-  for _,col in ipairs(cols) do
-    local id = (col.id=="focus" or col.id=="item" or col.id=="status") and "item"
-      or (col.id=="stock" or col.id=="eta") and "stock" or "rates"
-    local g=groups[#groups]
-    if not g or g.id~=id then g={id=id,width=0,count=0}; groups[#groups+1]=g end
-    g.width=g.width+col.width+(g.count>0 and 6 or 0); g.count=g.count+1
-  end
-  local band=header.add {type="table",name="ssk_bal_column_groups",style="ssk_balance_grid",
-    column_count=#groups,draw_vertical_lines=true}
-  band.style.horizontal_spacing=0
-  band.style.top_cell_padding, band.style.bottom_cell_padding = 2, 2
-  for _,g in ipairs(groups) do
-    local title=g.id=="item" and "Item & status" or g.id=="stock" and "Chest stock"
-      or cols[1].details and "Rates & utilisation" or "Production rates"
-    local heading=band.add{type="label",caption=title,style="caption_label"}
-    heading.style.width=g.width
-    heading.style.horizontal_align="center"
-  end
   local t = grid(header, "ssk_bal_columns", cols)
   t.style.top_cell_padding, t.style.bottom_cell_padding = 2, 2
   for _, col in ipairs(cols) do
@@ -398,13 +374,13 @@ function BU.fill(player, c, us, scope, only_auto)
   -- Reuse existing cells while the visible rows stay the same. Live sampling
   -- updates values without destroying the table, dropdowns or scroll position.
   local same = live_reuse or (c.ssk_bal_root and c.ssk_bal_root.tags.signature == signature)
-  local root, summaries, summary_heads, cells, context, refresh
+  local root, summaries, summary_heads, cells, refresh
   local cols = columns(us.bal_details, us.bal_width)
   local list_w = list_width(us.bal_width)
   cols.list_width = list_w
   if same then
     root = c.ssk_bal_root
-    context, refresh = root.ssk_bal_context, root.ssk_bal_controls.ssk_bal_refresh
+    refresh = root.ssk_bal_controls.ssk_bal_refresh
     summaries, summary_heads, cells = {}, {}, {}
     for _, group in ipairs(SUMMARY_GROUPS) do
       local column = root.ssk_bal_summary["ssk_bal_" .. group.id]
@@ -473,9 +449,6 @@ function BU.fill(player, c, us, scope, only_auto)
     spacer.style.minimal_width = 16
     toolbar.add { type = "checkbox", caption = "Details", state = us.bal_details == true, tags = { ssk_ui = "bal_details" },
       tooltip = "Show net percentage, producer / consumer utilisation and recent stock trend." }
-    context = root.add { type = "label", name = "ssk_bal_context" }
-    context.style.single_line = false
-    context.style.maximal_width = us.bal_width or 900
     local summary = root.add { type = "table", name = "ssk_bal_summary", column_count = 3 }
     summary.style.horizontal_spacing = 8
     summary.vertical_centering = false
@@ -498,12 +471,6 @@ function BU.fill(player, c, us, scope, only_auto)
         summaries[id] = label
       end
     end
-    local hint = text(root, "Rates /s · chest stock, all qualities · — unavailable · ≈ estimated empty time · ★ keeps a row or group at the top")
-    hint.visible = developer(player)
-    hint.style.font="default-small"
-    hint.style.font_color = { 0.65, 0.65, 0.65 }
-    hint.style.single_line = false
-    hint.style.maximal_width = us.bal_width or 900
     -- Only the item list scrolls; filters, summary, column header and pagination
     -- stay visible. A deep frame bounds the list and a raised header clearly
     -- separates fixed headings from the independently scrolling rows.
@@ -525,6 +492,7 @@ function BU.fill(player, c, us, scope, only_auto)
         local g = empty[e].group
         local section = items.add { type = "flow", name = "ssk_bal_empty_" .. e, direction = "vertical" }
         section.style.vertical_spacing = 0
+        section.style.right_padding = LIST_GUTTER
         section.style.top_margin = #items.children > 1 and 8 or 0
         section_header(section, list_w, group_name(g), { set = true, tags = { ssk_ui = "bal_fav_group", gid = g.id } })
         local note = text(section, "No items in this group right now.")
@@ -540,6 +508,7 @@ function BU.fill(player, c, us, scope, only_auto)
       if not t or last ~= d.section then
         local section = items.add { type = "flow", name = "ssk_bal_section_" .. i, direction = "vertical" }
         section.style.vertical_spacing = 0
+        section.style.right_padding = LIST_GUTTER
         section.style.top_margin = #items.children > 1 and 8 or 0
         if d.section == "fav" then
           section_header(section, list_w, "[img=ssk-star] Favourites")
@@ -570,13 +539,6 @@ function BU.fill(player, c, us, scope, only_auto)
         tooltip = "Add the next 200 matching rows to the list" }
     end
   end
-  local stock_status=Sampler.stock_status()
-  local age=stock_status.updated_tick and time(math.max(0,game.tick-stock_status.updated_tick)/60).." ago" or "first scan pending"
-  -- Keep Claude's quiet normal view and main's configurable scan cadence.
-  context.visible = developer(player)
-  context.caption = developer(player)
-    and string.format("%s · Averaged over %s · Rates update every 5 s\nChest stock: %s · Wait %s after each scan", scope, time(secs), age, time(stock_status.interval / 60))
-    or string.format("%s · Averaged over %s", scope, time(secs))
   for _, group in ipairs(SUMMARY_GROUPS) do
     local total = 0
     for _, id in ipairs(group.ids) do total = total + (counts[id] or 0) end

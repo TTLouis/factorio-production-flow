@@ -1,12 +1,8 @@
 -- Top-left toolbar button + main window.
--- Tabs: Balance · Sankey · (debug, per-player setting) Graph · Sampler · Model · Render test.
+-- Tabs: Balance · Focus · Full Sankey.
 
 local mod_gui = require("mod-gui")
-local Graph = require("scripts.graph")
 local Sampler = require("scripts.sampler")
-local Model = require("scripts.model")
-local RenderTest = require("scripts.render_test")
-local Diag = require("scripts.diag")
 local SK = require("scripts.sankey_ui")
 local BalanceUI = require("scripts.balance_ui")
 local Su = require("scripts.surfaces")
@@ -14,17 +10,15 @@ local Help = require("scripts.help_ui")
 local MaterialPicker = require("scripts.material_picker")
 
 local UI = {}
+local TABS = { "balance", "focus", "sankey" }
+local TAB_CAPTIONS = { balance = "Balance", focus = "Focus", sankey = "Full Sankey" }
 local WIN = "ssk_main"
-local ALL_TABS = { "balance", "focus", "sankey", "graph", "sampler", "model", "render" }
-local DEBUG_TAB = { graph = true, sampler = true, model = true, render = true }
-local TAB_CAPTIONS = { sankey = "Full Sankey", focus = "Focus", balance = "Balance", graph = "Graph", sampler = "Sampler", model = "Model", render = "Render test" }
-local AUTO_REFRESH = { sampler = true, model = true, balance = true }
 
 local function ustate(pi)
   storage.ui = storage.ui or {}
   local s = storage.ui[pi]
   if not s then
-    s = { tab_id = "balance", lookup = nil }
+    s = { tab_id = "balance" }
     storage.ui[pi] = s
   end
   if not s.tab_id then s.tab_id = "balance" end
@@ -50,28 +44,6 @@ local function ustate(pi)
   end
   if s.period == nil then s.period = Sampler.DEFAULT_PERIOD end
   return s
-end
-
--- visible tabs: Balance + Sankey, debug tabs only with the per-player setting
-local function tabs_for(player)
-  local dbg = player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value
-  local list = {}
-  for _, id in ipairs(ALL_TABS) do
-    if dbg or not DEBUG_TAB[id] then list[#list + 1] = id end
-  end
-  return list
-end
-
--- Same rate formatting as the Balance table and the charts.
-local function fmt(x)
-  local a = math.abs(x)
-  if a >= 1000000 then return string.format("%.2fM", x / 1000000) end
-  if a >= 10000 then return string.format("%.1fk", x / 1000) end
-  if a >= 100 then return string.format("%.0f", x) end
-  if a >= 10 then return string.format("%.1f", x) end
-  if a >= 1 then return string.format("%.2f", x) end
-  if a > 0 and a < 0.001 then return "<0.001" end
-  return string.format("%.3f", x)
 end
 
 ---------------------------------------------------------------------------
@@ -102,27 +74,6 @@ local function label(parent, caption, style, wrap)
     l.style.maximal_width = 1400
   end
   return l
-end
-
--- numeric table cell: fixed minimum width, right-aligned
-local function num(parent, caption)
-  local l = parent.add { type = "label", caption = caption }
-  l.style.minimal_width = 80
-  l.style.horizontal_align = "right"
-  return l
-end
-
-local function heading(parent, caption)
-  local l = parent.add { type = "label", caption = caption, style = "caption_label" }
-  l.style.top_margin = 8
-  return l
-end
-
--- scope + period are shared by every tab and live in the title bar
-local function surface_toggle(parent, us)
-  local row = parent.add { type = "flow", direction = "horizontal" }
-  row.style.vertical_align = "center"
-  return row
 end
 
 -- one surface at a time, never combined: the chosen one, else where the player stands
@@ -156,140 +107,6 @@ end
 ---------------------------------------------------------------------------
 local fill = {}
 
-function fill.graph(player, c, us)
-  local g = Graph.get()
-  local row = c.add { type = "flow", direction = "horizontal" }
-  row.style.vertical_align = "center"
-  label(row, string.format("Vertices: %d items/fluids · %d recipes (%d reversing: recycling / unbarrel)",
-    g.n_nodes, g.n_recipes, g.n_reversing))
-  row.add { type = "button", caption = "Rebuild graph", tags = { ssk_ui = "rebuild_graph" } }
-
-  heading(c, "Look up an item or fluid")
-  local pick = c.add { type = "flow", direction = "horizontal" }
-  pick.style.vertical_align = "center"
-  MaterialPicker.button(pick, us.lookup and Graph.key(us.lookup.type, us.lookup.name), "lookup")
-
-  if us.lookup then
-    local key = Graph.key(us.lookup.type, us.lookup.name)
-    local nd = g.nodes[key]
-    if not nd then
-      label(c, Graph.rt(key) .. " is not produced or consumed by any recipe.")
-      return
-    end
-    local function list(caption, names)
-      heading(c, string.format("%s (%d)", caption, #names))
-      local parts = {}
-      for _, r in ipairs(names) do
-        local rec = g.recipes[r]
-        parts[#parts + 1] = "[recipe=" .. r .. "]" .. (rec.reversing and "↺" or "")
-      end
-      local l = label(c, #parts > 0 and table.concat(parts, " ") or "—", nil, true)
-      l.style.maximal_width = 1400
-    end
-    list("Produced by", nd.producers)
-    list("Consumed by", nd.consumers)
-    label(c, "↺ = reversing recipe (excluded from tiering, drawn as loop-back)", "info_label")
-  end
-end
-
-function fill.sampler(player, c, us)
-  local st = Sampler.status()
-  local sidx = sidx_for(player, us)
-  local rates, secs = Sampler.rates(sidx, us.period)
-  local mcount = Sampler.machine_counts(sidx)
-
-  local row = surface_toggle(c, us)
-  row.add { type = "button", caption = "Rescan machines", tags = { ssk_ui = "rescan" } }
-  label(c, string.format(
-    "Tracked machines: %d · sampled per tick: %d · full sampling cycle: %d ticks (%.1f s) · window: %.0f / %d s filled · scope: %s",
-    st.tracked, st.per_tick, st.cycle, st.cycle / 60, secs, st.window, scope_caption(player, us)))
-  label(c, "Run /sankey-probe while hovering a machine to check what products_finished counts.", "info_label")
-
-  local rows = {}
-  for r, m in pairs(mcount) do rows[r] = { r = r, m = m, cps = 0, prod = 0 } end
-  for r, x in pairs(rates.recipes) do
-    rows[r] = rows[r] or { r = r, m = 0 }
-    rows[r].cps, rows[r].prod = x.cps, x.prod
-  end
-  local arr = {}
-  for _, x in pairs(rows) do arr[#arr + 1] = x end
-  table.sort(arr, function(a, b) if a.cps ~= b.cps then return a.cps > b.cps end return a.r < b.r end)
-
-  heading(c, string.format("Recipes in use (%d)", #arr))
-  local t = c.add { type = "table", column_count = 4, draw_horizontal_line_after_headers = true }
-  t.style.horizontal_spacing = 24
-  for _, h in ipairs({ "Recipe", "Machines", "Crafts / s", "Avg productivity" }) do label(t, h, "caption_label") end
-  for i = 1, math.min(#arr, 80) do
-    local x = arr[i]
-    label(t, "[recipe=" .. x.r .. "] " .. x.r)
-    num(t, tostring(x.m))
-    num(t, fmt(x.cps))
-    num(t, string.format("%.0f%%", x.prod * 100))
-  end
-  if #arr > 80 then label(c, string.format("… %d more", #arr - 80), "info_label") end
-end
-
-function fill.model(player, c, us)
-  local sidx = sidx_for(player, us)
-  local m = Model.build(sidx, us.period)
-  surface_toggle(c, us)
-  local nitems, nrec = 0, 0
-  for _, v in pairs(m.vertices) do if v.kind == "recipe" then nrec = nrec + 1 else nitems = nitems + 1 end end
-  label(c, string.format(
-    "Scope: %s · window %.0f s · in-use recipes: %d · item/fluid vertices: %d · edges: %d · SCCs (cycles): %d · max tier: %d",
-    scope_caption(player, us), m.seconds, nrec, nitems, #m.edges, #m.sccs, m.max_tier))
-
-  -- tiers (items/fluids only; recipes sit on the odd tiers between them)
-  heading(c, "Tiers (longest path from raw, bipartite: items and recipes alternate)")
-  local by_tier = {}
-  for _, v in ipairs(m.verts) do
-    local x = m.vertices[v]
-    by_tier[x.tier] = by_tier[x.tier] or {}
-    table.insert(by_tier[x.tier], v)
-  end
-  local t = c.add { type = "table", column_count = 2 }
-  t.style.horizontal_spacing = 16
-  for tier = 0, m.max_tier do
-    local vs = by_tier[tier]
-    if vs then
-      label(t, "T" .. tier, "caption_label")
-      local parts = {}
-      for _, v in ipairs(vs) do parts[#parts + 1] = Graph.rt(v) end
-      local l = label(t, table.concat(parts, " "), nil, true)
-      l.style.maximal_width = 1400
-    end
-  end
-
-  heading(c, string.format("Cycles collapsed into one tier (%d)", #m.sccs))
-  if #m.sccs == 0 then label(c, "none") end
-  for i = 1, math.min(#m.sccs, 20) do
-    local parts = {}
-    for _, v in ipairs(m.sccs[i]) do parts[#parts + 1] = Graph.rt(v) end
-    local l = label(c, string.format("#%d (%d): %s", i, #m.sccs[i], table.concat(parts, " ")), nil, true)
-    l.style.maximal_width = 1400
-  end
-
-  heading(c, "Residuals: force statistics minus measured recipe edges (/s)")
-  label(c, "Other source = mining, handcrafting, pumps, spoilage… · Other sink = labs, fuel, ammo, building, launches…", "info_label")
-  local rs = {}
-  for v, r in pairs(m.residuals) do
-    local mx = math.max(r.other_src, r.other_sink)
-    if mx > 0.001 then rs[#rs + 1] = { v = v, r = r, mx = mx } end
-  end
-  table.sort(rs, function(a, b) if a.mx ~= b.mx then return a.mx > b.mx end return a.v < b.v end)
-  local rt = c.add { type = "table", column_count = 7, draw_horizontal_line_after_headers = true }
-  rt.style.horizontal_spacing = 20
-  for _, h in ipairs({ "Item", "Produced", "Measured in", "Other source", "Consumed", "Measured out", "Other sink" }) do
-    label(rt, h, "caption_label")
-  end
-  for i = 1, math.min(#rs, 40) do
-    local x = rs[i]
-    label(rt, Graph.rt(x.v) .. " " .. string.match(x.v, "/(.+)$"))
-    num(rt, fmt(x.r.prod)); num(rt, fmt(x.r.meas_in)); num(rt, fmt(x.r.other_src))
-    num(rt, fmt(x.r.cons)); num(rt, fmt(x.r.meas_out)); num(rt, fmt(x.r.other_sink))
-  end
-end
-
 function fill.balance(player, c, us, only_auto, keep_balance_rows)
   if not c.ssk_balance_split then
     c.clear()
@@ -315,13 +132,6 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
   if not only_auto or fx.live ~= false then
     SK.fill(player, split.ssk_balance_focus, fx, fx.canvas_w, fx.canvas_h, false, only_auto)
   end
-end
-
-function fill.render(player, c, us)
-  label(c, "M0: fake graph rendered with stretched ribbon sprites. Checks overlap (negative margins), hover highlight and thin-flow clamp.")
-  local row = c.add { type = "flow", direction = "horizontal" }
-  row.add { type = "button", caption = "Open (margin mode)", tags = { ssk_ui = "rt_margin" } }
-  row.add { type = "button", caption = "Open (screen mode)", tags = { ssk_ui = "rt_screen" } }
 end
 
 ---------------------------------------------------------------------------
@@ -373,7 +183,6 @@ function UI.refresh(player, only_auto, full, keep_balance_rows)
     SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(us)), full, only_auto)
     return
   end
-  if only_auto and not AUTO_REFRESH[id] then return end
   if id ~= "balance" then c.clear() end
   fill[id](player, c, us, only_auto, keep_balance_rows)
 end
@@ -398,7 +207,6 @@ function UI.open(player)
   UI.close(player)
   local us = ustate(player.index)
   close_chart_settings(us)
-  local developer = player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value
   local res, sc = player.display_resolution, player.display_scale
   local W, H = UI.dimensions(res, sc)
 
@@ -422,7 +230,7 @@ function UI.open(player)
   local sitems, ssel = { "Where I am (" .. Su.rich(player.surface) .. ")" }, 1
   us.surface_names = {}
   for i, x in ipairs(surface_choices(us.surface)) do
-    sitems[#sitems + 1] = developer and string.format("%s  (%d machines)", x.label, x.n) or x.label
+    sitems[#sitems + 1] = x.label
     us.surface_names[i + 1] = x.name
     if us.surface == x.name then ssel = i + 1 end
   end
@@ -442,9 +250,6 @@ function UI.open(player)
   history.style.font="default-small-bold";history.style.font_color={1,0.82,0.35}
   history.style.maximal_width=190
   action_button("utility/questionmark", "Help: controls, calculations, stock, alerts and chart limits", "help")
-  if player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value then
-    action_button("utility/export_slot", "Export diagnostics to script-output/production-flow/", "export")
-  end
   action_button("utility/refresh", "Refresh", "refresh")
   action_button("utility/close", "Close", "close")
 
@@ -454,18 +259,13 @@ function UI.open(player)
   local tabs = inner.add { type = "tabbed-pane", name = "ssk_tabs" }
   tabs.style.horizontally_stretchable = true
   tabs.style.vertically_stretchable = true
-  local list = tabs_for(player)
+  local list = TABS
   local sel = 1
   for i, id in ipairs(list) do if id == us.tab_id then sel = i end end
   us.tab_id = list[sel]
   for _, id in ipairs(list) do
     local tab = tabs.add { type = "tab", caption = TAB_CAPTIONS[id] }
-    local c
-    if id == "sankey" or id == "focus" or id == "balance" then
-      c = tabs.add { type = "flow", name = "content_" .. id, direction = "vertical" }
-    else
-      c = tabs.add { type = "scroll-pane", name = "content_" .. id, horizontal_scroll_policy = "auto" }
-    end
+    local c = tabs.add { type = "flow", name = "content_" .. id, direction = "vertical" }
     c.style.horizontally_stretchable = true
     c.style.vertically_stretchable = true
     c.style.padding = 12
@@ -537,7 +337,6 @@ function UI.on_click(e)
     if root then root.tags={} end
     UI.refresh(player)
   elseif a == "refresh" then UI.refresh(player)
-  elseif a == "export" then Diag.export(player, "manual")
   elseif a == "bal_more" then
     local us = ustate(e.player_index)
     us.bal_limit = (us.bal_limit or 200) + 200
@@ -553,14 +352,6 @@ function UI.on_click(e)
     SK.select_focus(fx, el.tags.key)
     if us.tab_id == "balance" then UI.refresh(player, false, false, true)
     else us.tab_id = "focus"; UI.open(player) end
-  elseif a == "rebuild_graph" then Graph.build(); UI.refresh(player)
-  elseif a == "rescan" then
-    local n = Sampler.rescan()
-    player.print("[Production Flow] Rescanned: " .. n .. " crafting machines.")
-    UI.refresh(player)
-  elseif a == "rt_margin" or a == "rt_screen" then
-    UI.close(player)
-    RenderTest.open(player, a == "rt_margin" and "margin" or "screen")
   else
     return false
   end
@@ -573,11 +364,7 @@ function UI.on_selection(e)
     if key then
       local player = game.get_player(e.player_index)
       local us = ustate(e.player_index)
-      if target == "lookup" then
-        local kind, name = key:match("^(%a+)/(.+)$")
-        us.lookup = { type = kind, name = name }
-        UI.refresh(player)
-      elseif target == us.tab_id then
+      if target == us.tab_id then
         SK.select_focus(chart_state(us), key)
         UI.refresh(player, false, false, true)
       end
@@ -646,20 +433,14 @@ function UI.on_elem_changed(e)
       return true
     end
   end
-  local a = e.element.tags and e.element.tags.ssk_ui
-  if a ~= "lookup_item" and a ~= "lookup_fluid" then return false end
-  local us = ustate(e.player_index)
-  local v = e.element.elem_value
-  if type(v) == "table" then v = v.name end
-  us.lookup = v and { type = (a == "lookup_item") and "item" or "fluid", name = v } or nil
-  UI.refresh(game.get_player(e.player_index))
-  return true
+
+  return false
 end
 
 function UI.on_tab_changed(e)
   local f = e.element
   if not (f.valid and f.name == "ssk_tabs" and f.parent and f.parent.parent and f.parent.parent.name == WIN) then return false end
-  local list = tabs_for(game.get_player(e.player_index))
+  local list = TABS
   local us = ustate(e.player_index)
   us.tab_id = list[f.selected_tab_index] or "balance"
   close_chart_settings(us)

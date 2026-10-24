@@ -29,9 +29,24 @@ local original = root()
 local item_pane = original.ssk_bal_list.ssk_bal_items
 assert(content().ssk_balance_split.ssk_balance_table.type == "flow", "outer Balance pane must stay fixed")
 assert(item_pane.type == "scroll-pane", "only the item list should scroll")
-assert(original.ssk_bal_summary and original.ssk_bal_context and original.ssk_bal_controls.ssk_bal_refresh
+assert(original.ssk_bal_summary and not original.ssk_bal_context and original.ssk_bal_controls.ssk_bal_refresh
   and not original.ssk_bal_footer, "refresh must be in the header and the footer must be absent")
 assert(item_pane.ssk_bal_section_1, "item tables must live inside the scroller")
+local function check_header_alignment()
+  local list=root().ssk_bal_list
+  local header=list.ssk_bal_header
+  assert(not header.ssk_bal_column_groups, "Balance must not have a second band of headings")
+  local columns=header.ssk_bal_columns
+  for _,t in ipairs(tables()) do
+    assert(t.column_count==columns.column_count, "Header and rows have different columns")
+    for i,h in ipairs(columns.children) do
+      assert(h.style.width==t.children[i].style.width, "Header width differs from data column "..i)
+    end
+    assert(t.parent.style.right_padding>=8, "Empty in needs breathing room before the scrollbar")
+  end
+end
+check_header_alignment()
+
 UI.refresh(player, true)
 assert(root() == original and root().ssk_bal_list.ssk_bal_items == item_pane, "unchanged live refresh must preserve the item scroller")
 select("bal_filter", 3)
@@ -56,6 +71,7 @@ assert(root() == grouped, "grouped live update should reuse every section")
 assert(UI.on_checked({ player_index = 1, element = { tags = { ssk_ui = "bal_details" }, state = true } }))
 for _, t in ipairs(tables()) do assert(t.column_count == 8, "details must stack without adding width")
   assert(t.children[4].caption:find("\n"), "producer utilisation should appear beneath production") end
+check_header_alignment()
 local group_index
 for i, id in pairs(us.bal_group_ids) do if id == "plates" then group_index = i end end
 assert(group_index, "active curated group missing")

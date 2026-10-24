@@ -27,15 +27,6 @@ data:extend({
   },
   {
     type = "int-setting",
-    name = "ssk-auto-export-minutes",
-    setting_type = "runtime-global",
-    default_value = 0,
-    minimum_value = 0,
-    maximum_value = 120,
-    order = "c",
-  },
-  {
-    type = "int-setting",
     name = "ssk-min-ribbon-px",
     setting_type = "runtime-per-user",
     default_value = 6,
@@ -51,12 +42,5 @@ data:extend({
     minimum_value = 0.0001,
     maximum_value = 1,
     order = "e",
-  },
-  {
-    type = "bool-setting",
-    name = "ssk-debug-tabs",
-    setting_type = "runtime-per-user",
-    default_value = false,
-    order = "f",
   },
 })

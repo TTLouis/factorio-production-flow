@@ -9,13 +9,13 @@ assert(fx and fx.view == "focus", "focus state")
 UI.on_elem_changed({ element = { valid = true, tags = { ssk_sk = "f_item" }, elem_value = "electronic-circuit" }, player_index = 1 })
 assert(fx.focus == "item/electronic-circuit", "picked")
 local function find(el, name) if el.name == name then return el end for _, c in ipairs(el.children) do local r = find(c, name) if r then return r end end end
-local function info() return find(player.gui.screen.ssk_main, "ssk_info").caption end
+local function info() local L=TREQ("scripts.view").build(player,fx,1000,600);return string.format("%d flows · %.0f s recorded",#L.links,L.seconds) end
 print("focus 2:", info())
 for i = 1, 3 do
   UI.on_selection({ element = { valid = true, tags = { ssk_sk = "f_steps" }, selected_index = i }, player_index = 1 })
   print("steps", i, info():match("%](.-) ·"))
 end
-UI.on_selection({ element = { valid = true, tags = { ssk_sk = "f_renderer" }, selected_index = 2 }, player_index = 1 })
+fx.renderer="poly";UI.refresh(player)
 local live = 0
 for _, o in ipairs(RO) do if o.valid then live = live + 1 end end
 print("poly objects:", live)
@@ -39,7 +39,7 @@ for _, pick in ipairs({ {"f_item", "wood"}, {"f_fluid", "unrecorded-fluid"} }) d
 end
 UI.on_hover({ element = { valid = true, tags = { ssk_sk = "node", key = "item/electronic-circuit", fx = true } }, player_index = 1 }, true)
 UI.on_hover({ element = { valid = true, tags = { ssk_sk = "node", key = "item/electronic-circuit", fx = true } }, player_index = 1 }, false)
-UI.on_selection({ element = { valid = true, tags = { ssk_sk = "f_renderer" }, selected_index = 1 }, player_index = 1 })
+fx.renderer="sprites";UI.refresh(player)
 live = 0
 for _, o in ipairs(RO) do if o.valid then live = live + 1 end end
 assert(live == 0, "sprite renderer should clear polygons, left " .. live)

@@ -147,12 +147,26 @@ local dialog = player.gui.screen.ssk_material_picker
 local inner = dialog.ssk_material_inner
 local tab_count = #inner.ssk_group_scroll.ssk_groups.children
 assert(tab_count >= 31 and inner.ssk_group_scroll.ssk_groups.column_count == 6, "every modded group needs a tab, six per row")
-assert(inner.ssk_group_scroll.style.height == 4 * 65 and inner.ssk_group_scroll.style.width == 10 * 40 + 2,
-  "short material groups must not reserve an unused material scrollbar gutter")
+assert(inner.ssk_group_scroll.style.height == 4 * 68 and inner.ssk_group_scroll.style.width == 10 * 40 + 24,
+  "category tabs must fit the grid and native side margins")
 assert(inner.ssk_slot_frame.ssk_slot_scroll.vertical_scroll_policy == "auto",
   "material scrollbars must only occupy space while needed")
 assert(results(dialog).column_count == 10 and inner.ssk_slot_frame.ssk_slot_scroll.style.height >= 4 * 40,
   "the grid must stay ten wide and keep at least four rows")
+assert(inner.ssk_slot_frame.style.width == 424 and inner.ssk_slot_frame.style.left_padding == 12
+  and inner.ssk_slot_frame.style.right_padding == 12, "short categories need both native side margins")
+MaterialPickerTest.close(player)
+for i = 1, 130 do
+  local name = "dense-material-" .. i
+  extra[#extra + 1] = name
+  rawset(prototypes.item, name, { name = name, localised_name = name, order = name,
+    group = prototypes.item.wood.group, subgroup = prototypes.item.wood.subgroup })
+end
+MaterialPickerTest.open(player, "focus", "item/wood")
+inner = player.gui.screen.ssk_material_picker.ssk_material_inner
+assert(inner.ssk_slot_frame.style.width == 424 and inner.ssk_group_scroll.style.width == 424
+  and inner.ssk_slot_frame.style.left_padding == 12 and inner.ssk_slot_frame.style.right_padding == 0,
+  "the scrollbar must replace the right margin without widening the selector")
 MaterialPickerTest.close(player)
 MaterialPickerTest.open(player, "focus", "item/wood")
 assert(player.gui.screen.ssk_material_picker.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll.style.height <= 12 * 40,
