@@ -13,6 +13,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
@@ -211,7 +212,20 @@ def portal_post(path, fields, *, file=None, signed_url=None):
 
 
 def portal_state():
-    return request(f"{PORTAL}/api/mods/{MOD}/full", missing=True)
+    # Public discovery responses can be cached after a successful edit. A fresh
+    # read must confirm the mutation, rather than validate a previous snapshot.
+    return request(f"{PORTAL}/api/mods/{MOD}/full?publisher_nonce={uuid4().hex}",
+                   headers={"Cache-Control": "no-cache"}, missing=True)
+
+
+def wait_for_portal(predicate, message):
+    for attempt in range(8):
+        state = portal_state()
+        if predicate(state):
+            return state
+        if attempt < 7:
+            time.sleep(2)
+    raise PublishError(message)
 
 
 def verify_bundle(bundle):
@@ -266,8 +280,8 @@ def deploy(bundle):
         print(f"Uploaded {MOD} {plan['version']}")
     else:
         print("Exact release already exists; resuming page and gallery synchronization")
-    state = portal_state()
-    require(existing_release(state, plan), "Portal release does not match the published GitHub ZIP")
+    state = wait_for_portal(lambda state: existing_release(state, plan),
+                            "Portal release does not match the published GitHub ZIP")
     current = {x["id"]: x for x in state.get("images", [])}
     desired, description = [], plan["metadata"]["description"]
     for entry in plan["gallery"]:
@@ -286,11 +300,14 @@ def deploy(bundle):
     fields = dict(plan["metadata"], mod=MOD, description=description)
     edited = portal_post("/api/v2/mods/edit_details", fields)
     require(edited.get("success") is True, "Portal did not confirm the page update")
-    final = portal_state()
-    require(existing_release(final, plan), "Final release verification failed")
-    require(final.get("description", "").replace("\r\n", "\n").strip() == description.strip(), "Final description differs from the approved page")
-    require(set(plan["metadata"]["tags"]) == set(final.get("tags", [])), "Portal tags differ from the requested classification")
-    require(set(desired).issubset({x["id"] for x in final.get("images", [])}), "Portal gallery is incomplete")
+    def complete(final):
+        return (existing_release(final, plan)
+                and final.get("description", "").replace("\r\n", "\n").strip() == description.strip()
+                and set(plan["metadata"]["tags"]) == set(final.get("tags", []))
+                and final.get("category") == plan["metadata"]["category"]
+                and final.get("summary") == plan["metadata"]["summary"]
+                and set(desired).issubset({x["id"] for x in final.get("images", [])}))
+    wait_for_portal(complete, "Portal release, description, category, tags or gallery did not finish updating")
     url = f"{PORTAL}/mod/{MOD}"
     print(f"Published and verified {url} version {plan['version']} SHA256 {plan['sha256']}")
     if os.getenv("GITHUB_STEP_SUMMARY"):

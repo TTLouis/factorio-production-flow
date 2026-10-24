@@ -117,6 +117,19 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(body.count(b'name="tags"'), 3)
         self.assertIn("multipart/form-data; boundary=", content_type)
 
+    def test_wait_for_delayed_public_metadata(self):
+        with patch.object(P, "portal_state", side_effect=[None, {"ready": False}, {"ready": True}]), \
+             patch.object(P.time, "sleep") as sleep:
+            result = P.wait_for_portal(lambda state: state and state.get("ready"), "not ready")
+        self.assertTrue(result["ready"])
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_public_verification_has_a_bounded_timeout(self):
+        with patch.object(P, "portal_state", return_value={}), patch.object(P.time, "sleep") as sleep:
+            with self.assertRaisesRegex(P.PublishError, "not ready"):
+                P.wait_for_portal(lambda state: False, "not ready")
+        self.assertEqual(sleep.call_count, 7)
+
     def deploy(self, bundle, fake):
         with patch.dict(os.environ, {"FACTORIO_API_KEY": "test-key"}, clear=True), \
              patch.object(P, "release", return_value=self.remote), \
