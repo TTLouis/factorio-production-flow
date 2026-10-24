@@ -9,6 +9,7 @@ local function find(e,pred)
  for _,c in ipairs(e.children) do local x=find(c,pred);if x then return x end end
 end
 local root=player.gui.screen.ssk_main
+UI.on_click({element=find(root,function(e)return e.tags.ssk_sk=="chart_settings" end),player_index=1})
 local live=find(root,function(e)return e.tags.ssk_sk=="live" end)
 assert(live.caption=="Auto-update chart","update control must name its scope")
 local period=find(root,function(e)return e.tags.ssk_ui=="period" end)

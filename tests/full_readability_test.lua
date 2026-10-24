@@ -12,7 +12,7 @@ local function find_rate(e,key)
 end
 for _,renderer in ipairs({"poly","sprites"}) do
   local us={view="detail",layout="clean",lines="curves",heights="sqrt",renderer=renderer,
-    period=600,canvas_w=1600}
+    period=600,canvas_w=1600,settings_open=true} -- Unpin and Colors live in Chart settings
   SK.fill(player,c,us,1600,850,true)
   local L=V.build(player,us,1600,850)
   local before={}

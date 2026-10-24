@@ -134,7 +134,7 @@ end
 ---------------------------------------------------------------------------
 local ACTION_SPRITES = {
   f_back = "left_arrow", f_forward = "right_arrow", center_selection = "center",
-  reflow = "refresh", f_options = "list_view", advanced = "list_view", reset_layout = "reset",
+  reflow = "refresh", chart_settings = "ssk-gear", reset_layout = "reset",
   unpin = "pin_arrow", inputs_more = "add", inputs_less = "collapse", overview_reset = "collapse",
   up = "indication_arrow", down = "down_arrow", hide = "filter_blacklist", expand = "expand", collapse = "collapse",
   new_group = "add", ungroup = "reset", deselect = "close", unhide_all = "grid_view",
@@ -145,7 +145,7 @@ local function button(parent, caption, action, tooltip, extra)
   local sprite = ACTION_SPRITES[action]
   if sprite then
     return parent.add { type = "sprite-button", style = action == "reset_layout" and "tool_button_red" or "tool_button",
-      sprite = "utility/" .. sprite, tooltip = tooltip or caption, tags = tags }
+      sprite = sprite:find("^ssk%-") and sprite or "utility/" .. sprite, tooltip = tooltip or caption, tags = tags }
   end
   -- Vanilla has no zoom or fit utility sprite. Its square tool button keeps
   -- the game graphics, hover state, dimensions and click sound for these captions.
@@ -231,6 +231,106 @@ local function reflow_button(row)
   button(row, "Reflow", "reflow", "Recalculate node order and spacing. Auto-update otherwise keeps the current layout.")
 end
 
+local function settings_button(row, us)
+  button(row, "Chart settings", "chart_settings",
+    "Chart settings: widths, colors, lines, layout and auto-update. Esc closes them.").toggled = us.settings_open == true
+end
+
+-- Chart settings float over the chart's top-right corner, so opening them never
+-- moves or resizes the chart. Every row is a 28 px control, so the frame height
+-- is known and the panel takes no layout height of its own.
+local function settings_panel(c, us, L, player, W, viewH)
+  if c.ssk_settings then c.ssk_settings.destroy() end
+  if not us.settings_open then return end
+  local full = us.view ~= "focus"
+  local panel = c.add { type = "frame", name = "ssk_settings", style = "frame", direction = "vertical" }
+  local title = panel.add { type = "flow", direction = "horizontal" }
+  title.style.vertical_align = "center"
+  title.style.height = 24
+  title.style.bottom_margin = 8
+  title.add { type = "label", caption = "Chart settings", style = "frame_title", ignored_by_interaction = true }
+  title.add { type = "empty-widget", ignored_by_interaction = true }.style.horizontally_stretchable = true
+  title.add { type = "sprite-button", style = "frame_action_button", sprite = "utility/close",
+    tooltip = "Close chart settings (Esc)", tags = { ssk_sk = "chart_settings" } }
+  local inner = panel.add { type = "frame", style = "inside_shallow_frame_with_padding", direction = "vertical" }
+  inner.style.horizontally_stretchable = true
+  local grid = inner.add { type = "table", column_count = 2 }
+  grid.style.vertical_spacing = 8
+  grid.style.horizontal_spacing = 12
+  local rows = 0
+  local function line(caption)
+    rows = rows + 1
+    local name = grid.add { type = "flow", direction = "horizontal" }
+    name.style.vertical_align = "center"
+    name.style.height = 28
+    small(name, caption)
+    local cell = grid.add { type = "flow", direction = "horizontal" }
+    cell.style.vertical_align = "center"
+    cell.style.horizontal_spacing = 8
+    cell.style.height = 28
+    return cell
+  end
+  local function picker(caption, items, index, action, tooltip)
+    local d = line(caption).add { type = "drop-down", items = items, selected_index = index, tags = { ssk_sk = action }, tooltip = tooltip }
+    d.style.width = 180
+    return d
+  end
+  picker("Widths:", { "Proportional", "Compressed" }, us.heights == "linear" and 1 or 2, "f_heights",
+    "Proportional: linear rate widths. Compressed: square-root widths, so small flows stay visible. Fluids use a separate scale and thin ribbons keep a visible minimum. Hover for exact rates.")
+  picker("Colors:", { "Destination", "Source" }, us.color_mode == "source" and 2 or 1, "balance_colors",
+    "Destination: ribbons feeding the same node share its color. Source: ribbons take the color of the material they come from. Ribbons always carry source-material units.")
+  picker("Lines:", { "Curves", "Right angles" }, us.lines == "metro" and 2 or 1, "f_lines",
+    "Right angles: steep ribbons run vertically and cross others at 90°.")
+  if us.neighborhood then
+    local cell = line("Inputs:")
+    local fewer = button(cell, "Fewer inputs", "inputs_less", "Hide the furthest upstream step")
+    fewer.enabled = (us.input_depth or 1) > 1
+    local more = button(cell, "Expand inputs", "inputs_more", "Reveal another upstream production step (up to 6)")
+    more.enabled = (us.input_depth or 1) < View.MAX_INPUT_DEPTH
+    small(cell, string.format("%d step%s", us.input_depth or 1, (us.input_depth or 1) == 1 and "" or "s"))
+  elseif not full then
+    picker("Steps:", { "1", "2", "3" }, us.focus_steps or 2, "f_steps", "Item steps to include upstream and downstream")
+  else
+    picker("Layout:", { "Routed columns", "Swimlanes" }, (us.layout == "lanes") and 2 or 1, "layout",
+      "Routed columns reserve item headers and long-link tracks; crossings can remain. Scroll sideways for larger graphs.\nSwimlanes group related items and allow manual ordering; ribbons can overlap.")
+    local tiers = picker("Tiers by:", { "Tech era + depth", "Production depth" },
+      (us.view == "overview" or us.tier_mode == "depth") and 2 or 1, "tier_mode",
+      "Overview uses production depth because groups span tech eras. Individual items can use tech era + depth or production depth.")
+    tiers.enabled = us.view ~= "overview"
+    local titems, lo_i, hi_i = {}, 1, 1
+    us.tier_vals = {}
+    for i, t in ipairs(L and L.all_tiers or {}) do
+      titems[i] = View.tier_label(t)
+      us.tier_vals[i] = t
+      if us.tier_lo and t <= us.tier_lo + 1e-9 then lo_i = i end
+      if not us.tier_hi or t <= us.tier_hi + 1e-9 then hi_i = i end
+    end
+    if #titems == 0 then titems = { "T0" } end
+    local range = line("Range:")
+    range.add { type = "drop-down", items = titems, selected_index = lo_i, tags = { ssk_sk = "tier_lo" } }.style.width = 86
+    small(range, "to")
+    range.add { type = "drop-down", items = titems, selected_index = math.max(lo_i, hi_i), tags = { ssk_sk = "tier_hi" } }.style.width = 86
+    line("").add { type = "checkbox", caption = "Split raw inputs", state = us.split_raw ~= false, tags = { ssk_sk = "split_raw" },
+      tooltip = "Ores, oil, water… get one copy per lane that uses them, placed next to their consumers" }
+  end
+  live_toggle(line(""), us)
+  local actions = line("")
+  if not full then button(actions, "Center", "center_selection", "Center the selected material") end
+  reflow_button(actions)
+  button(actions, "Unpin", "unpin", full and "Clear the pinned highlight. Click a node to pin one." or "Clear the pinned chain highlight")
+  if full then button(actions, "Reset layout", "reset_layout", "Forget manual ordering, hidden items and collapsed groups") end
+  if developer_controls(player) then
+    picker("Renderer:", { "GUI sprites", "Polygons (beta)" }, us.renderer == "poly" and 2 or 1, "f_renderer",
+      "Compare the same routes: atlas sprites, or one polygon mesh per ribbon drawn on a hidden surface and shown through a camera.")
+  end
+  -- frame: 4 top + 24 title + 8 + inner (12 + rows + 12) + 8 bottom
+  local width, height = full and 360 or 330, 4 + 24 + 8 + 24 + rows * 28 + (rows - 1) * 8 + 8
+  local top = -viewH + 8
+  panel.style.width, panel.style.height = width, height
+  panel.style.left_margin = math.max(0, W - width - 24)
+  panel.style.top_margin, panel.style.bottom_margin = top, -(top + height)
+end
+
 local function item_pickers(row, us)
   small(row, "Item / fluid:")
   MaterialPicker.button(row, us.focus, us.neighborhood and "balance" or "focus")
@@ -290,51 +390,31 @@ local function history_controls(bar, us)
   clear.enabled = #back + #forward > 0
 end
 
-local function focus_toolbar(bar, us, player)
+-- Every toolbar row sits in one subheader strip across the top of the chart panel,
+-- as vanilla panels put their controls.
+local function toolbar_strip(bar, us)
   bar.clear()
-  local strip = bar.add { type = "frame", style = "subheader_frame", direction = "horizontal", tags = { ssk_primary_controls = true } }
-  strip.style.height = 48
+  local strip = bar.add { type = "frame", style = "subheader_frame", direction = "vertical", tags = { ssk_primary_controls = true } }
+  strip.style.height = SK.toolbar_height(us)
+  strip.style.horizontally_stretchable = true
+  return strip
+end
+
+local function focus_toolbar(bar, us, player)
+  local strip = toolbar_strip(bar, us)
   local main = option_row(strip)
   item_pickers(main, us)
   local actions = right_group(main, us)
   zoom_buttons(actions, true)
   label_toggle(actions, us)
-  button(actions, "Options", "f_options", "Show or hide less-used chart and layout controls").toggled = us.options_open == true
-  history_controls(bar, us)
-  if us.neighborhood then
-    local making = bar.add { type = "label", name = "ssk_producers" }
-    making.style.width = math.max(100, (us.toolbar_width or us.canvas_w or 900) - 12)
-    making.style.font = "default-small"
-    making.style.single_line = true
-  end
-  local options = bar.add { type = "frame", style = "inside_shallow_frame", name = "ssk_options", direction = "vertical", visible = us.options_open == true }
-  options.style.padding = 4
-  local row = option_row(options)
-  widths_picker(row, us)
-  colors_picker(row, us)
-  lines_picker(right_group(row, us), us)
-  row = option_row(options)
-  if us.neighborhood then
-    local expand = button(row, "Expand inputs", "inputs_more", "Reveal another upstream production step (up to 6)")
-    expand.enabled = (us.input_depth or 1) < View.MAX_INPUT_DEPTH
-    if (us.input_depth or 1) > 1 then button(row, "Fewer inputs", "inputs_less", "Hide the furthest upstream step") end
-  else
-    small(row, "Steps:")
-    row.add { type = "drop-down", items = { "1", "2", "3" }, selected_index = us.focus_steps or 2,
-      tags = { ssk_sk = "f_steps" }, tooltip = "Item steps to include upstream and downstream" }
-  end
-  local drawing = right_group(row, us)
-  button(drawing, "Center", "center_selection", "Center the selected material")
-  reflow_button(drawing)
-  button(drawing, "Unpin", "unpin", "Clear the pinned chain highlight")
-  row = option_row(options)
-  live_toggle(row, us)
-  if developer_controls(player) then renderer_picker(right_group(row, us), us) end
+  settings_button(actions, us)
+  -- Balance picks its material from the list beside the chart, so only Focus keeps history.
+  if not us.neighborhood then history_controls(strip, us) end
 end
 
 local function build_toolbar(bar, us, L, player)
   if us.view == "focus" then return focus_toolbar(bar, us, player) end
-  bar.clear()
+  bar = toolbar_strip(bar, us)
   local r1 = option_row(bar)
 
   small(r1, "View:")
@@ -355,52 +435,11 @@ local function build_toolbar(bar, us, L, player)
   preset_picker.style.width = 190
 
   local actions = right_group(r1, us)
-  zoom_buttons(actions)
-  button(actions, "Advanced", "advanced", "Show or hide layout, tier range and line controls").toggled = us.advanced == true
-  local controls = bar.add { type = "flow", direction = "vertical", name = "ssk_advanced" }
-  controls.visible = us.advanced == true
-  r1 = option_row(controls)
-  small(r1, "Tiers by:")
-  r1.add { type = "drop-down", items = { "Tech era + depth", "Production depth" },
-           selected_index = (us.view == "overview" or us.tier_mode == "depth") and 2 or 1, tags = { ssk_sk = "tier_mode" },
-           enabled = us.view ~= "overview",
-           tooltip = "Overview uses production depth because groups span tech eras. Individual items can use tech era + depth or production depth." }
-  small(r1, "Range:")
-  local titems, lo_i, hi_i = {}, 1, 1
-  us.tier_vals = {}
-  for i, t in ipairs(L.all_tiers) do
-    titems[i] = View.tier_label(t)
-    us.tier_vals[i] = t
-    if us.tier_lo and t <= us.tier_lo + 1e-9 then lo_i = i end
-    if not us.tier_hi or t <= us.tier_hi + 1e-9 then hi_i = i end
-  end
-  if #titems == 0 then titems = { "T0" } end
-  r1.add { type = "drop-down", items = titems, selected_index = lo_i, tags = { ssk_sk = "tier_lo" } }
-  small(r1, "to")
-  r1.add { type = "drop-down", items = titems, selected_index = math.max(lo_i, hi_i), tags = { ssk_sk = "tier_hi" } }
-
-  r1 = option_row(controls)
-  r1.add { type = "checkbox", caption = "Split raw inputs", state = us.split_raw ~= false, tags = { ssk_sk = "split_raw" },
-           tooltip = "Ores, oil, water… get one copy per lane that uses them, placed next to their consumers" }
-  r1 = option_row(controls)
-  small(r1, "Layout:")
-  r1.add { type = "drop-down", items = { "Routed columns", "Swimlanes" }, selected_index = (us.layout == "lanes") and 2 or 1,
-           tags = { ssk_sk = "layout" },
-           tooltip = "Routed columns reserve item headers and long-link tracks; crossings can remain. Scroll sideways for larger graphs.\nSwimlanes group related items and allow manual ordering; ribbons can overlap." }
-  lines_picker(r1, us)
-  button(right_group(r1, us), "Reset layout", "reset_layout", "Forget manual ordering, hidden items and collapsed groups")
-
-  if developer_controls(player) then renderer_picker(option_row(controls), us) end
-  local r2 = option_row(bar)
-  widths_picker(r2, us)
-  colors_picker(r2, us)
-  local actions = right_group(r2, us)
-  live_toggle(actions, us)
-  label_toggle(actions, us)
-  reflow_button(actions)
-  button(actions, "Unpin", "unpin", "Clear the pinned highlight. Click a node to pin one.")
   if us.view == "overview" then button(actions, "Collapse overview", "overview_reset", "Unfinished grouping: return expanded groups to the overview") end
-  r2 = option_row(bar)
+  zoom_buttons(actions)
+  label_toggle(actions, us)
+  settings_button(actions, us)
+  local r2 = option_row(bar)
   local n = us.sel and L.nodes[us.sel]
   local clean = us.layout ~= "lanes"
   if clean and not n then
@@ -420,7 +459,7 @@ local function build_toolbar(bar, us, L, player)
     if n.kind == "group" then
       button(r2, "Expand group", "expand", "Show this group's members and their immediate production inputs", { gid = n.group })
     elseif n.base then
-      hint(r2, "Raw input, split per lane. Untick Split raw inputs under Advanced to regroup it.", 400)
+      hint(r2, "Raw input, split per lane. Untick Split raw inputs in Chart settings to regroup it.", 400)
     else
       button(r2, "Collapse group", "collapse", "Merge all visible members of this group into one node", { gid = n.group })
       small(r2, "Move to:")
@@ -744,47 +783,9 @@ local function rstate(pi, view)
 end
 
 function SK.toolbar_height(us)
-  if us.neighborhood then return 120 + (us.options_open and 112 or 0) end
-  if us.view == "focus" then return 96 + (us.options_open and 112 or 0) end
-  return (us.advanced and 272 or 96) + (us.sel and 32 or 0)
-end
-
-local function update_producers(bar,us,L)
-  local label=bar.ssk_producers
-  if not label then return end
-  local names,contribution={},{}
-  local graph=Graph.get()
-  local node=graph.nodes[us.focus]
-  for _,name in ipairs(node and node.producers or {}) do
-    local rate=L.recipe_rates[name]
-    if rate and rate.cps>0 then
-      names[#names+1]=name
-      local prod=rate.prod or 0
-      local normal=Sampler.PF_INCLUDES_BONUS and rate.cps/(1+prod) or rate.cps
-      local total=0
-      for _,product in ipairs(graph.recipes[name].products) do
-        if product.key==us.focus then total=total+normal*(product.amount+product.prod*prod) end
-      end
-      contribution[name]=total
-    end
-  end
-  table.sort(names,function(a,b)
-    if contribution[a]~=contribution[b] then return contribution[a]>contribution[b] end
-    return a<b
-  end)
-  local caption,tooltip={"","Making: "},{"","Recorded recipes producing this material:"}
-  for i,name in ipairs(names) do
-    local proto=prototypes.recipe[name]
-    local text=proto and proto.localised_name or name:gsub("%-"," ")
-    if i<=3 then
-      if i>1 then caption[#caption+1]=" · " end
-      caption[#caption+1]={"","[recipe="..name.."] ",text}
-    end
-    tooltip[#tooltip+1]={"","\n[recipe="..name.."] ",text}
-  end
-  if #names==0 then caption[#caption+1]="No recorded crafting recipe (may be mining, pumping or outside tracked machines)." end
-  if #names>3 then caption[#caption+1]=" +"..(#names-3).." more" end
-  label.caption=caption;label.tooltip=tooltip;label.tags={ssk_recipes=names}
+  if us.neighborhood then return 56 end
+  if us.view == "focus" then return 96 end
+  return 64 + (us.sel and 32 or 0)
 end
 
 -- c: tab content (vertical flow). full=false keeps the scroll-pane (and its scroll position).
@@ -799,12 +800,12 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   SK.defaults(us)
   if full or not c.ssk_sp then
     c.clear()
-    c.add { type = "scroll-pane", name = "ssk_bar", horizontal_scroll_policy = "auto", vertical_scroll_policy = "auto" }
+    c.add { type = "scroll-pane", name = "ssk_bar", style = "naked_scroll_pane", horizontal_scroll_policy = "auto", vertical_scroll_policy = "auto" }
     local info = c.add { type = "label", name = "ssk_info" }
     info.style.font = "default-small"
     info.style.font_color = { 0.65, 0.65, 0.65 }
-    local sp = c.add { type = "scroll-pane", name = "ssk_sp", horizontal_scroll_policy = "never",
-                       vertical_scroll_policy = "auto-and-reserve-space" }
+    local sp = c.add { type = "scroll-pane", name = "ssk_sp", style = "naked_scroll_pane",
+                       horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
     sp.style.horizontally_stretchable = true
     sp.style.height = viewH
     local canvas = sp.add { type = "flow", name = "ssk_canvas", direction = "vertical" }
@@ -819,7 +820,10 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   c.ssk_info.visible = developer_controls(player) == true
   local canvas = c.ssk_sp.ssk_canvas
   if us.view == "focus" and not us.focus then
-    if not only_auto or #c.ssk_bar.children==0 then focus_toolbar(c.ssk_bar, us, player) end
+    if not only_auto or #c.ssk_bar.children==0 then
+      focus_toolbar(c.ssk_bar, us, player)
+      settings_panel(c, us, nil, player, W, viewH)
+    end
     canvas.clear()
     Canvas.clear(player.index)
     local l = canvas.add { type = "label", caption = us.neighborhood and "Pick an item or fluid above, or use a row's magnifier to inspect its materials and uses." or "Pick an item or fluid above, or use a row's magnifier in the Balance tab." }
@@ -829,8 +833,10 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     return
   end
   local L = View.build(player, us, W, viewH)
-  if not only_auto or #c.ssk_bar.children==0 then build_toolbar(c.ssk_bar, us, L, player) end
-  update_producers(c.ssk_bar,us,L)
+  if not only_auto or #c.ssk_bar.children==0 then
+    build_toolbar(c.ssk_bar, us, L, player)
+    settings_panel(c, us, L, player, W, viewH)
+  end
   us.last_order = L.order
   us.last_lanes = L.lane_order
   us.last_subs = L.sub_order
@@ -881,7 +887,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   c.ssk_info.style.width = W
   c.ssk_info.style.single_line = true
   c.ssk_info.tooltip = c.ssk_info.caption
-  if not us.advanced then
+  if not us.settings_open then
     c.ssk_info.caption = string.format("%d items/groups · %d flows · %.0f s recorded · %s widths · %s colors · hover for details", nn, #L.links, L.seconds, us.heights=="linear" and "proportional" or "compressed", us.color_mode=="source" and "source" or "destination")
   end
   if us.neighborhood then
@@ -984,8 +990,7 @@ function SK.on_click(e, us)
     if not SK.step_history(us, a == "f_back" and -1 or a == "f_forward" and 1 or tags.steps) then return "none" end
   elseif a == "node" then
     us.sel = (us.sel ~= tags.key) and tags.key or nil
-  elseif a == "f_options" then us.options_open = not us.options_open
-  elseif a == "advanced" then us.advanced = not us.advanced
+  elseif a == "chart_settings" then us.settings_open = not us.settings_open or nil
   elseif a == "inputs_more" then us.input_depth = math.min(View.MAX_INPUT_DEPTH, (us.input_depth or 1) + 1)
   elseif a == "inputs_less" then us.input_depth = math.max(1, (us.input_depth or 1) - 1)
   elseif a == "deselect" then us.sel = nil

@@ -143,7 +143,10 @@ right sound.
 10. **Custom graphics only when vanilla has nothing suitable.** Prefer pointing a
     sprite prototype at a base-game image. The Balance favourite star
     (`ssk-star`, `ssk-star-off`) does this: it uses the Browse Games star from
-    `__core__/graphics/gui-new.png` inside a `tool_button`.
+    `__core__/graphics/gui-new.png` inside a `tool_button`. The chart settings
+    gear (`ssk-gear`) is a 32 px crop of the side-menu gear from
+    `__core__/graphics/side-menu-buttons.png`, tinted dark because the original
+    is drawn light for dark buttons.
 11. **Developer detail stays behind the "Show development tools" setting.** Chart
     statistics, scan cadence, machine counts and legend lines that Help already
     explains are hidden from normal players.
@@ -158,6 +161,16 @@ right sound.
     buttons at random widths in one row.
 14. Do not rely on Unicode symbols rendering in the default fonts; test them in
     native screenshots.
+15. A chart and its controls form one panel, not loose pieces on the tab
+    background: an `inside_deep_frame` with every toolbar row in one
+    `subheader_frame` across its top and the chart in a `naked_scroll_pane`
+    directly below (Balance, Focus and Full Sankey all do this).
+16. Less-used chart settings open from a gear `tool_button` (toggled while open)
+    as a fly-out: a `frame` with a `frame_title`, a `frame_action_button` close
+    and an `inside_shallow_frame_with_padding`, drawn over the chart's top-right
+    corner. It takes no layout height, so the chart never moves. Clicking the
+    gear again, the close button or Esc closes it; so do tab changes and
+    reopening the window.
 
 ## Known exceptions to fix
 

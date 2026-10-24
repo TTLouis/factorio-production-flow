@@ -58,6 +58,7 @@ assert(list.ssk_bal_items==items and target.valid,"selection replaced scrolled c
 assert(SK.balance_state(us).focus==target.tags.key,"row selection did not update inspector")
 assert(find(root,function(e) return e.name=="ssk_canvas" end).children[1]~=old_canvas,
   "paused inspector must redraw after explicit row selection")
+UI.on_click{element=find(root,function(e) return e.tags.ssk_sk=="chart_settings" end),player_index=player.index}
 UI.on_click{element=find(root,function(e) return e.tags.ssk_sk=="inputs_more" end),player_index=player.index}
 assert(find(root,function(e) return e.name=="ssk_bal_root" end)==list,
   "inspector control rebuilt the scrolled Balance list")

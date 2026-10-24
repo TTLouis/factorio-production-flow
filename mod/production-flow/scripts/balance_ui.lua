@@ -572,6 +572,8 @@ function BU.fill(player, c, us, scope, only_auto)
   end
   local stock_status=Sampler.stock_status()
   local age=stock_status.updated_tick and time(math.max(0,game.tick-stock_status.updated_tick)/60).." ago" or "first scan pending"
+  -- surface and period are already in the title bar; scan cadence is for development
+  context.visible = developer(player)
   context.caption = developer(player)
     and string.format("%s · Averaged over %s · Rates update every 5 s\nChest stock: %s · At least 5 min between scans", scope, time(secs), age)
     or string.format("%s · Averaged over %s", scope, time(secs))

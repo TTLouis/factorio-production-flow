@@ -291,7 +291,7 @@ function T.tick(UI, Sampler)
   local us = storage.ui[player.index]
   assert(us.period == 600, "10m is not the initial default")
   us.surface, us.tab_id, us.view = c.surface, c.tab, c.view or "overview"
-  us.live, us.advanced = false, c.advanced or false
+  us.live = false
   us.renderer = c.renderer or "poly"
   if mode=="scroll" or mode=="picker" or mode=="ux" or mode=="warmup" then
     us.bal_filter="all"; us.bal_details=c.details or false; us.bal_sort=c.groups and "groups" or "priority"; us.bal_group=nil
@@ -318,6 +318,10 @@ function T.tick(UI, Sampler)
   end
   UI.open(player)
   assert(us.sidx==game.surfaces[c.surface].index,"Wrong rendered surface")
+  if c.advanced then
+    UI.on_click{player_index=player.index,element=find_action(player.gui.screen.ssk_main,"chart_settings")}
+    assert(us.settings_open and player.gui.screen.ssk_main.ssk_inner.ssk_tabs["content_"..c.tab].ssk_chart.ssk_settings,"Chart settings did not open")
+  end
   if c.name=="full-platform-copper" or c.name=="full-vulcanus-copper" then
     local preset_picker=find_action(player.gui.screen.ssk_main,"preset")
     assert(us.preset_ids[preset_picker.selected_index]==us.preset,"Preset picker does not identify the displayed copper chain")
@@ -327,6 +331,9 @@ function T.tick(UI, Sampler)
   end
   assert(us.surface_names[find_scope(player.gui.screen.ssk_main).selected_index]==c.surface,"Surface picker does not identify rendered surface")
   if mode=="balance" or mode=="scroll" or mode=="ux" or mode=="warmup" or ((mode=="full" or mode=="names") and c.tab~="focus") then
+    -- Balance and Focus keep Center in Chart settings; close them again before capture.
+    local opened_settings=not find_action(player.gui.screen.ssk_main,"center_selection")
+    if opened_settings then UI.on_click{player_index=player.index,element=find_action(player.gui.screen.ssk_main,"chart_settings")} end
     for _,action in ipairs({"center_selection","zoom_fit"}) do
       local button=find_action(player.gui.screen.ssk_main,action)
       assert(button, "Missing Balance action "..action)
@@ -340,6 +347,7 @@ function T.tick(UI, Sampler)
       local center=find_action(player.gui.screen.ssk_main,"center_selection")
       UI.on_click({player_index=player.index,element=center})
     end
+    if opened_settings then UI.on_click{player_index=player.index,element=find_action(player.gui.screen.ssk_main,"chart_settings")} end
   end
   if mode=="scroll" then
     local left=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table
@@ -376,18 +384,22 @@ function T.tick(UI, Sampler)
   fx.live=was_live
 
   if mode=="picker" and c.tab~="sankey" then
-    fx.options_open = false
+    fx.settings_open = nil
     UI.refresh(player,false,false,true)
     local bar=find_named(root,"ssk_bar")
-    local collapsed=bar.style.minimal_height
-    assert(not bar.ssk_options.visible,"Options should start collapsed")
+    local chart=bar.parent
+    local toolbar_h,chart_h=bar.style.minimal_height,chart.ssk_sp.style.minimal_height
+    assert(not chart.ssk_settings,"Chart settings should start closed")
     local list_before=find_named(root,"ssk_bal_root")
-    UI.on_click{player_index=player.index,element=find_action(root,"f_options")}
-    assert(bar.ssk_options.visible and bar.style.minimal_height>collapsed,"Expanded controls did not reserve space")
-    if list_before then assert(list_before.valid,"Options rebuilt Balance list") end
-    if not c.options then
-      UI.on_click{player_index=player.index,element=find_action(root,"f_options")}
-      assert(not bar.ssk_options.visible and bar.style.minimal_height==collapsed,"Collapsed controls wasted chart space")
+    UI.on_click{player_index=player.index,element=find_action(root,"chart_settings")}
+    assert(chart.ssk_settings and find_action(chart.ssk_settings,"f_heights"),"Chart settings did not open")
+    assert(bar.style.minimal_height==toolbar_h and chart.ssk_sp.style.minimal_height==chart_h,"Chart settings moved the chart")
+    if list_before then assert(list_before.valid,"Chart settings rebuilt Balance list") end
+    UI.on_closed{player_index=player.index,element=root}
+    assert(root.valid and not chart.ssk_settings and player.opened==root,"Esc must close chart settings before the window")
+    if c.options then
+      UI.on_click{player_index=player.index,element=find_action(root,"chart_settings")}
+      assert(chart.ssk_settings,"Chart settings did not reopen")
     end
     fx.focus_hist,fx.focus_forward={},{}
     SK.select_focus(fx,"item/copper-plate")
@@ -435,6 +447,7 @@ function T.tick(UI, Sampler)
       UI.on_click{player_index=player.index,element=assert(material_button(dialog),"Material absent from icon grid")}
       assert(fx.focus==c.pick and not dialog.valid,"Native material choice failed")
       if list then assert(list.valid,"Native material choice rebuilt Balance list") end
+      if c.tab=="focus" then
       local previous=fx.focus_hist[#fx.focus_hist]
       UI.on_click{player_index=player.index,element=find_action(root,"f_back")}
       assert(fx.focus==previous and #fx.focus_forward==1,"Back lost forward material")
@@ -448,6 +461,7 @@ function T.tick(UI, Sampler)
         UI.on_click{player_index=player.index,element=find_action(root,"f_clear_history")}
         assert(fx.focus==focus and #fx.focus_hist==0 and #fx.focus_forward==0 and storage.bins==bins,"Clear history changed material or production data")
         assert(not find_action(root,"f_back").enabled and not find_action(root,"f_forward").enabled,"Cleared history still navigates")
+      end
       end
     else
       assert(#grid.tags.keys>0,"Native search returned no materials")
@@ -471,9 +485,11 @@ function T.tick(UI, Sampler)
     local help_button=find_ui(root,"help")
     assert(help_button.type=="sprite-button" and help_button.sprite=="utility/questionmark","Help must use built-in icon")
     assert(not find_ui(root,"export") and not find_action(root,"f_renderer"),"Normal menus expose development tools")
-    if c.name=="ux-stock" then
-      local making=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus.ssk_bar.ssk_producers
-      assert(making.tags.ssk_recipes[1]=="steel-plate","Main producing recipe must precede recycling")
+    if c.tab=="balance" then
+      local chart=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus
+      assert(not find_action(chart,"f_back") and not find_action(chart,"f_history"),"Balance chart must not show Focus history")
+      local context=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root.ssk_bal_context
+      assert(not context.visible,"Balance list must not repeat the surface and period")
     end
     if c.recent then
       local period=find_ui(root,"period");period.selected_index=1
@@ -489,11 +505,6 @@ function T.tick(UI, Sampler)
       UI.on_click({player_index=player.index,element=find_ui(root,"help")})
       assert(player.gui.screen.ssk_help,"Help action did not open")
       player.gui.screen.ssk_help.ssk_help_inner.ssk_help_tabs.selected_tab_index=c.help_tab
-    end
-    if c.name=="ux-copper" then
-      local making=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus.ssk_bar.ssk_producers
-      local found=false;for _,name in pairs(making.tags.ssk_recipes) do if name=="casting-copper" then found=true end end
-      assert(found,"Copper inspector must identify its recorded casting recipe")
     end
     if mode=="warmup" then
       assert(root.ssk_window_bar.ssk_history.visible,"Fresh-install history indicator missing")

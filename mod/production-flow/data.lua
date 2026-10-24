@@ -78,6 +78,12 @@ for _, v in ipairs({ { "ssk-star", { 32, 600 } }, { "ssk-star-off", { 0, 600 } }
   protos[#protos + 1] = { type = "sprite", name = v[1], filename = "__core__/graphics/gui-new.png",
     position = v[2], size = 32, scale = 0.5, priority = "extra-high-no-scale", flags = { "gui-icon" } }
 end
+-- Chart settings use the base game's side-menu gear, darkened like the other
+-- tool button icons (the original is drawn light for dark side-menu buttons).
+-- The 32 px crop is the gear itself, so it matches 16 px utility icons.
+protos[#protos + 1] = { type = "sprite", name = "ssk-gear", filename = "__core__/graphics/side-menu-buttons.png",
+  x = 16, y = 6 * 64 + 16, size = 32, scale = 0.5, tint = { 0.22, 0.22, 0.22 },
+  priority = "extra-high-no-scale", flags = { "gui-icon" } }
 data:extend(protos)
 
 -- Native table grids separate items while retaining the paired Details lines.

@@ -28,21 +28,34 @@ end
 for _, tab in ipairs({ "balance", "focus" }) do
   us.tab_id, us.bal_filter = tab, "all"
   local fx = tab == "balance" and SK.balance_state(us) or SK.focus_state(us)
-  fx.focus, fx.focus_hist, fx.focus_forward, fx.live, fx.options_open = "item/iron-plate", {}, {}, false, false
+  fx.focus, fx.focus_hist, fx.focus_forward, fx.live, fx.settings_open = "item/iron-plate", {}, {}, false, true
   UI.open(player)
   local main = player.gui.screen.ssk_main
   local list = find(main, function(e) return e.name == "ssk_bal_root" end)
   local bar = find(main, function(e) return e.name == "ssk_bar" end)
-  assert(not bar.ssk_options.visible, "less-used controls should start collapsed")
+  local chart = bar.parent
+  assert(not fx.settings_open and not chart.ssk_settings, "chart settings should start closed when the window opens")
+  assert(chart.spec.style == "inside_deep_frame" and chart.ssk_sp.spec.style == "naked_scroll_pane", "toolbar and chart must share one vanilla inset")
   assert(action(bar.children[1], "zoom_in") and action(bar.children[1], "show_labels"), "zoom and labels must remain in the front row")
-  assert(action(main, "f_options").type == "sprite-button" and not action(main, "f_options").toggled,
-    "Options must be a vanilla icon toggle")
-  local height = SK.toolbar_height(fx)
-  UI.on_click { element = action(main, "f_options"), player_index = 1 }
-  assert(fx.options_open and bar.ssk_options.visible and SK.toolbar_height(fx) > height, "Options did not open")
-  if list then assert(list.valid, "Options reset Balance list") end
-  UI.on_click { element = action(main, "f_options"), player_index = 1 }
-  assert(not fx.options_open and not bar.ssk_options.visible and SK.toolbar_height(fx) == height, "Options did not release chart space")
+  local gear = action(main, "chart_settings")
+  assert(gear.type == "sprite-button" and gear.sprite == "ssk-gear" and not gear.toggled, "Chart settings must be a vanilla gear toggle")
+  local height, chart_height = SK.toolbar_height(fx), chart.ssk_sp.style.height
+  UI.on_click { element = gear, player_index = 1 }
+  local panel = chart.ssk_settings
+  assert(fx.settings_open and panel and action(bar, "chart_settings").toggled, "Chart settings did not open")
+  assert(SK.toolbar_height(fx) == height and chart.ssk_sp.style.height == chart_height, "Chart settings must not move the chart")
+  assert(panel.style.top_margin + panel.style.height + panel.style.bottom_margin == 0, "Chart settings must take no layout height")
+  for _, name in ipairs({ "f_heights", "balance_colors", "f_lines", "live", "reflow", "unpin" }) do
+    assert(action(panel, name), "Chart settings lack " .. name)
+  end
+  assert(action(panel, tab == "balance" and "inputs_more" or "f_steps"), "Chart settings lack the step control")
+  if list then assert(list.valid, "Chart settings reset Balance list") end
+  UI.on_closed { element = main, player_index = 1 }
+  assert(main.valid and not fx.settings_open and not chart.ssk_settings and player.opened == main,
+    "Esc must close chart settings before the window")
+  UI.on_click { element = action(main, "chart_settings"), player_index = 1 }
+  UI.on_click { element = action(chart.ssk_settings, "chart_settings"), player_index = 1 }
+  assert(not fx.settings_open and not chart.ssk_settings, "the panel close button did not close chart settings")
   local open = find(main, function(e) return e.tags.ssk_picker == "open" end)
   assert(open and not find(main, function(e) return e.type == "choose-elem-button" end), "split selectors remain")
   assert(UI.on_click { element = open, player_index = 1 })
@@ -78,6 +91,11 @@ for _, tab in ipairs({ "balance", "focus" }) do
   assert(fx.focus == "fluid/water" and fx.live == false and not dialog.valid, "typed selection or paused chart failed")
   assert(player.gui.screen.ssk_main == main, "picker selection reopened window")
   if list then assert(find(main, function(e) return e.name == "ssk_bal_root" end) == list, "picker reset Balance list") end
+  if tab == "balance" then
+    assert(not action(main, "f_history") and not action(main, "f_back") and not action(main, "f_clear_history"),
+      "Balance chooses from its list and must not show Focus history")
+    fx.focus, fx.focus_hist, fx.focus_forward = "item/iron-plate", {}, {}
+  else
   local history = action(main, "f_history")
   history.selected_index = 2
   UI.on_selection { element = history, player_index = 1 }
@@ -92,6 +110,8 @@ for _, tab in ipairs({ "balance", "focus" }) do
   assert(not action(main, "f_clear_history").enabled, "empty history clear must be disabled")
   assert(not action(main, "f_history").enabled and not action(main, "f_back").enabled
     and not action(main, "f_forward").enabled, "cleared history still navigates")
+  end
+  local focus = fx.focus
   SK.select_focus(fx, "fluid/water"); SK.select_focus(fx, "item/wood")
   assert(SK.step_history(fx, -2) and fx.focus == focus and #fx.focus_forward == 2, "multi-step trail failed")
   assert(SK.step_history(fx, 2) and fx.focus == "item/wood", "multi-step forward failed")

@@ -301,7 +301,8 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     left.style.width, left.style.height = left_w, us.canvas_h + 100
     us.bal_width = left_w - 24
     us.bal_height = us.canvas_h + 100
-    local right = split.add { type = "flow", name = "ssk_balance_focus", direction = "vertical" }
+    -- the chart panel: toolbar strip on top, chart below, in one vanilla inset
+    local right = split.add { type = "frame", name = "ssk_balance_focus", style = "inside_deep_frame", direction = "vertical" }
     us.bal_chart_w = us.canvas_w - left_w - 12
     right.style.width, right.style.height = us.bal_chart_w, us.canvas_h + 100
   end
@@ -345,6 +346,11 @@ local function update_history(player,us)
   label.tooltip="The selected period is still filling. Rates use the recorded history available so far, not an assumed full window. Recording continues while the factory runs."
 end
 
+-- Focus and Full Sankey draw into one vanilla panel: toolbar strip on top, chart below.
+local function chart_panel(c)
+  return c.ssk_chart or c.add { type = "frame", name = "ssk_chart", style = "inside_deep_frame", direction = "vertical" }
+end
+
 -- full = rebuild the Sankey tab from scratch (otherwise its scroll position is kept)
 function UI.refresh(player, only_auto, full, keep_balance_rows)
   local us = ustate(player.index)
@@ -358,18 +364,27 @@ function UI.refresh(player, only_auto, full, keep_balance_rows)
     fx.sidx = us.sidx
     SK.defaults(fx)
     if only_auto and not fx.live then return end
-    SK.fill(player, c, fx, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(fx)), full, only_auto)
+    SK.fill(player, chart_panel(c), fx, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(fx)), full, only_auto)
     return
   end
   if id == "sankey" then
     SK.defaults(us)
     if only_auto and not us.live then return end
-    SK.fill(player, c, us, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(us)), full, only_auto)
+    SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(us)), full, only_auto)
     return
   end
   if only_auto and not AUTO_REFRESH[id] then return end
   if id ~= "balance" then c.clear() end
   fill[id](player, c, us, only_auto, keep_balance_rows)
+end
+
+-- Chart settings float over the chart; Esc, tab changes and reopening close them.
+local function close_chart_settings(us)
+  local open = false
+  for _, s in pairs({ us, us.fx, us.bal_fx }) do
+    if s.settings_open then s.settings_open, open = nil, true end
+  end
+  return open
 end
 
 function UI.close(player)
@@ -382,6 +397,7 @@ end
 function UI.open(player)
   UI.close(player)
   local us = ustate(player.index)
+  close_chart_settings(us)
   local developer = player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value
   local res, sc = player.display_resolution, player.display_scale
   local W, H = UI.dimensions(res, sc)
@@ -641,7 +657,9 @@ function UI.on_tab_changed(e)
   local f = e.element
   if not (f.valid and f.name == "ssk_tabs" and f.parent and f.parent.parent and f.parent.parent.name == WIN) then return false end
   local list = tabs_for(game.get_player(e.player_index))
-  ustate(e.player_index).tab_id = list[f.selected_tab_index] or "balance"
+  local us = ustate(e.player_index)
+  us.tab_id = list[f.selected_tab_index] or "balance"
+  close_chart_settings(us)
   UI.refresh(game.get_player(e.player_index), false, true)
   return true
 end
@@ -661,6 +679,11 @@ function UI.on_closed(e)
     end
     if player.gui.screen.ssk_help then
       Help.close(player);player.opened=player.gui.screen[WIN]
+      return true
+    end
+    if close_chart_settings(ustate(player.index)) then
+      player.opened = player.gui.screen[WIN]
+      UI.refresh(player, false, false, true)
       return true
     end
     UI.close(player)

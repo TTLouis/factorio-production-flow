@@ -7,7 +7,7 @@ local function find(e, action, key)
 end
 local function click(e, us, shift) return SK.on_click({element=e,player_index=1,shift=shift},us) end
 local us={view="focus",neighborhood=true,focus="item/electronic-circuit",period=600,
-  renderer="poly",input_depth=2,heights="sqrt",canvas_w=1200}
+  renderer="poly",input_depth=2,heights="sqrt",canvas_w=1200,settings_open=true} -- Chart settings hold Unpin, Colors and Center
 SK.fill(player,c,us,1200,800,true)
 local L=V.build(player,us,1200,800)
 assert(L.content_w<=1200 and L.content_h<=800, "small chain should fit without shrinking icons")
