@@ -160,9 +160,8 @@ local function make_table(parent, cols)
   for _,g in ipairs(groups) do
     local title=g.id=="item" and "Item & status" or g.id=="stock" and "Chest stock"
       or cols[1].details and "Rates & utilisation" or "Production rates"
-    local heading=text(band,title)
-    heading.style.width=g.width; heading.style.font="default-bold"
-    heading.style.font_color={0.85,0.80,0.67}
+    local heading=band.add{type="label",caption=title,style="caption_label"}
+    heading.style.width=g.width
     heading.style.horizontal_align="center"
   end
   local t = parent.add { type = "table", name = "ssk_bal_table", style="ssk_balance_grid",
@@ -315,6 +314,7 @@ function BU.fill(player, c, us, scope, only_auto)
     local picker = toolbar.add { type = "drop-down", items = names, selected_index = gi, tags = { ssk_ui = "bal_group" } }
     picker.style.width = math.min(240, math.max(120, (us.bal_width or 900) - 290))
     toolbar = root.add { type = "flow", direction = "horizontal" }
+    toolbar.style.vertical_align = "center"
     toolbar.style.horizontal_spacing = 8
     text(toolbar, "Order:")
     toolbar.add { type = "drop-down", items = { "Priority", "Item groups" }, selected_index = us.bal_sort == "groups" and 2 or 1,
@@ -358,9 +358,7 @@ function BU.fill(player, c, us, scope, only_auto)
             style="repeated_subheader_frame",direction="horizontal"}
           header.style.width=group_width
           header.style.left_padding,header.style.right_padding=8,8
-          local h=text(header,group_name(g),group_name(g))
-          h.style.font="default-bold"
-          h.style.font_color={0.95,0.85,0.65}
+          local h=header.add{type="label",caption=group_name(g),tooltip=group_name(g),style="caption_label"}
           h.style.width=group_width-16
           h.style.single_line=true
         end
@@ -389,7 +387,7 @@ function BU.fill(player, c, us, scope, only_auto)
   end
   local stock_status=Sampler.stock_status()
   local age=stock_status.updated_tick and time(math.max(0,game.tick-stock_status.updated_tick)/60).." ago" or "first scan pending"
-  context.caption = string.format("%s  ·  Averaged over %s  ·  Rates update every 5 s\nChest stock: %s  ·  At least 5 min between scans", scope, time(secs),age)
+  context.caption = string.format("%s · Averaged over %s · Rates update every 5 s\nChest stock: %s · At least 5 min between scans", scope, time(secs),age)
   for id, el in pairs(summaries) do
     local st = Balance.STATUS[id]
     el.caption = string.format("[color=%s]%s: %d[/color]", st.color, st.label, counts[id] or 0)
@@ -409,7 +407,7 @@ function BU.fill(player, c, us, scope, only_auto)
   end
   counter.caption = live_reuse and string.format("List order held · %d rows · %d match now",shown,matching_count)
     or string.format("Showing %d of %d matching items", shown, #filtered)
-  counter.tooltip="Live updates keep rows in place while updating values. Update list or change a filter to reapply row membership and ordering."
+  counter.tooltip="Automatic updates keep rows in place while updating values. Update list or change a filter to reapply row membership and ordering."
   return filtered[1] and filtered[1].key
 end
 

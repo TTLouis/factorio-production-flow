@@ -88,11 +88,14 @@ end
 ---------------------------------------------------------------------------
 -- single-line by default; wrap = true for long free text (needs a maximal_width to wrap at)
 local function label(parent, caption, style, wrap)
-  if style == "info_label" then
-    style = nil
-    caption = "[color=0.65,0.65,0.65]" .. caption .. "[/color]"
-  end
+  local hint = style == "info_label"
+  if hint then style = nil end
   local l = parent.add { type = "label", caption = caption, style = style }
+  -- same small grey hint text as the Balance and chart toolbars
+  if hint then
+    l.style.font = "default-small"
+    l.style.font_color = { 0.65, 0.65, 0.65 }
+  end
   if wrap then
     l.style.single_line = false
     l.style.maximal_width = 1400
@@ -528,7 +531,7 @@ function UI.on_click(e)
   elseif a == "rebuild_graph" then Graph.build(); UI.refresh(player)
   elseif a == "rescan" then
     local n = Sampler.rescan()
-    player.print("[Sankey] Rescanned: " .. n .. " crafting machines.")
+    player.print("[Production Flow] Rescanned: " .. n .. " crafting machines.")
     UI.refresh(player)
   elseif a == "rt_margin" or a == "rt_screen" then
     UI.close(player)

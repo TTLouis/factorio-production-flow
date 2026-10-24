@@ -729,7 +729,9 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   if full or not c.ssk_sp then
     c.clear()
     c.add { type = "scroll-pane", name = "ssk_bar", horizontal_scroll_policy = "auto", vertical_scroll_policy = "auto" }
-    c.add { type = "label", name = "ssk_info" }
+    local info = c.add { type = "label", name = "ssk_info" }
+    info.style.font = "default-small"
+    info.style.font_color = { 0.65, 0.65, 0.65 }
     local sp = c.add { type = "scroll-pane", name = "ssk_sp", horizontal_scroll_policy = "never",
                        vertical_scroll_policy = "auto-and-reserve-space" }
     sp.style.horizontally_stretchable = true
@@ -746,7 +748,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     if not only_auto or #c.ssk_bar.children==0 then focus_toolbar(c.ssk_bar, us, player) end
     canvas.clear()
     Canvas.clear(player.index)
-    local l = canvas.add { type = "label", caption = us.neighborhood and "Select a table row with its magnifier to inspect materials and uses." or "Pick an item above, or press the search button on a row in the Balance tab." }
+    local l = canvas.add { type = "label", caption = us.neighborhood and "Pick an item or fluid above, or use a row's magnifier to inspect its materials and uses." or "Pick an item or fluid above, or use a row's magnifier in the Balance tab." }
     l.style.single_line = false
     place(l, 24, 40, math.max(100, W - 48), 60)
     c.ssk_info.caption = ""
@@ -791,7 +793,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     end
   end
   c.ssk_info.caption = string.format(
-    "[color=0.65,0.65,0.65]%d nodes · %d ribbons · %d lanes · %d columns (%s–%s of %d tiers) · window %.0f s · %.4f px per item/s · fluids drawn ×%g · %d thin flows at %d px min · crossing cost %.0f · %d elements · ribbons carry the source item's units[/color]",
+    "%d items/groups · %d flows · %d lanes · %d columns (%s–%s of %d tiers) · %.0f s recorded · %.4f px per item/s · fluids drawn ×%g · %d thin flows at %d px min · crossing cost %.0f · %d elements · ribbons carry the source item's units",
     nn, #L.links, L.lane_list and #L.lane_list or 0, #L.cols,
     L.col_tiers[1] and View.tier_label(L.col_tiers[1]) or "-", L.col_tiers[#L.col_tiers] and View.tier_label(L.col_tiers[#L.col_tiers]) or "-",
     #L.all_tiers, L.seconds, L.scale or 0, L.fluid_factor or 1, L.clamped or 0, L.min_t or 0, L.crossing_cost or 0, count)
@@ -802,7 +804,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     c.ssk_info.caption = string.format("%d items/groups · %d flows · %.0f s recorded · %s widths · %s colors · hover for details", nn, #L.links, L.seconds, us.heights=="linear" and "proportional" or "compressed", us.color_mode=="source" and "source" or "destination")
   end
   if us.neighborhood then
-    c.ssk_info.caption = string.format("%d input step(s) · %s · %.0f s · shift-click to pin", (L.center_ci or 2)-1, us.heights=="linear" and "proportional" or "compressed widths", L.seconds)
+    c.ssk_info.caption = string.format("%d input step(s) · %.0f s recorded · %s widths · %s colors · Shift-click to pin", (L.center_ci or 2)-1, L.seconds, us.heights=="linear" and "proportional" or "compressed", us.color_mode=="source" and "source" or "destination")
     c.ssk_info.tooltip = "Colors follow the "..(us.color_mode=="source" and "source" or "destination")..". Ribbons carry source-material units. Fluids drawn ×"..tostring(L.fluid_factor)..". Thin flows are enlarged to "..L.min_t.." px. Hover for exact rates."
   end
 end
@@ -911,7 +913,7 @@ function SK.on_click(e, us)
       local id = Gr.create(pi, name, cur.super)
       Gr.assign(pi, base_key(us.sel), id)
     else
-      player.print("[Sankey] Type a group name first.")
+      player.print("[Production Flow] Type a group name first.")
       return "redraw"
     end
   else
