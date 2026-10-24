@@ -278,8 +278,9 @@ local function trail_controls(bar, us)
   for i = first, #back do
     trail.add { type = "sprite-button", style = "slot_button", sprite = back[i],
       tooltip = { "", "Return to ", caption(back[i]) }, tags = { ssk_sk = "f_trail", steps = -(#back - i + 1) } }
-    local arrow = trail.add { type = "sprite", sprite = "utility/right_arrow" }
+    local arrow = trail.add { type = "sprite", sprite = "utility/right_arrow", resize_to_sprite = false }
     arrow.style.width, arrow.style.height = 12, 12
+    arrow.style.stretch_image_to_widget_size = true
   end
   if us.focus then
     local current = small(trail, caption(us.focus))
