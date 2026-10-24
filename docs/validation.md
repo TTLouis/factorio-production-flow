@@ -1,23 +1,23 @@
-# Local 0.1.3 candidate
+# Published 0.1.3
 
-Version 0.1.3 is prepared locally and has not been published. The current UI
+Version 0.1.3 was published on 24 October 2026. The current UI
 preview covers selector margins with and without a scrollbar, settings fly-out
 bottom spacing, fixed Balance headings and Focus navigation at **100% only**.
-See the [candidate UI previews](ui-preview-0.1.3.md).
+See the [UI screenshots](ui-preview-0.1.3.md).
 
 The Lua regression suite and 19 offline publisher tests pass. Native Factorio
 2.1.23 checks pass with 25 captures (scroll and picker) at 100%, no skipped cases, and the configuration
 event recording **0.1.0 → 0.1.3**. The saved ten-minute history survives the upgrade.
 A direct 0.1.2 → 0.1.3 upgrade was not separately exercised.
 
-Candidate `dist/production-flow_0.1.3.zip` SHA256:
+Published `production-flow_0.1.3.zip` SHA256:
 `ca2d586588c681c50a33afa51c8792df1f5531884d5d5fb370d3523a9573e312`
 
 All 31 archive members match the final source. Runtime code and assets match the
 native-tested source exactly; only changelog.txt was updated afterward to record
 the approved heading and scrollbar refinements. The manifest, LICENSE, changelog
 and 512 px thumbnail validate. Test hooks and development tools
-are excluded. The six candidate gallery images match the native captures. Original
+are excluded. The six published gallery images match the native captures. Original
 save/profile hashes and the published 0.1.2 archive remain unchanged. Following
 the approved UI work, development tabs, test commands, export settings, logging
 and renderer comparisons were removed from the runtime and validated again.
@@ -30,9 +30,14 @@ The final ZIP differs from the native test archive only in changelog.txt and ZIP
 entry order; no runtime code changed after native validation. Native harness checks invoke GUI handlers rather than
 physically clicking every control.
 
-This candidate is committed locally for release preparation and remains unpublished.
-No release tag, push or publishing workflow was created. No fresh UPS benchmark was run for
-these UI changes; the stock measurements below are historical.
+Release tag `v0.1.3` points to `e190922a61a3d8f855647d02f05105d48df4a2e9`.
+The [publishing workflow](https://github.com/TTLouis/factorio-production-flow/actions/runs/40142003898)
+passed both validation and publication. The live GitHub ZIP and Mod Portal release
+match the approved archive; the live description and six screenshot identifiers
+match the approved files. Repository documentation was then updated to identify
+0.1.3 as the current public beta. No runtime files or published archive changed.
+No fresh UPS benchmark was run for these UI changes; stock measurements below
+are historical.
 
 # Configurable stock cooldown — historical measurements
 

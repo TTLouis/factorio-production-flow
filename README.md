@@ -3,13 +3,12 @@
 **Production balances and interactive Sankey charts for Factorio.**
 
 Production Flow shows what your factory makes, what it consumes, and how recipes
-connect on the selected surface. Public beta: **0.1.2**, by **TTLouis**.
+connect on the selected surface. Public beta: **0.1.3**, by **TTLouis**.
 
-**Local 0.1.3 candidate:** compact chart controls, a combined item/fluid icon
+**New in 0.1.3:** compact chart controls, a combined item/fluid icon
 selector, Focus navigation, Balance favourites and framed headings, plus the
 configurable chest-stock cooldown (1-minute minimum, 5-minute default).
-It has not been published; the public download remains 0.1.2.
-See [candidate UI previews](docs/ui-preview-0.1.3.md) and [the changelog](CHANGELOG.md).
+See [UI screenshots](docs/ui-preview-0.1.3.md) and [the changelog](CHANGELOG.md).
 
 ## Views
 
@@ -32,7 +31,7 @@ sets a short averaging period; **Auto-update chart** only controls chart redraws
 The default measurement window is
 **10 minutes**. History survives saves; new installations show a warm-up indicator as it accumulates.
 
-**0.1.3 candidate UI:**
+**0.1.3 UI:**
 
 ![Balance summaries, fixed headings and compact controls](docs/screenshots/24-balance-controls.png)
 ![Focus navigation and material history](docs/screenshots/27-focus-navigation.png)
@@ -43,8 +42,8 @@ Requires **Factorio 2.1**. Tested with Factorio **2.1.23** and a Space Age save,
 including planetary and local space-platform production.
 
 Install [Production Flow from the Mod Portal](https://mods.factorio.com/mod/production-flow),
-or download `production-flow_0.1.2.zip` from the
-[GitHub beta release](https://github.com/TTLouis/factorio-production-flow/releases/tag/v0.1.2)
+or download `production-flow_0.1.3.zip` from the
+[GitHub beta release](https://github.com/TTLouis/factorio-production-flow/releases/tag/v0.1.3)
 and place it in your Factorio mods directory.
 Open Production Flow in-game, select a surface, and inspect a Balance row with
 its magnifier button. Expand inputs to follow its recipe chain upstream.

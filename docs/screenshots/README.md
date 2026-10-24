@@ -1,12 +1,12 @@
 # Beta screenshots
 
-## Local 0.1.3 candidate
+## 0.1.3 release
 
-The [candidate UI gallery](../ui-preview-0.1.3.md) uses native captures from the
+The [UI gallery](../ui-preview-0.1.3.md) uses native captures from the
 100% upgrade check: 24–29 cover Balance controls/groups, the item/fluid selector,
 Focus history, chart settings and a scrolling material search. The Balance photos
-show the latest single heading row and 8 px scrollbar gap. These previews
-are prepared locally and have not been published.
+show the latest single heading row and 8 px scrollbar gap. All six photos were
+published with the 0.1.3 description on GitHub and the Mod Portal.
 
 ## Earlier published versions and development measurements
 

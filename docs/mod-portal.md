@@ -1,8 +1,7 @@
 # Production Flow (Beta)
 
-The short description is live. The full description below is the local 0.1.3
-candidate draft, including the UI improvements and configurable stock cooldown.
-It has not been republished.
+Published for 0.1.3, including the UI improvements, updated photos and
+configurable stock cooldown. The description below matches the live Mod Portal page.
 
 ## Short description
 See where your factory's resources go. Spot imbalances and explore item and fluid production with interactive Sankey charts.

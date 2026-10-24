@@ -1,6 +1,6 @@
-# Production Flow 0.1.3 — candidate UI preview
+# Production Flow 0.1.3 — UI screenshots
 
-Prepared locally for review; not published. Native Factorio 2.1.23 captures at
+Published with 0.1.3. Native Factorio 2.1.23 captures at
 1920×1080 and **100% interface size**. The captures come from the 0.1.3 upgrade
 check against an isolated copy of the warmed 0.1.0 save. The native configuration
 event confirms the 0.1.0 → 0.1.3 upgrade and retained ten-minute history.

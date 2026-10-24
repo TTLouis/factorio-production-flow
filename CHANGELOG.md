@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.3 — local release candidate
+## 0.1.3 — 2026-10-24
 
 ### UI improvements
 
@@ -47,7 +47,7 @@
 - Replace the history/window wording in the short description with an introduction
   focused on production imbalances and interactive item/fluid charts.
 
-Prepared locally for review. This candidate has not been published.
+Published on GitHub and the Factorio Mod Portal.
 
 ## 0.1.2 performance work
 
