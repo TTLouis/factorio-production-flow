@@ -131,6 +131,32 @@ for _, tab in ipairs({ "balance", "focus" }) do
   assert(UI.on_closed { element = main, player_index = 1 } and player.opened == main and not dialog.valid
     and main.valid, "Escape must close the picker before the main UI")
 end
+-- Many modded item groups: tabs wrap six per row, then the tab area scrolls and
+-- the ten-column grid keeps its height.
+local extra = {}
+for i = 1, 30 do
+  local name = string.format("modded-material-%02d", i)
+  extra[#extra + 1] = name
+  rawset(prototypes.item, name, { name = name, localised_name = name, order = name,
+    group = { name = "modded-group-" .. i, order = string.format("m%02d", i), localised_name = name },
+    subgroup = { name = "modded-sub-" .. i, order = "a" } })
+end
+local MaterialPickerTest = TREQ("scripts.material_picker")
+MaterialPickerTest.open(player, "focus", nil)
+local dialog = player.gui.screen.ssk_material_picker
+local inner = dialog.ssk_material_inner
+local tab_count = #inner.ssk_group_scroll.ssk_groups.children
+assert(tab_count >= 31 and inner.ssk_group_scroll.ssk_groups.column_count == 6, "every modded group needs a tab, six per row")
+assert(inner.ssk_group_scroll.style.height == 4 * 71 and inner.ssk_group_scroll.style.width == 6 * 71 + 12,
+  "past four rows the group tabs must scroll beside a scrollbar")
+assert(results(dialog).column_count == 10 and inner.ssk_slot_frame.ssk_slot_scroll.style.height >= 4 * 40,
+  "the grid must stay ten wide and keep at least four rows")
+MaterialPickerTest.close(player)
+MaterialPickerTest.open(player, "focus", "item/wood")
+assert(player.gui.screen.ssk_material_picker.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll.style.height <= 12 * 40,
+  "a tall screen gives the grid up to twelve rows")
+MaterialPickerTest.close(player)
+for _, name in ipairs(extra) do rawset(prototypes.item, name, nil) end
 for kind, names in pairs(originals) do
   for _, name in ipairs(fixture_names) do rawset(prototypes[kind], name, names[name]) end
 end

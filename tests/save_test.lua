@@ -489,7 +489,7 @@ function T.tick(UI, Sampler)
     local dialog=assert(player.gui.screen.ssk_material_picker)
     local grid=find_named(dialog,"ssk_results")
     assert(grid.type=="table" and grid.tags.total>100,"Incomplete material icon grid")
-    local categories=dialog.ssk_material_inner.ssk_groups
+    local categories=dialog.ssk_material_inner.ssk_group_scroll.ssk_groups
     for _,category in pairs(categories.children) do
       assert(category.tags.group~="other" and category.tags.group~="signals", "Excluded selector category remains visible")
     end
