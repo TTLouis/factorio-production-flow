@@ -78,6 +78,7 @@ prototypes = { recipe = recipes,
 -- ---------- mock world ----------
 local tick = 0
 local machines = {}
+MOCK_CHESTS = {}
 local function M(recipe, speed, prod, surface)
   local e = { valid = true, type = (recipe:find("plate") and "furnace" or "assembling-machine"),
               unit_number = #machines + 1, surface = surface, force = FORCE, products_finished = 0,
@@ -86,7 +87,15 @@ local function M(recipe, speed, prod, surface)
   machines[#machines+1] = e; return e
 end
 local nauvis = { index = 1, name = "nauvis" }
-nauvis.find_entities_filtered = function() local t = {} for _, m in ipairs(machines) do if m.surface == nauvis then t[#t+1] = m end end return t end
+nauvis.find_entities_filtered = function(filter)
+  local t, allowed = {}, {}
+  if type(filter.type)=="table" then for _,name in ipairs(filter.type) do allowed[name]=true end
+  else allowed[filter.type]=true end
+  for _,list in ipairs({machines,MOCK_CHESTS}) do for _,e in ipairs(list) do
+    if e.valid and e.surface==nauvis and allowed[e.type] then t[#t+1]=e end
+  end end
+  return t
+end
 M("iron-plate", 2, 0, nauvis); M("iron-plate", 2, 0, nauvis); M("copper-plate", 2, 0, nauvis)
 M("copper-cable", 1, 0, nauvis); M("electronic-circuit", 1, 0.1, nauvis); M("iron-gear-wheel", 1, 0, nauvis)
 M("kovarex", 1, 0, nauvis); M("uranium-processing", 1, 0, nauvis); M("iron-gear-wheel-recycling", 1, 0, nauvis)
@@ -121,7 +130,7 @@ helpers = { is_valid_sprite_path = function() return true end, table_to_json = t
 storage = {}
 package.loaded["mod-gui"] = { button_style = "mod_gui_button", get_button_flow = function(p) return p.gui.top end }
 local handlers, nth = {}, {}
-defines = { events = setmetatable({}, { __index = function(_, k) return k end }) }
+defines = { inventory={chest=1}, events = setmetatable({}, { __index = function(_, k) return k end }) }
 script = { active_mods = { ["production-flow"] = "0.0.6", base = "2.0.77", ["space-age"] = "2.0.77" }, on_init = function(f) handlers.init = f end, on_configuration_changed = function(f) handlers.cc = f end,
            on_event = function(id, f) handlers[id] = f end, on_nth_tick = function(n, f) nth[n] = f end }
 commands = { add_command = function(n, h, f) handlers["cmd_" .. n] = f end }
@@ -131,6 +140,10 @@ dofile("control.lua")
 local real_require = require
 require = function(name) error("Require can't be used outside of control.lua parsing (" .. name .. ")", 2) end
 TREQ = function(name) return package.loaded[name] or real_require(name) end
+MOCK_CHESTS[1]={valid=true,type="container",unit_number=800001,surface=nauvis,force=FORCE,
+  get_inventory=function() return {valid=true,get_contents=function() return {
+    {name="iron-plate",count=math.max(0,5000-game.tick/10),quality="normal"},
+    {name="electronic-circuit",count=200+game.tick/50,quality="normal"}} end} end}
 handlers.init()
 assert(player.gui.top.ssk_toggle, "toolbar button missing")
 print("graph:", storage.graph.n_nodes, storage.graph.n_recipes, storage.graph.n_reversing, "tracked:", #storage.mlist)
@@ -235,4 +248,5 @@ dofile(TESTDIR .. "/recipe_api_test.lua")
 dofile(TESTDIR .. "/selection_refresh_test.lua")
 dofile(TESTDIR .. "/plain_names_test.lua")
 dofile(TESTDIR .. "/usability_test.lua")
+dofile(TESTDIR .. "/chest_stock_test.lua")
 print("ALL OK")

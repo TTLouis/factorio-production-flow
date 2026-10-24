@@ -1,21 +1,5 @@
 local Sm,UI,SK,B=TREQ("scripts.sampler"),TREQ("scripts.ui"),TREQ("scripts.sankey_ui"),TREQ("scripts.balance")
 local player=game.players[1]
-local old_storage,old_nets=storage,game.forces.player.logistic_networks
-storage={stock={{tick=0,s={[1]={["item/steel-plate"]=-3}}}}}
-Sm.init()
-assert(#storage.stock==0,"old availability history must not create a stock trend")
-local available=-3
-local point={owner={unit_number=777},targeted_items_pickup={{name="steel-plate",quality="normal",count=104}}}
-local net={get_contents=function() return {{name="steel-plate",quality="normal",count=available}} end,
-  provider_points={point},storage_points={point}}
-assert(Sm.network_stock(net)["item/steel-plate"]==101,"stored stock is physical 101, not available -3 or clamped zero")
-local mixed={get_contents=function() return {{name="speed-module",quality="normal",count=-6},{name="speed-module",quality="uncommon",count=58}} end,
-  provider_points={{owner={unit_number=778},targeted_items_pickup={{name="speed-module",quality="normal",count=8}}}}}
-assert(Sm.network_stock(mixed)["item/speed-module"]==60,"reservations and qualities must combine without cancellation")
-game.forces.player.logistic_networks={nauvis={net}}
-Sm.on_stock(0);available=-5;Sm.on_stock(600)
-assert(Sm.stock(1)["item/steel-plate"].count==99 and Sm.stock(1)["item/steel-plate"].per_min==-12,"stock trend must use corrected stored counts")
-storage,game.forces.player.logistic_networks=old_storage,old_nets
 player.mod_settings["ssk-debug-tabs"]={value=false}
 local us=storage.ui[1];us.tab_id="balance";us.bal_filter="all";us.period=600
 SK.balance_state(us).focus="fluid/water"
@@ -56,4 +40,4 @@ local update=find(root,function(e)return e.tags.ssk_ui=="bal_update" end)
 UI.on_click({element=update,player_index=1})
 assert(root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root~=list and fx.focus==focus,"Update list must reapply membership without changing inspected material")
 assert(B.STATUS.starved.label=="Low activity" and B.STATUS.limited.label=="Possible supply limit","activity alerts must avoid claiming a confirmed cause")
-print("USABILITY OK: physical stock, reservation/quality correction, history baseline, controls, help and explicit list refresh")
+print("USABILITY OK: physical stock, controls, help and explicit list refresh")

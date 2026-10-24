@@ -5,6 +5,7 @@ local SK = require("scripts.sankey_ui")
 local Model = require("scripts.model")
 local View = require("scripts.view")
 local Diag = require("scripts.diag")
+local ChestStock=require("scripts.chest_stock")
 local start, step, capture = nil, 0, nil
 local captures, skipped, products, usage_labels = {}, {}, {}, {}
 
@@ -86,59 +87,36 @@ if mode=="audit" then
   cases={{name="stock-audit",surface="nauvis",tab="balance",focus="item/steel-plate",depth=1}}
 end
 
+local audit_fixture
 local function audit_stock(Sampler)
-  local report={tick=game.tick,networks={},negative_entries=0}
-  for sname,nets in pairs(game.forces.player.logistic_networks) do
-    for _,net in pairs(nets) do
-      local contents=net.get_contents()
-      for _,entry in pairs(contents) do
-        if entry.count<0 then
-          report.negative_entries=report.negative_entries+1
-          local quality=entry.quality or "normal"
-          local name=entry.name
-          local rec={surface=sname,network=net.network_id,item=name,quality=quality,
-            network_count=entry.count,physical=0,targeted_pickup=0,targeted_deliver=0,owners={}}
-          local seen={}
-          for _,points in ipairs({net.provider_points,net.storage_points}) do
-            for _,point in pairs(points) do
-              local owner=point.owner
-              if owner.valid and not seen[owner.unit_number or owner] then
-                seen[owner.unit_number or owner]=true
-                local inv=owner.get_inventory(defines.inventory.chest)
-                local n=inv and inv.get_item_count{name=name,quality=quality} or 0
-                local pick,deliver=0,0
-                for _,x in pairs(point.targeted_items_pickup) do if x.name==name and x.quality==quality then pick=pick+x.count end end
-                for _,x in pairs(point.targeted_items_deliver) do if x.name==name and x.quality==quality then deliver=deliver+x.count end end
-                rec.physical=rec.physical+n;rec.targeted_pickup=rec.targeted_pickup+pick;rec.targeted_deliver=rec.targeted_deliver+deliver
-                if n~=0 or pick~=0 or deliver~=0 then rec.owners[#rec.owners+1]={name=owner.name,count=n,pickup=pick,deliver=deliver} end
-              end
-            end
-          end
-          local corrected=Sampler.network_stock(net)
-          rec.corrected_stored=corrected["item/"..name]
-          -- The UI combines qualities, so compare the corrected result against
-          -- all physical qualities of this item in the same owners.
-          local physical_all=0;local owners_seen={}
-          for _,points in ipairs({net.provider_points,net.storage_points}) do
-            for _,point in pairs(points) do
-              local owner=point.owner
-              if owner.valid and not owners_seen[owner.unit_number or owner] then
-                owners_seen[owner.unit_number or owner]=true
-                local inv=owner.get_inventory(defines.inventory.chest)
-                if inv then for _,x in pairs(inv.get_contents()) do if x.name==name then physical_all=physical_all+x.count end end end
-              end
-            end
-          end
-          rec.physical_all_qualities=physical_all
-          assert(rec.corrected_stored==physical_all,"Reservation correction does not match physical stock")
-          rec.providers=net.get_contents("providers");rec.storage=net.get_contents("storage")
-          report.networks[#report.networks+1]=rec
-        end
-      end
+  local C=ChestStock
+  local surface=game.create_surface("chest-stock-audit",{width=64,height=64,default_enable_all_autoplace_controls=false})
+  surface.request_to_generate_chunks({0,0},1);surface.force_generate_chunk_requests()
+  local tiles={};for y=-10,10 do for x=-10,10 do tiles[#tiles+1]={name="refined-concrete",position={x,y}} end end
+  surface.set_tiles(tiles)
+  local expected=0
+  for i,name in ipairs({"wooden-chest","iron-chest","steel-chest","requester-chest","buffer-chest","storage-chest","passive-provider-chest","active-provider-chest"}) do
+    local chest=surface.create_entity{name=name,position={-8+2*i,0},force="player"}
+    assert(chest and chest.insert{name="steel-plate",count=i,quality="normal"}==i)
+    assert(chest.insert{name="steel-plate",count=2*i,quality="rare"}==2*i)
+    C.add(chest);expected=expected+3*i
+  end
+  C.rescan() -- Include the entire fixture in a fresh scan.
+  audit_fixture={surface=surface.index,expected=expected}
+end
+local function finish_audit(Sampler)
+  local measured=Sampler.stock(audit_fixture.surface)["item/steel-plate"]
+  assert(measured and measured.count==audit_fixture.expected,"Native chest stock fixture mismatch")
+  local report={tick=game.tick,fixture=audit_fixture,measured=measured,types={},surfaces={},sampler=Sampler.stock_status()}
+  for _,surface in pairs(game.surfaces) do
+    local n=0
+    for _,chest in pairs(surface.find_entities_filtered{type={"container","logistic-container"},force="player"}) do
+      report.types[chest.name]=(report.types[chest.name] or 0)+1;n=n+1
     end
+    if n>0 then report.surfaces[surface.name]={chests=n,stock=Sampler.stock(surface.index)} end
   end
   helpers.write_file("save-test/stock-audit.json",helpers.table_to_json(report),false)
-  log("STOCK AUDIT negatives="..report.negative_entries)
+  log("STOCK AUDIT all eight chest types and mixed qualities: "..measured.count.." items")
 end
 
 if mode=="ux" then
@@ -227,6 +205,8 @@ function T.tick(UI, Sampler)
     Sampler.on_stock(game.tick)
     log("SANKEY SAVE RELOAD HISTORY OK")
   end
+  if not Sampler.stock_known(game.surfaces.nauvis.index) then return end
+  if mode=="audit" and not Sampler.stock_known(audit_fixture.surface) then return end
   if elapsed % 60 ~= 0 then return end
   local player = game.connected_players[1]
   assert(player, "Graphical test has no connected player")
@@ -246,6 +226,7 @@ function T.tick(UI, Sampler)
     local usage={}
     verify_usage(player.gui.screen.ssk_main,player.gui.screen.ssk_main,usage)
     if next(usage) then usage_labels[capture]=usage end
+    if mode=="audit" then finish_audit(Sampler) end
     local node = find_node(player.gui.screen.ssk_main)
     if node then
       assert(node.tooltip ~= nil, "Node has no tooltip")

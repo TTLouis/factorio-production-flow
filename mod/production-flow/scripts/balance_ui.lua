@@ -54,7 +54,7 @@ function BU.matches(r, filter)
   if filter == "shortages" then return SHORTAGE[r.status] == true end
   if filter == "surpluses" then return r.status == "surplus" end
   if filter == "capacity" then return r.status == "overbuilt" end
-  return r.status ~= "ok" and r.status ~= "source"
+  return r.status ~= "ok" and r.status ~= "source" and r.status ~= "stored"
 end
 
 -- A single column definition controls both headers and cells, including all
@@ -70,9 +70,9 @@ local COLUMNS = {
   { id = "net", name = "Net /s", width = 80, numeric = true,
     help = "Production minus consumption per second. Positive = surplus; negative = shortage." },
   { id = "stock", name = "Stock", width = 85, numeric = true,
-    help = "Stored items in provider/storage inventories on this surface, across all qualities, including robot pickup reservations. Other chests, requester inventories, items in transit and fluid tanks are excluded. — means no stock data; 0 means measured empty." },
+    help = "Physical contents of ordinary and logistic chests on this surface, including requester and buffer chests, across all qualities. No logistic network is required. Belts, machines, vehicles, player inventories and fluid tanks are excluded. — means unavailable; 0 means measured empty." },
   { id = "eta", name = "Empty in", width = 90, numeric = true,
-    help = "Estimated time until logistic stock is empty if its current drain continues. Recent stock trend takes precedence over production minus consumption." },
+    help = "Estimated time until chest stock is empty if its current drain continues. Recent stock trend takes precedence over production minus consumption." },
   { id = "netp", name = "Net %", width = 70, numeric = true, detail = true,
     help = "Net rate divided by the larger of production and consumption. Differences within 5% count as balanced." },
   { id = "pu", name = "Producers", width = 90, numeric = true, detail = true,
@@ -80,7 +80,7 @@ local COLUMNS = {
   { id = "cu", name = "Consumers", width = 90, numeric = true, detail = true,
     help = "Estimated consumer utilisation: measured crafts / current crafting capacity. Long periods use today's machines; values may exceed 100% after capacity changes." },
   { id = "trend", name = "Stock /min", width = 90, numeric = true, detail = true,
-    help = "Recent change in logistic stock per minute (about 60 seconds), independent of the selected production averaging period." },
+    help = "Recent change in chest stock per minute (about 60 seconds), independent of the selected production averaging period." },
 }
 
 local function values(r)
@@ -157,7 +157,7 @@ local function make_table(parent, cols)
     column_count=#groups,draw_vertical_lines=true,draw_horizontal_line_after_headers=true}
   band.style.horizontal_spacing=0
   for _,g in ipairs(groups) do
-    local title=g.id=="item" and "Item & status" or g.id=="stock" and "Logistic stock"
+    local title=g.id=="item" and "Item & status" or g.id=="stock" and "Chest stock"
       or cols[1].details and "Rates & utilisation" or "Production rates"
     local heading=text(band,title)
     heading.style.width=g.width; heading.style.font="default-bold"
@@ -268,19 +268,22 @@ function BU.fill(player, c, us, scope, only_auto)
     root = c.ssk_bal_root
     context, counter = root.ssk_bal_context, root.ssk_bal_footer.ssk_bal_count
     summaries, cells = {}, {}
-    for _, id in ipairs({ "deficit", "limited", "starved", "surplus", "overbuilt", "ok", "source" }) do
+    for _, id in ipairs({ "deficit", "limited", "starved", "surplus", "overbuilt", "ok", "source", "stored" }) do
       summaries[id] = root.ssk_bal_summary["ssk_bal_" .. id]
     end
     for i = 1, shown do
       local entry = root.ssk_bal_items["ssk_bal_section_" .. i]
       if entry then -- Sections are named for the first row they contain.
         local t = entry.ssk_bal_table
+        -- Reading children copies the whole array through the Factorio API.
+        -- Cache it once, not once for every cell in the table.
+        local children = t.children
         local cols = columns(us.bal_details, us.bal_width)
         local offset = #cols
         local j = i
         while j <= shown and (j == i or not root.ssk_bal_items["ssk_bal_section_" .. j]) do
           cells[j] = {}
-          for k, col in ipairs(cols) do cells[j][col.id] = t.children[offset + k] end
+          for k, col in ipairs(cols) do cells[j][col.id] = children[offset + k] end
           offset = offset + #cols
           j = j + 1
         end
@@ -323,12 +326,12 @@ function BU.fill(player, c, us, scope, only_auto)
     local summary = root.add { type = "table", name = "ssk_bal_summary", column_count = 2 }
     summary.style.horizontal_spacing = 18
     summaries = {}
-    for _, id in ipairs({ "deficit", "limited", "starved", "surplus", "overbuilt", "ok", "source" }) do
+    for _, id in ipairs({ "deficit", "limited", "starved", "surplus", "overbuilt", "ok", "source", "stored" }) do
       summaries[id] = summary.add { type = "label", name = "ssk_bal_" .. id, tooltip = Balance.STATUS[id].help }
       summaries[id].style.width = math.floor((us.bal_width or 900) / 2) - 18
       summaries[id].style.single_line = true
     end
-    local hint = text(root, "Rates /s · stored logistic stock, all qualities · — unavailable · ≈ estimated empty time")
+    local hint = text(root, "Rates /s · chest stock, all qualities · — unavailable · ≈ estimated empty time")
     hint.style.font="default-small"
     hint.style.font_color = { 0.65, 0.65, 0.65 }
     hint.style.single_line = false
@@ -370,7 +373,7 @@ function BU.fill(player, c, us, scope, only_auto)
       last = g.id
     end
     if shown == 0 then
-      text(items, #rows == 0 and "No measured production or consumption yet. Let the factory run, then refresh."
+      text(items, #rows == 0 and "No measured activity or chest stock yet. Let sampling finish, then Update list."
         or "No items match this view. Try Everything or All groups.")
     end
     local footer=root.add{type="flow",name="ssk_bal_footer",direction="horizontal"}

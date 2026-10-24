@@ -4,7 +4,7 @@
 -- Inputs (all measured):
 --   produced / consumed : force production statistics (window average)
 --   machine utilisation : normal crafts / capacity (sum of crafting_speed / energy)
---   stock + trend       : logistic-network contents, sampled every 10 s over ~60 s
+--   stock + trend       : physical chest contents, scanned in bounded batches
 
 local Graph = require("scripts.graph")
 local Model = require("scripts.model")
@@ -17,8 +17,10 @@ B.LOW = 0.85       -- machines below 85 % busy are "waiting"
 B.HIGH = 0.95      -- machines above 95 % busy are "maxed"
 
 B.STATUS = {
+  stored = { order = 8, label = "Stock only", color = "0.7,0.7,0.7",
+             help = "Stored in chests, with no measured production or consumption in this period." },
   deficit   = { order = 1, label = "Deficit",          color = "1,0.35,0.35",
-                help = "Measured consumption exceeds production by more than 5%. Check stored supply and transport; logistic stock gives an estimated time to empty when a drain is measured." },
+                help = "Measured consumption exceeds production by more than 5%. Check stored supply and transport; chest stock gives an estimated time to empty when a drain is measured." },
   limited   = { order = 2, label = "Possible supply limit", color = "1,0.6,0.2",
                 help = "Rates roughly balance, consumer utilisation is below 85% and producers are at least 95% busy. Check this item's supply and delivery before adding capacity; utilisation alone does not identify the cause." },
   starved   = { order = 3, label = "Low activity",          color = "1,0.8,0.3",
@@ -59,19 +61,27 @@ function B.rows(sidx, period)
     if rec and not rec.reversing then used[r] = true end
   end
 
+  local residuals = {}
+  for key,res in pairs(m.residuals) do residuals[key]=res end
+  for key,st in pairs(stock) do
+    if st.count>0 and not residuals[key] then residuals[key]={} end
+  end
+  local known = Sampler.stock_known(sidx)
   local rows = {}
-  for key, res in pairs(m.residuals) do
+  for key, res in pairs(residuals) do
     local prod, cons = res.prod or 0, res.cons or 0
     local ref = math.max(prod, cons)
-    if ref > 1e-3 then
+    if ref > 1e-3 or (stock[key] and stock[key].count>0) then
       local nd = g.nodes[key]
       local pu = nd and util_of(nd.producers, m.rates, cap, used)
       local cu = nd and util_of(nd.consumers, m.rates, cap, used)
       local net = prod - cons
-      local netp = net / ref
+      local netp = ref>0 and net / ref or 0
       local st = stock[key]
+      if not st and known and key:sub(1,5)=="item/" then st={count=0} end
       local status
-      if netp < -B.NET_TOL then status = "deficit"
+      if ref<=1e-3 then status = "stored"
+      elseif netp < -B.NET_TOL then status = "deficit"
       elseif netp > B.NET_TOL then status = "surplus"
       elseif pu == nil or cu == nil then status = (pu == nil and cu == nil) and "source" or "ok"
       elseif cu < B.LOW and pu >= B.HIGH then status = "limited"

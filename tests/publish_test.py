@@ -184,6 +184,20 @@ class ReleaseTests(unittest.TestCase):
         self.deploy(bundle, fake)
         self.assertIn("manual", fake.order)
 
+    def test_replace_previous_inline_gallery_without_accumulating_old_screenshots(self):
+        bundle = self.bundle()
+        fake = FakePortal(P.verify_bundle(bundle))
+        fake.state = {"releases": [], "description": "![Old release](/assets/old.png)", "images": [
+            {"id": "old", "url": "/assets/old.png"},
+            {"id": "manual", "url": "https://cdn.example/manual.png"}]}
+        self.deploy(bundle, fake)
+        self.assertNotIn("old", fake.order)
+        self.assertIn("manual", fake.order)
+        self.assertEqual(len(fake.order), 2)
+        self.deploy(bundle, fake)
+        self.assertEqual(len(fake.order), 2)
+        self.assertEqual(fake.image_uploads, 1)
+
     def test_missing_secret_cannot_publish(self):
         bundle = self.bundle()
         with patch.dict(os.environ, {}, clear=True), patch.object(P, "portal_post") as post:
@@ -220,6 +234,8 @@ class FakePortal:
             return image
         if path.endswith("images/edit"):
             self.order = fields["images"].split(",")
+            images = {image["id"]: image for image in self.state["images"]}
+            self.state["images"] = [images[key] for key in self.order]
             return {"success": True}
         if path.endswith("edit_details"):
             if self.fail_details:

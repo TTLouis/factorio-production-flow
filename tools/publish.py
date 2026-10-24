@@ -283,6 +283,10 @@ def deploy(bundle):
     state = wait_for_portal(lambda state: existing_release(state, plan),
                             "Portal release does not match the published GitHub ZIP")
     current = {x["id"]: x for x in state.get("images", [])}
+    previous_description = state.get("description", "")
+    previous_inline = {key for key, image in current.items() if image.get("url")
+                       and (image["url"] in previous_description
+                            or urljoin(PORTAL, image["url"]) in previous_description)}
     desired, description = [], plan["metadata"]["description"]
     for entry in plan["gallery"]:
         image = current.get(entry["sha1"])
@@ -293,8 +297,9 @@ def deploy(bundle):
         desired.append(image["id"])
         original = f"https://raw.githubusercontent.com/{REPOSITORY}/main/docs/screenshots/{entry['file']}"
         description = description.replace(original, urljoin(PORTAL, image["url"]))
-    # Keep any manually-added images after the release's approved gallery.
-    desired.extend(key for key in current if key not in desired)
+    # Replace the previous page's inline gallery; retain standalone manual images.
+    # Otherwise every screenshot refresh would accumulate outdated release images.
+    desired.extend(key for key in current if key not in desired and key not in previous_inline)
     edited = portal_post("/api/v2/mods/images/edit", {"mod": MOD, "images": ",".join(desired)})
     require(edited.get("success") is True, "Portal did not confirm gallery ordering")
     fields = dict(plan["metadata"], mod=MOD, description=description)

@@ -43,15 +43,25 @@ cases have separate handling when machine or stock data is unavailable.
 
 ## Stock, trend and time to empty
 
-Stock combines all qualities in logistic provider and storage inventories on the
-surface. Factorio's available network count subtracts pending robot pickups and
-can be negative. The sampler adds those pickup reservations back once per owner
-to report physically stored stock, including reserved items. Requester
-inventories, other chests, items in transit and fluid tanks are excluded. A dash
-means no stock data; zero means measured empty stock. On upgrade, the old stock
-trend baseline is cleared so the definition change does not create a false drain.
-Stock is sampled every ten seconds; the recent trend uses about one minute of samples, independently of
-the selected production window.
+Stock sums physical item counts from ordinary (`container`) and logistic
+(`logistic-container`) chest inventories belonging to the player force on the
+selected surface. Requester and buffer chests are included, even without a
+logistic network. Each chest is counted once and all qualities are combined.
+No network availability or robot reservations are added or subtracted.
+Player/vehicle inventories, machine buffers, belts, ground items, linked/infinity
+chests and fluid tanks are excluded. Selection and production statistics do not
+depend on storage. Positive stock without recent activity appears as Stock only.
+
+The registry is collected on setup/rescan and maintained by build/clone events.
+At most 32 registry entries are visited per tick. A new scan starts about every
+600 ticks, or after the previous scan completes if it takes longer. Only complete
+scans are published; individual inventories are read at different ticks, so items
+moving between chests can cause temporary sampling discrepancies. The last seven
+completed scans provide the trend, normally about one minute, independently of
+the production window. Deleted chests are removed on visit. The baseline is reset
+on upgrade so the expanded scope does not create a false trend.
+A dash means no completed sample or unsupported stock (fluids); an absent item in
+a completed surface sample has measured zero chest stock.
 
 Time to empty divides stock by the drain rate. A negative recent stock trend is
 preferred; otherwise a production deficit supplies the drain estimate. This

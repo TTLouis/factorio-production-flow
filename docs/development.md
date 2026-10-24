@@ -71,3 +71,33 @@ contracts: [initial publication](https://wiki.factorio.com/Mod_publish_API),
 [release upload](https://wiki.factorio.com/Mod_upload_API),
 [page metadata](https://wiki.factorio.com/Mod_details_API), and
 [images](https://wiki.factorio.com/Mod_images_API).
+
+
+## Chest stock and UPS stress tests
+
+`python tests/stock_stress.py --open --save PATH_TO_COPIED_SPACE_AGE_SAVE`
+builds isolated 1,000-, 10,000- and 50,000-chest maps, each with 48 randomized
+stacks per chest. Seed 20261024 fixes item, quality and quantity selection.
+The fixture uses ordinary steel chests plus every logistic chest type, no
+logistic networks or inserters, and non-spoiling visible items. It verifies exact
+per-item totals before saving. This tests dense inventory reads; it is not a
+substitute for a moving, working factory.
+
+The runner compares the same save with the new stock tick enabled and disabled,
+while keeping the rest of Production Flow enabled. Each pair runs 3 x 3,600
+updates. It records native `--benchmark-verbose all` timings and excludes the
+first 300 updates of each repetition from steady-state mean/p95/p99/max.
+Closed-window and open Balance/Everything pairs distinguish background sampling
+from UI refresh. Benchmark players are disconnected, so the injected test hook
+calls the normal five-second UI refresh explicitly. These headless benchmarks
+measure simulation/GUI script cost, not rendering FPS. Normal play caps at 60 UPS;
+compare update times with the 16.67 ms budget rather than treating uncapped UPS as
+a promised game speed. Laptop scheduling, thermals and garbage collection add
+noise; isolated maxima are not deterministic upper bounds.
+
+Use `--stage tests/out/stock-stress-TIMESTAMP --benchmark-only --open` to repeat
+existing maps. `--capture` records the native Balance list and a chest inventory.
+Stage saves, logs, screenshots, source hashes and results stay under `tests/out`.
+Test hooks are injected into private mod copies and never included in release ZIPs.
+The separate `tests/save_test.py --phase audit` also verifies wooden/iron chests,
+all logistic chest types, mixed qualities and no-network stock on a Space Age copy.

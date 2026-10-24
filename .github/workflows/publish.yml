@@ -8,7 +8,7 @@ on:
       tag:
         description: Published GitHub release tag
         required: true
-        default: v0.1.1
+        default: v0.1.2
       dry_run:
         description: Validate only; do not upload or edit the Mod Portal
         type: boolean

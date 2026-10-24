@@ -3,7 +3,7 @@
 **Production balances and interactive Sankey charts for Factorio.**
 
 Production Flow shows what your factory makes, what it consumes, and how recipes
-connect on the selected surface. Public beta: **0.1.1**, by **TTLouis**.
+connect on the selected surface. Public beta: **0.1.2**, by **TTLouis**.
 
 ## Views
 
@@ -11,7 +11,7 @@ Charts default to individual item and fluid names. Graph grouping is optional
 and unfinished. Balance is the main focus of this beta. Focus and Full Sankey still need layout,
 navigation and readability improvements, especially on dense factories.
 
-- **Balance:** Made, used and net rates, logistic stock, and an item/fluid inspector.
+- **Balance:** Made, used and net rates, chest stock, and an item/fluid inspector.
   Uses show consumption of the selected material. Filters stay fixed while the
   list scrolls vertically. Details stack within rows; dividers separate columns,
   rows and item groups.
@@ -35,8 +35,8 @@ Requires **Factorio 2.1**. Tested with Factorio **2.1.23** and a Space Age save,
 including planetary and local space-platform production.
 
 Install [Production Flow from the Mod Portal](https://mods.factorio.com/mod/production-flow),
-or download `production-flow_0.1.1.zip` from the
-[GitHub beta release](https://github.com/TTLouis/factorio-production-flow/releases/tag/v0.1.1)
+or download `production-flow_0.1.2.zip` from the
+[GitHub beta release](https://github.com/TTLouis/factorio-production-flow/releases/tag/v0.1.2)
 and place it in your Factorio mods directory.
 Open Production Flow in-game, select a surface, and inspect a Balance row with
 its magnifier button. Expand inputs to follow its recipe chain upstream.
@@ -45,10 +45,12 @@ its magnifier button. Expand inputs to follow its recipe chain upstream.
 
 Flows combine observed crafting activity, production statistics and recipe
 relationships. They do not trace belts, pipes or individual shipments.
-Interplanetary logistics tracking is not included. Stock covers logistic
-provider and storage inventories across all qualities, including robot pickup
-reservations. Other chests, requester inventories, items in transit and fluid
-tanks are excluded. Empty-time values are estimates.
+Interplanetary logistics tracking is not included. Stock covers ordinary and logistic chests on the selected surface, including
+requester and buffer chests, across all qualities. No logistic network is required;
+item/fluid selection and production measurements are independent of storage.
+Player/vehicle inventories, machine buffers, belts, ground items, linked/infinity
+chests and fluid tanks are excluded. Empty-time values are estimates. Large maps
+use staggered inventory scans, publishing only completed results.
 
 See [how rates are calculated](docs/calculations.md) for the measurements,
 productivity adjustments, utilisation estimates and stock calculations.

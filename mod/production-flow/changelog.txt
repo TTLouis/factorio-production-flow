@@ -1,4 +1,18 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.1.2
+Date: 2026-10-24
+  Features:
+    - Count physical stock in ordinary and all logistic chest types, including requester and buffer chests.
+    - Include stored items without recent activity as Stock only in Balance.
+  Changes:
+    - Spread chest reads across ticks and publish only complete stock scans.
+    - Clarify that item selection and production measurements do not require logistic storage.
+    - Explain stock coverage, sampling and exclusions in help and the mod description.
+  Bugfixes:
+    - Avoid repeatedly copying the full GUI child list during Balance refreshes.
+    - Measure chest contents directly without signed network availability or duplicate reservations.
+    - Reset the narrower stock baseline on upgrade to avoid a false trend.
+---------------------------------------------------------------------------------------------------
 Version: 0.1.1
 Date: 2026-10-24
   Features:

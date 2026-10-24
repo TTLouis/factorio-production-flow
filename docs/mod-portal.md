@@ -8,7 +8,7 @@ Production Flow helps you see where your factory's resources are going and wheth
 
 Compare recorded item and fluid rates, then explore the recipes connecting their inputs and consumers.
 
-**Balance is the main focus of this beta.** Compare made, used and net rates, inspect an item's inputs and consumers, and review utilisation and logistic stock in an organized list. In-game help explains the controls, numbers and chart limits.
+**Balance is the main focus of this beta.** Compare made, used and net rates, inspect an item's inputs and consumers, and review utilisation and chest stock in an organized list. Item/fluid selection and production measurements are independent of chest storage. In-game help explains the controls, numbers and chart limits.
 
 ![Balance: item groups](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/02-balance-groups.png)
 
@@ -26,18 +26,18 @@ Compare recorded item and fluid rates, then explore the recipes connecting their
 - **Recipe connections:** The mod samples completed crafts on tracked crafting machines. Ingredient amounts and estimated product yields turn that activity into rates for each recipe link, with adjustments for productivity and expected yields for probabilistic outputs. These estimates can differ from the measured production totals.
 - **Selected-item usage:** The Uses side reports how much of the selected material each consumer takes. For example, 10 normal crafts/s of a recipe using 2 iron plates per craft represents 20 iron plates/s consumed.
 - **Utilisation and status:** Observed normal craft rates are compared with the current machines' capacity, calculated from crafting speed and recipe time. Net differences within 5% of the larger made/used rate count as roughly balanced. Utilisation warnings are diagnostic hints; they do not prove why a machine is waiting. Machine or module changes can affect comparisons with historical activity.
-- **Stock and Empty in:** Stock combines all qualities in logistic provider and storage inventories, including items reserved for robot pickup. Pending pickups are added back to Factorio's availability count so stored items are not shown as negative. Other chests, requester inventories, items in transit and fluid tanks are excluded. A dash means no stock data; zero means measured empty. Its recent change is measured over roughly one minute. Time to empty uses that measured drain when available, otherwise the net production deficit. It is an estimate based on the current drain continuing.
+- **Stock and Empty in:** Physical contents of ordinary and logistic chests on the selected surface, including requester and buffer chests, with all qualities combined. No logistic network is required. Items stored without recent activity appear as **Stock only**. Reads are spread across ticks; completed scans normally refresh about every 10 seconds, taking longer on very large maps. A dash means unavailable; zero means measured empty. Empty time uses the recent stock drain (normally about one minute), otherwise the net production deficit, and assumes that drain continues. Items moving during a scan can affect a sample.
 - **Ribbon widths:** Proportional mode uses rate-based widths; compressed mode uses a square-root scale. Fluids have a separate visual scale and thin flows have a minimum thickness. Widths across different materials are not a conserved mass balance.
 
 ![Balance: steam inputs and uses](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/09-balance-steam-usage.png)
 
-![Balance: stored logistic stock and estimated empty time](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/13-balance-stored-stock.png)
+![Balance: chest stock and estimated empty time](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/13-balance-stored-stock.png)
 
 **Compatibility and scope**
 
 Requires **Factorio 2.1**. Tested with **Factorio 2.1.23 and Space Age**, including planetary and local space-platform production. Broader modpack, multiplayer and large-factory performance testing is still needed.
 
-Recording starts when the mod is installed; earlier recipe activity cannot be recovered. Charts describe recipe relationships. Belt/pipe routing, interplanetary shipment tracking, non-logistic chests and fluid-tank stock are outside the current beta.
+Recording starts when the mod is installed; earlier recipe activity cannot be recovered. Charts describe recipe relationships. Belt/pipe routing, interplanetary shipment tracking, player/vehicle inventories, machine buffers, belts, ground items, linked/infinity chests and fluid-tank stock are outside the current beta.
 
 Diagnostic files remain local. Automatic exports are optional and off by default for new installations. Nothing is uploaded automatically.
 

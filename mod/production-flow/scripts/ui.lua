@@ -125,10 +125,11 @@ local function scope_caption(player, us)
   return Su.rich(game.surfaces[sidx_for(player, us)])
 end
 
--- surfaces offered in the picker: those with crafting machines, busiest first
+-- Surfaces with crafting activity or measured chest stock, busiest machines first.
 local function surface_choices(selected)
   local n = {}
   for _, rec in pairs(storage.machines or {}) do n[rec.s] = (n[rec.s] or 0) + 1 end
+  for index in pairs(Sampler.stock_surfaces()) do n[index]=n[index] or 0 end
   local chosen=selected and game.surfaces[selected]
   if chosen and chosen.valid and chosen.name~="ssk-canvas" then n[chosen.index]=n[chosen.index] or 0 end
   local list = {}

@@ -53,7 +53,7 @@ end)
 ---------------------------------------------------------------------------
 -- entity registry
 ---------------------------------------------------------------------------
-local build_filter = {}
+local build_filter = { {filter="type",type="container"}, {filter="type",type="logistic-container"} }
 for _, t in ipairs(Sampler.TYPES) do build_filter[#build_filter + 1] = { filter = "type", type = t } end
 
 for _, name in ipairs({ "on_built_entity", "on_robot_built_entity", "script_raised_built",
