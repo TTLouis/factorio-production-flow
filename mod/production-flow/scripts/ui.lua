@@ -517,6 +517,11 @@ function UI.on_click(e)
     local us = ustate(e.player_index)
     us.bal_limit = (us.bal_limit or 200) + 200
     UI.refresh(player)
+  elseif a == "bal_fav" or a == "bal_fav_group" then
+    local favs = BalanceUI.favourites(ustate(e.player_index))
+    local set, id = a == "bal_fav" and favs.items or favs.groups, el.tags.key or el.tags.gid
+    set[id] = not set[id] or nil
+    UI.refresh(player)
   elseif a == "focus_item" then
     local us = ustate(e.player_index)
     local fx = us.tab_id == "balance" and SK.balance_state(us) or SK.focus_state(us)

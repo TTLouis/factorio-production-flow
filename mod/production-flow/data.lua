@@ -72,6 +72,11 @@ protos[#protos + 1] = {
   scale = 0.5,
   flags = { "gui-icon" },
 }
+-- Balance favourite toggles (tools/gen_star.py): gold when set, grey outline otherwise.
+for _, v in ipairs({ { "ssk-star", "star.png" }, { "ssk-star-off", "star-off.png" } }) do
+  protos[#protos + 1] = { type = "sprite", name = v[1], filename = "__production-flow__/graphics/" .. v[2],
+    priority = "extra-high-no-scale", size = 32, scale = 0.5, flags = { "gui-icon" } }
+end
 data:extend(protos)
 
 -- Native table grids separate items while retaining the paired Details lines.
@@ -79,6 +84,6 @@ data.raw["gui-style"].default.ssk_balance_grid = {
   type = "table_style", parent = "table",
   horizontal_line_color = {0.16, 0.17, 0.18, 1},
   vertical_line_color = {0.31, 0.33, 0.35, 1},
-  top_cell_padding = 3, bottom_cell_padding = 3,
+  top_cell_padding = 5, bottom_cell_padding = 5,
   left_cell_padding = 3, right_cell_padding = 3,
 }

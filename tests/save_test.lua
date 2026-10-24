@@ -73,6 +73,8 @@ if mode == "scroll" then
     {name="balance-groups-details",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,groups=true,details=true},
     {name="balance-scroll-groups",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,bottom=true,groups=true},
     {name="balance-beta-water",surface="vulcanus",tab="balance",focus="fluid/water",depth=1},
+    {name="balance-favourites",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,groups=true,
+      favs={items={["item/steel-plate"]=true,["item/stone"]=true},groups={["plates"]=true}}},
   }
 end
 
@@ -219,10 +221,10 @@ function T.tick(UI, Sampler)
       -- Live sampling can reorder rows between setup and capture. Exercise the
       -- current list after that refresh, immediately before engine rendering.
       local root=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root
-      local sections=root.ssk_bal_items.children
+      local sections=root.ssk_bal_list.ssk_bal_items.children
       local table=sections[#sections].ssk_bal_table
       local rows=table.children
-      root.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
+      root.ssk_bal_list.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
     end
     local usage={}
     verify_usage(player.gui.screen.ssk_main,player.gui.screen.ssk_main,usage)
@@ -272,6 +274,7 @@ function T.tick(UI, Sampler)
   us.renderer = c.renderer or "poly"
   if mode=="scroll" or mode=="ux" or mode=="warmup" then
     us.bal_filter="all"; us.bal_details=c.details or false; us.bal_sort=c.groups and "groups" or "priority"; us.bal_group=nil
+    us.bal_favs=c.favs or nil
   end
   if (mode=="full" or mode=="names") then
     us.preset=c.preset or "all"; us.sel=nil; us.layout_snapshot=nil; us.auto_rank=nil
@@ -320,13 +323,13 @@ function T.tick(UI, Sampler)
   if mode=="scroll" then
     local left=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table
     local root=left.ssk_bal_root
-    assert(left.type=="flow" and root.ssk_bal_items.type=="scroll-pane")
+    assert(left.type=="flow" and root.ssk_bal_list.ssk_bal_items.type=="scroll-pane")
     assert(root.ssk_bal_summary and root.ssk_bal_context and root.ssk_bal_footer.ssk_bal_count)
     if c.bottom then
-      local sections=root.ssk_bal_items.children
+      local sections=root.ssk_bal_list.ssk_bal_items.children
       local table=sections[#sections].ssk_bal_table
       local rows=table.children
-      root.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
+      root.ssk_bal_list.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
     end
   end
   -- Native GUI identity check: a live refresh must retain the controls used by

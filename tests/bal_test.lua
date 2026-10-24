@@ -26,13 +26,13 @@ local function tables() return find(root(), function(e) return e.name == "ssk_ba
 local function links() return find(root(), function(e) return e.tags.ssk_ui == "focus_item" end) end
 assert(tables()[1].column_count == 8, "compact summary should have 8 columns including focus")
 local original = root()
-local item_pane = original.ssk_bal_items
+local item_pane = original.ssk_bal_list.ssk_bal_items
 assert(content().ssk_balance_split.ssk_balance_table.type == "flow", "outer Balance pane must stay fixed")
 assert(item_pane.type == "scroll-pane", "only the item list should scroll")
 assert(original.ssk_bal_summary and original.ssk_bal_context and original.ssk_bal_footer.ssk_bal_count, "summary and footer must remain outside the item scroller")
 assert(item_pane.ssk_bal_section_1, "item tables must live inside the scroller")
 UI.refresh(player, true)
-assert(root() == original and root().ssk_bal_items == item_pane, "unchanged live refresh must preserve the item scroller")
+assert(root() == original and root().ssk_bal_list.ssk_bal_items == item_pane, "unchanged live refresh must preserve the item scroller")
 select("bal_filter", 3)
 for _, e in ipairs(links()) do
   local status
@@ -54,7 +54,7 @@ UI.refresh(player, true)
 assert(root() == grouped, "grouped live update should reuse every section")
 assert(UI.on_checked({ player_index = 1, element = { tags = { ssk_ui = "bal_details" }, state = true } }))
 for _, t in ipairs(tables()) do assert(t.column_count == 8, "details must stack without adding width")
-  assert(t.children[12].caption:find("\n"), "producer utilisation should appear beneath production") end
+  assert(t.children[4].caption:find("\n"), "producer utilisation should appear beneath production") end
 local group_index
 for i, id in pairs(us.bal_group_ids) do if id == "plates" then group_index = i end end
 assert(group_index, "active curated group missing")
@@ -62,6 +62,41 @@ select("bal_group", group_index)
 for _, e in ipairs(links()) do assert(TREQ("scripts.groups").of(1, e.tags.key) == "plates", "group filter leaked an item") end
 assert(#links() > 0)
 select("bal_group", 1)
+
+-- Favourites stay at the top whatever the filters, and toggle off again.
+local function click(tags) UI.on_click({ player_index = 1, element = { valid = true, name = "x", tags = tags } }) end
+local function keys() local out = {}; for i, e in ipairs(links()) do out[i] = e.tags.key end; return out end
+local hidden
+for _, r in ipairs(B.rows(1, us.period)) do
+  if not BU.matches(r, "problems") and TREQ("scripts.groups").of(1, r.key) ~= "plates" then hidden = r.key; break end
+end
+assert(hidden, "fixture needs a row outside Problems only")
+select("bal_filter", 1); select("bal_sort", 1)
+for _, k in ipairs(keys()) do assert(k ~= hidden, "chosen row should be filtered out before it is a favourite") end
+click({ ssk_ui = "bal_fav", key = hidden })
+assert(us.bal_favs.items[hidden] and keys()[1] == hidden, "favourite item must lead the list despite the filter")
+local pane = root().ssk_bal_list.ssk_bal_items
+assert(pane.ssk_bal_section_1.ssk_bal_group_header and pane.ssk_bal_section_2.ssk_bal_group_header, "favourites and other items need headers")
+assert(root().ssk_bal_footer.ssk_bal_count.caption:find("1 favourite$"), "counter should mention favourites")
+for _, e in ipairs(find(root(), function(e) return e.tags.ssk_ui == "bal_fav" and e.tags.key == hidden end)) do
+  assert(e.sprite == "ssk-star", "favourite star should be filled")
+end
+click({ ssk_ui = "bal_fav_group", gid = "plates" })
+local plates = {}
+for _, r in ipairs(B.rows(1, us.period)) do
+  if TREQ("scripts.groups").of(1, r.key) == "plates" then plates[r.key] = true end
+end
+local listed = keys()
+assert(listed[1] == hidden, "favourite items come before favourite groups")
+local n = 0
+for k in pairs(plates) do n = n + 1; assert(plates[listed[n + 1]], "whole favourite group must follow the favourite items") end
+assert(n > 0)
+select("bal_filter", 4)
+assert(keys()[1] == hidden and plates[keys()[2]], "favourites ignore the Show filter")
+click({ ssk_ui = "bal_fav", key = hidden }); click({ ssk_ui = "bal_fav_group", gid = "plates" })
+assert(not next(us.bal_favs.items) and not next(us.bal_favs.groups), "stars must toggle off")
+assert(not root().ssk_bal_list.ssk_bal_items.ssk_bal_section_1.ssk_bal_group_header, "priority order without favourites has no section header")
+select("bal_filter", 2)
 
 -- Deterministic fixture verifies pagination, real caption updates, zero stock,
 -- missing stock, localisation, and status-driven table invalidation.
@@ -80,20 +115,20 @@ assert(#links() == 200 and root().ssk_bal_footer.ssk_bal_count.caption == "Showi
 UI.on_click({ player_index = 1, element = { name = "x", tags = { ssk_ui = "bal_more" } } })
 assert(#links() == 205, "show more must expose all remaining rows")
 local t = tables()[1]
-assert(t.children[15].caption == "0.000", "known zero stock must not become missing stock")
-assert(t.children[23].caption == "—", "missing stock must stay unavailable")
-assert(t.children[10].caption[4] == prototypes.item["test-1"].localised_name, "use prototype display name")
+assert(t.children[7].caption == "0.000", "known zero stock must not become missing stock")
+assert(t.children[15].caption == "—", "missing stock must stay unavailable")
+assert(t.children[2].caption[4] == prototypes.item["test-1"].localised_name, "use prototype display name")
 local reuse = root()
 fixture[1].prod = 3
 UI.refresh(player, true)
-assert(root() == reuse and t.children[12].caption == "3.00", "live numbers must update in place")
+assert(root() == reuse and t.children[4].caption == "3.00", "live numbers must update in place")
 fixture[1].status = "deficit"
 UI.refresh(player, true)
-assert(root()==reuse and t.children[11].caption:find("Deficit"), "live status changes must update cells without destroying controls")
-local original_first=t.children[9]
+assert(root()==reuse and t.children[3].caption:find("Deficit"), "live status changes must update cells without destroying controls")
+local original_first=t.children[1]
 table.remove(fixture,1)
 UI.refresh(player,true)
-assert(root()==reuse and t.children[9]==original_first and t.children[11].caption:find("Inactive"), "expired rows must not interrupt selection")
+assert(root()==reuse and t.children[1]==original_first and t.children[3].caption:find("Inactive"), "expired rows must not interrupt selection")
 UI.refresh(player)
 assert(root()~=reuse, "manual Refresh must reapply list membership")
 fixture = {}
