@@ -1,3 +1,53 @@
+# Unreleased: five-minute stock cooldown
+
+The development branch has not been published or version-bumped.
+
+Chest sampling now waits at least 18,000 game ticks (five minutes) after a
+completed scan before starting another. The 32-entry-per-tick budget is retained.
+This prevents back-to-back scans even when a full scan takes longer than the old
+10-second interval. Balance shows the stock sample age separately from its
+five-second production-rate refresh. The stock trend uses up to seven completed
+samples, normally about 30 minutes and longer for large scans.
+
+A deterministic test asserts that no scan can begin during the five-minute rest
+period, and that scan state survives initialization. The same mixed-quality
+native Space Age stock audit and updated Balance/help/scroll views are rechecked.
+The changelog explicitly records these performance changes and the stress testing.
+The short description is revised independently of the runtime measurements.
+
+## Longer benchmark
+
+Same i7-13700H / Windows 11 / Factorio 2.1.23 setup as the earlier report below.
+The 50,000-chest fixture (2.4 million randomized stacks) is reused, plus its
+seed world's starting container. Four variants compare stock enabled/disabled
+with the window closed or Balance/Everything open. Each variant runs 3 x 40,000
+updates, excluding the first 300 of each repetition: 119,100 measured updates.
+The longer window includes multiple stock-scan cycles. The native hook asserts
+that consecutive completed scans are never less than five game minutes apart.
+Completions occurred at ticks 3,126 and 22,688 in each repetition: 19,562 ticks
+apart, about 5 minutes 26 seconds, including scan time.
+
+All values below are milliseconds per update. Baselines retain the rest of the
+mod and only disable the new stock tick. Measurements are hardware-specific and
+include normal scheduling, caching and garbage-collection variation.
+
+| 50,000-chest case | Baseline mean | Stock mean | Stock p99 | Stock maximum | Script mean delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Closed window | 0.154 | 0.241 | 1.415 | 7.475 | 0.083 |
+| Open Balance / Everything | 0.187 | 0.280 | 2.164 | 19.243 | 0.085 |
+
+The 60 UPS budget is 16.67 ms per update. Means and p99 stayed well below that
+budget; the largest open-window outlier was 19.243 ms (baseline maximum 14.703 ms).
+This is not a rendering-FPS measurement or a guarantee of hitch-free play. The
+measured closed-window stock-script overhead is about 0.083 ms/update, compared
+with about 0.923 ms in the earlier high-cadence 0.1.2 test below. Individual active
+scan ticks still perform the same bounded work; the cooldown reduces average load.
+
+Local evidence: `tests/out/stock-cooldown-20261024/results.json` and raw native
+logs with completion timestamps. Stock and Balance source hashes match the
+benchmarked code. A subsequent help-text punctuation correction does not affect
+those paths; final native captures use the packaged help text.
+
 # Beta 0.1.2 validation
 
 Ordinary and logistic chest stock, in-game wording, and the Balance refresh fix

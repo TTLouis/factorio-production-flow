@@ -124,6 +124,7 @@ if mode=="ux" then
     {name="ux-water",surface="vulcanus",tab="balance",focus="fluid/water",depth=1},
     {name="ux-stock",surface="nauvis",tab="balance",focus="item/steel-plate",depth=1,details=true},
     {name="ux-copper",surface="vulcanus",tab="balance",focus="item/copper-plate",depth=1},
+    {name="ux-steam",surface="vulcanus",tab="balance",focus="fluid/steam",depth=1},
     {name="ux-list-update",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,update_list=true},
     {name="ux-help-basics",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,help_tab=1},
     {name="ux-help-stock",surface="nauvis",tab="balance",focus="item/steel-plate",depth=1,help_tab=2},

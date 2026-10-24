@@ -3,7 +3,7 @@ local T={}
 local cfg=require("scripts.stock_stress_config")
 local C=require("scripts.chest_stock")
 local SK=require("scripts.sankey_ui")
-local started, refreshed
+local started, refreshed, last_scan_tick
 local function build()
   local seed=20261024
   local random=game.create_random_generator(seed)
@@ -49,6 +49,14 @@ end
 function T.tick(UI,Sampler)
   started=started or game.tick
   local elapsed=game.tick-started
+  if cfg.mode=="benchmark" then
+    local completed=Sampler.stock_status().last
+    if completed and completed.tick~=last_scan_tick then
+      if last_scan_tick then assert(completed.tick-last_scan_tick>=C.INTERVAL,"Stock scans exceed the maximum update rate") end
+      last_scan_tick=completed.tick
+      log("STOCK SCAN COMPLETE "..helpers.table_to_json(completed))
+    end
+  end
   if cfg.mode=="build" then
     if elapsed==0 then
       for _,p in pairs(game.players) do UI.close(p) end

@@ -1,6 +1,13 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.2
 Date: 2026-10-24
+  Optimizations:
+    - Cache GUI children once per Balance table refresh, avoiding repeated full-array copies for every cell.
+    - Limit chest sampling to 32 registry visits per tick and keep the previous result until a scan completes.
+  Info:
+    - Validate exact stock totals on fixed-seed maps with 1,000, 10,000 and 50,000 chests, up to 2.4 million randomized item stacks.
+    - Compare local UPS timings with stock sampling enabled/disabled and Balance open/closed, including a working Space Age save.
+    - Record average, p95, p99 and maximum update timings; methodology and hardware-specific results are in the repository validation report.
   Features:
     - Count physical stock in ordinary and all logistic chest types, including requester and buffer chests.
     - Include stored items without recent activity as Stock only in Balance.
@@ -9,7 +16,6 @@ Date: 2026-10-24
     - Clarify that item selection and production measurements do not require logistic storage.
     - Explain stock coverage, sampling and exclusions in help and the mod description.
   Bugfixes:
-    - Avoid repeatedly copying the full GUI child list during Balance refreshes.
     - Measure chest contents directly without signed network availability or duplicate reservations.
     - Reset the narrower stock baseline on upgrade to avoid a false trend.
 ---------------------------------------------------------------------------------------------------

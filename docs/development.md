@@ -101,3 +101,10 @@ Stage saves, logs, screenshots, source hashes and results stay under `tests/out`
 Test hooks are injected into private mod copies and never included in release ZIPs.
 The separate `tests/save_test.py --phase audit` also verifies wooden/iron chests,
 all logistic chest types, mixed qualities and no-network stock on a Space Age copy.
+
+
+For the five-minute cooldown, use at least `--ticks 40000` when checking scan
+cadence so a run includes more than one complete cycle. The native hook asserts
+that consecutive completed scans are never less than five game minutes apart.
+Keep older high-cadence results separately: the per-active-tick budget remains 32,
+but long-run average work is reduced by the cooldown after each complete scan.

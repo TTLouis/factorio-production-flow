@@ -7,5 +7,5 @@
   "dependencies": [
     "base >= 2.1"
   ],
-  "description": "Measured production balances and interactive Sankey charts for items and fluids, with a 10-minute default history window."
+  "description": "See where your factory's resources go. Spot imbalances and explore item and fluid production with interactive Sankey charts."
 }

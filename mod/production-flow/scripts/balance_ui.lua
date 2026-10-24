@@ -3,6 +3,7 @@ local Balance = require("scripts.balance")
 local Graph = require("scripts.graph")
 local Groups = require("scripts.groups")
 
+local Sampler = require("scripts.sampler")
 local BU = {}
 BU.FILTERS = { "problems", "all", "shortages", "surpluses", "capacity" }
 local FILTER_NAMES = { "Problems only", "Everything", "Supply/activity", "Surpluses", "Spare capacity" }
@@ -80,7 +81,7 @@ local COLUMNS = {
   { id = "cu", name = "Consumers", width = 90, numeric = true, detail = true,
     help = "Estimated consumer utilisation: measured crafts / current crafting capacity. Long periods use today's machines; values may exceed 100% after capacity changes." },
   { id = "trend", name = "Stock /min", width = 90, numeric = true, detail = true,
-    help = "Recent change in chest stock per minute (about 60 seconds), independent of the selected production averaging period." },
+    help = "Recent change in chest stock per minute (seven samples: about 30 minutes, longer for large scans), independent of the selected production averaging period." },
 }
 
 local function values(r)
@@ -386,7 +387,9 @@ function BU.fill(player, c, us, scope, only_auto)
     update.style.width=110
     if shown < #filtered then root.add { type = "button", caption = "Show 200 more", tags = { ssk_ui = "bal_more" } } end
   end
-  context.caption = string.format("%s  ·  Averaged over %s  ·  Values update every 5 s", scope, time(secs))
+  local stock_status=Sampler.stock_status()
+  local age=stock_status.updated_tick and time(math.max(0,game.tick-stock_status.updated_tick)/60).." ago" or "first scan pending"
+  context.caption = string.format("%s  ·  Averaged over %s  ·  Rates update every 5 s\nChest stock: %s  ·  At least 5 min between scans", scope, time(secs),age)
   for id, el in pairs(summaries) do
     local st = Balance.STATUS[id]
     el.caption = string.format("[color=%s]%s: %d[/color]", st.color, st.label, counts[id] or 0)

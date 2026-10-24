@@ -26,3 +26,8 @@ Charts default to individual item/fluid names. Focus, Full Sankey and grouping n
 - [50,000-chest stress map](19-chest-stress-map.png): Six chest types, 2.4 million stacks and 210 item types, with fixed-seed randomized counts and qualities.
 - [Stock without recent production](20-stock-only.png): Everything lists 210 stored materials on a surface with zero crafting machines and no logistic network.
 - [Randomized full inventory](21-randomized-inventory.png): One native steel-chest inventory with 48 item types, varied quantities and all five qualities, from the stress fixture.
+
+## Unreleased development previews
+
+- [Stock sample age](22-development-stock-age.png): Five-minute scan cooldown displayed separately from the five-second rate refresh. Not published in 0.1.2.
+- [Stock sampling help](23-development-stock-help.png): Updated cadence, scope and trend explanation. Not published in 0.1.2.

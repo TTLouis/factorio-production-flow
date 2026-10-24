@@ -2,7 +2,7 @@
 local C = {}
 C.TYPES = {"container", "logistic-container"}
 C.PER_TICK = 32
-C.INTERVAL = 600
+C.INTERVAL = 18000 -- at least five minutes of rest after a completed scan
 local function state() return storage.chest_stock end
 
 function C.init()
@@ -74,7 +74,7 @@ function C.tick(tick)
     h[#h+1] = {tick=tick, start=b.start, s=b.s}
     while #h>7 do table.remove(h,1) end
     s.last = {ticks=tick-b.start+1, reads=b.reads, tick=tick}
-    s.next_tick, s.batch = math.max(b.start+C.INTERVAL,tick+1), nil
+    s.next_tick, s.batch = tick+C.INTERVAL, nil
   end
 end
 
@@ -86,7 +86,9 @@ end
 
 function C.status()
   local s = state()
-  return {tracked=#s.list, per_tick=C.PER_TICK, last=s.last, active=s.batch~=nil}
+  local h=storage.stock or {};local snapshot=h[#h]
+  return {tracked=#s.list, per_tick=C.PER_TICK, interval=C.INTERVAL, updated_tick=snapshot and snapshot.tick,
+          last=s.last, active=s.batch~=nil}
 end
 
 return C

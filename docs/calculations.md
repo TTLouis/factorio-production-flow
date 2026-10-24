@@ -53,14 +53,16 @@ chests and fluid tanks are excluded. Selection and production statistics do not
 depend on storage. Positive stock without recent activity appears as Stock only.
 
 The registry is collected on setup/rescan and maintained by build/clone events.
-At most 32 registry entries are visited per tick. A new scan starts about every
-600 ticks, or after the previous scan completes if it takes longer. Only complete
+At most 32 registry entries are visited per tick. After completing a scan, the sampler waits
+18,000 ticks (5 minutes) before starting the next one. This cooldown prevents
+back-to-back scans on very large maps. Only complete
 scans are published; individual inventories are read at different ticks, so items
 moving between chests can cause temporary sampling discrepancies. The last seven
-completed scans provide the trend, normally about one minute, independently of
+completed scans provide the trend, typically about 30 minutes, longer for large scans, independently of
 the production window. Deleted chests are removed on visit. The baseline is reset
 on upgrade so the expanded scope does not create a false trend.
-A dash means no completed sample or unsupported stock (fluids); an absent item in
+Balance shows the age of the last complete stock sample separately from its
+five-second production-rate refresh. A dash means no completed sample or unsupported stock (fluids); an absent item in
 a completed surface sample has measured zero chest stock.
 
 Time to empty divides stock by the drain rate. A negative recent stock trend is
