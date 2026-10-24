@@ -87,3 +87,7 @@ data.raw["gui-style"].default.ssk_balance_grid = {
   top_cell_padding = 5, bottom_cell_padding = 5,
   left_cell_padding = 3, right_cell_padding = 3,
 }
+data.raw["gui-style"].default.ssk_balance_header = {
+  type = "frame_style", parent = "subheader_frame", padding = 0,
+  vertical_flow_style = { type = "vertical_flow_style", vertical_spacing = 0 },
+}

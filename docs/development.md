@@ -15,7 +15,9 @@ The save runner copies a Space Age save using only bundled mods, records at leas
 are checked. The isolated stage is under `tests/out/`. Reuse the returned stage
 with `--stage tests/out/<stage> --phase full` or `--phase scroll`. Additional
 phases are `ux` (controls and help), `audit` (network reservations versus physical
-stored items) and `warmup` (fresh-install defaults and incomplete history).
+stored items), `picker` (combined material search, Back/Forward, trail and Clear
+history, compact/expanded Balance and Focus controls, framed list headers and
+grouped activity counts), and `warmup` (fresh-install defaults and incomplete history).
 Phase-specific evidence records native image hashes and the clean archive hash.
 Development tabs, exports and renderer comparisons are hidden unless the
 per-player **Show development tools** setting is enabled.

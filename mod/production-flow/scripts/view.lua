@@ -281,7 +281,11 @@ end
 -- Focus view: one item plus N item-steps upstream and downstream (recipe nodes are free).
 -- Everything else is dropped; its share of the flow shows up as grey stubs.
 local function apply_focus(nodes, links, focus, steps)
-  if not (focus and nodes[focus]) then return false end
+  if not (focus and nodes[focus]) then
+    -- An unrecorded selection is an empty Focus view, not an unfiltered chart.
+    drop_nodes(nodes, links, function() return false end)
+    return true
+  end
   local fwd, rev = {}, {}
   for _, l in pairs(links) do
     fwd[l.from] = fwd[l.from] or {}; table.insert(fwd[l.from], l.to)

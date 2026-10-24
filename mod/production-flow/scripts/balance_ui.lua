@@ -12,7 +12,8 @@ local LIMIT = 200
 -- The item list pane is bal_width + 24 wide and always reserves its scrollbar,
 -- so rows, group headers and the column header all fill the remaining width.
 local SCROLLBAR = 12
-local function list_width(width) return (width or 900) + 24 - SCROLLBAR end
+local LIST_PADDING = 4
+local function list_width(width) return (width or 900) + 24 - SCROLLBAR - 2 * LIST_PADDING end
 
 -- Favourites stay at the top of the list whatever the filters; saved per player.
 function BU.favourites(us)
@@ -22,8 +23,8 @@ function BU.favourites(us)
   return us.bal_favs
 end
 
-local function text(parent, caption, tooltip)
-  return parent.add { type = "label", caption = caption, tooltip = tooltip }
+local function text(parent, caption, tooltip, style)
+  return parent.add { type = "label", caption = caption, tooltip = tooltip, style = style }
 end
 
 local function fmt(x)
@@ -169,8 +170,9 @@ end
 -- The column header stays above the scroller, so it remains visible while the
 -- rows scroll. It uses the same widths as the row tables beneath it.
 local function make_header(parent, cols)
-  local header = parent.add { type = "flow", name = "ssk_bal_header", direction = "vertical" }
-  header.style.vertical_spacing = 0
+  local header = parent.add { type = "frame", name = "ssk_bal_header", style = "ssk_balance_header", direction = "vertical" }
+  header.style.width = cols.list_width
+  header.style.height = cols[1].details and 88 or 68
   -- A band brackets related columns without spending any extra list width.
   local groups = {}
   for _,col in ipairs(cols) do
@@ -192,9 +194,7 @@ local function make_header(parent, cols)
   end
   local t = grid(header, "ssk_bal_columns", cols)
   for _, col in ipairs(cols) do
-    local l = text(t, col.name, col.help)
-    l.style.font = "default-bold"
-    l.style.font_color = { 0.9, 0.9, 0.9 }
+    local l = text(t, col.name, col.help, "bold_label")
     l.style.width = col.width
     l.style.single_line = false
     l.style.horizontal_align = col.numeric and "right" or "left"
@@ -223,7 +223,6 @@ local function add_row(parent, r, g, cols, fav)
       star_button(el, fav, { ssk_ui = "bal_fav", key = r.key }, "this item")
       local spec = { type = "sprite-button", name = "ssk_bal_inspect", style = "tool_button", sprite = "utility/search",
         tooltip = "Show this item's materials and uses on the right", tags = { ssk_ui = "focus_item", key = r.key } }
-      if not helpers.is_valid_sprite_path(spec.sprite) then spec.type = "button"; spec.sprite = nil; spec.caption = ">" end
       local inspect = el.add(spec)
       inspect.style.width, inspect.style.height = 24, 24
     else
@@ -302,6 +301,16 @@ local function arrange(us, rows, filtered, by_key, info)
   return display, normal, nfav, empty
 end
 
+-- Themes group the existing indicators; their individual meanings and help stay visible.
+local SUMMARY_GROUPS = {
+  { id = "under", label = "Underproducing", color = "1,0.45,0.4", ids = { "deficit", "limited", "starved" },
+    help = "Deficits and activity warnings. A supply warning or low activity needs investigation; it does not prove insufficient production." },
+  { id = "ok", label = "OK", color = "0.5,0.9,0.5", ids = { "ok", "source", "stored" },
+    help = "No detected rate or utilisation warning. Source / sink and stock-only materials have no machine activity assessment." },
+  { id = "over", label = "Overproducing", color = "1,0.85,0.35", ids = { "surplus", "overbuilt" },
+    help = "Measured surplus or spare producer capacity. Spare capacity alone does not mean stock is accumulating." },
+}
+
 function BU.fill(player, c, us, scope, only_auto)
   local rows, secs = Balance.rows(us.sidx, us.period)
   local groups, seen, by_key, counts = {}, {}, {}, {}
@@ -379,16 +388,18 @@ function BU.fill(player, c, us, scope, only_auto)
   -- Reuse existing cells while the visible rows stay the same. Live sampling
   -- updates values without destroying the table, dropdowns or scroll position.
   local same = live_reuse or (c.ssk_bal_root and c.ssk_bal_root.tags.signature == signature)
-  local root, summaries, cells, context, counter
+  local root, summaries, summary_heads, cells, context, counter
   local cols = columns(us.bal_details, us.bal_width)
   local list_w = list_width(us.bal_width)
   cols.list_width = list_w
   if same then
     root = c.ssk_bal_root
     context, counter = root.ssk_bal_context, root.ssk_bal_footer.ssk_bal_count
-    summaries, cells = {}, {}
-    for _, id in ipairs({ "deficit", "limited", "starved", "surplus", "overbuilt", "ok", "source", "stored" }) do
-      summaries[id] = root.ssk_bal_summary["ssk_bal_" .. id]
+    summaries, summary_heads, cells = {}, {}, {}
+    for _, group in ipairs(SUMMARY_GROUPS) do
+      local column = root.ssk_bal_summary["ssk_bal_" .. group.id]
+      summary_heads[group.id] = column.ssk_bal_theme
+      for _, id in ipairs(group.ids) do summaries[id] = column["ssk_bal_" .. id] end
     end
     for i = 1, shown do
       local entry = root.ssk_bal_list.ssk_bal_items["ssk_bal_section_" .. i]
@@ -422,6 +433,10 @@ function BU.fill(player, c, us, scope, only_auto)
     for i, id in ipairs(BU.FILTERS) do if id == us.bal_filter then fi = i end end
     local filter = toolbar.add { type = "drop-down", items = FILTER_NAMES, selected_index = fi, tags = { ssk_ui = "bal_filter" } }
     filter.style.width = 145
+    toolbar.style.width = (us.bal_width or 900) + 24
+    local spacer = toolbar.add { type = "empty-widget" }
+    spacer.style.horizontally_stretchable = true
+    spacer.style.minimal_width = 16
     text(toolbar, "Group:")
     local names, gi = { "All groups" }, 1
     us.bal_group_ids = {}
@@ -440,18 +455,36 @@ function BU.fill(player, c, us, scope, only_auto)
     text(toolbar, "Order:")
     toolbar.add { type = "drop-down", items = { "Priority", "Item groups" }, selected_index = us.bal_sort == "groups" and 2 or 1,
       tags = { ssk_ui = "bal_sort" } }
+    toolbar.style.width = (us.bal_width or 900) + 24
+    local spacer = toolbar.add { type = "empty-widget" }
+    spacer.style.horizontally_stretchable = true
+    spacer.style.minimal_width = 16
     toolbar.add { type = "checkbox", caption = "Details", state = us.bal_details == true, tags = { ssk_ui = "bal_details" },
       tooltip = "Show net percentage, producer / consumer utilisation and recent stock trend." }
     context = root.add { type = "label", name = "ssk_bal_context" }
     context.style.single_line = false
     context.style.maximal_width = us.bal_width or 900
-    local summary = root.add { type = "table", name = "ssk_bal_summary", column_count = 2 }
-    summary.style.horizontal_spacing = 18
-    summaries = {}
-    for _, id in ipairs({ "deficit", "limited", "starved", "surplus", "overbuilt", "ok", "source", "stored" }) do
-      summaries[id] = summary.add { type = "label", name = "ssk_bal_" .. id, tooltip = Balance.STATUS[id].help }
-      summaries[id].style.width = math.floor((us.bal_width or 900) / 2) - 18
-      summaries[id].style.single_line = true
+    local summary = root.add { type = "table", name = "ssk_bal_summary", column_count = 3 }
+    summary.style.horizontal_spacing = 8
+    summary.vertical_centering = false
+    local width = math.floor(((us.bal_width or 900) + 24 - 16) / 3)
+    summaries, summary_heads = {}, {}
+    for _, group in ipairs(SUMMARY_GROUPS) do
+      local column = summary.add { type = "flow", name = "ssk_bal_" .. group.id, direction = "vertical" }
+      column.style.width = width
+      column.style.vertical_spacing = 0
+      local heading = column.add { type = "label", name = "ssk_bal_theme", tooltip = group.help }
+      heading.style.font = "default-bold"
+      heading.style.width = width
+      heading.style.single_line = true
+      summary_heads[group.id] = heading
+      for _, id in ipairs(group.ids) do
+        local label = column.add { type = "label", name = "ssk_bal_" .. id, tooltip = Balance.STATUS[id].help }
+        label.style.width = width
+        label.style.font = "default-small"
+        label.style.single_line = true
+        summaries[id] = label
+      end
     end
     local hint = text(root, "Rates /s · chest stock, all qualities · — unavailable · ≈ estimated empty time · ★ keeps a row or group at the top")
     hint.style.font="default-small"
@@ -459,14 +492,16 @@ function BU.fill(player, c, us, scope, only_auto)
     hint.style.single_line = false
     hint.style.maximal_width = us.bal_width or 900
     -- Only the item list scrolls; filters, summary, column header and pagination
-    -- stay visible. The scroller has no border, so rows use the whole pane.
-    local list_flow = root.add { type = "flow", name = "ssk_bal_list", direction = "vertical" }
-    list_flow.style.vertical_spacing = 0
+    -- stay visible. A deep frame bounds the list and a raised header clearly
+    -- separates fixed headings from the independently scrolling rows.
+    local list_flow = root.add { type = "frame", name = "ssk_bal_list", style = "inside_deep_frame", direction = "vertical" }
+    list_flow.style.width = (us.bal_width or 900) + 24
+    list_flow.style.padding = LIST_PADDING
     list_flow.style.vertically_stretchable = true
     if shown > 0 then make_header(list_flow, cols) end
     local items = list_flow.add { type = "scroll-pane", name = "ssk_bal_items", style = "naked_scroll_pane",
       horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
-    items.style.width = (us.bal_width or 900) + 24
+    items.style.width = (us.bal_width or 900) + 24 - 2 * LIST_PADDING
     items.style.vertically_stretchable = true
     items.style.minimal_height = 0
     cells = {}
@@ -516,16 +551,20 @@ function BU.fill(player, c, us, scope, only_auto)
     local footer=root.add{type="flow",name="ssk_bal_footer",direction="horizontal"}
     footer.style.vertical_align="center"
     counter=footer.add{type="label",name="ssk_bal_count"}
-    counter.style.width=math.max(100,(us.bal_width or 900)-120)
+    counter.style.width=math.max(100,(us.bal_width or 900)-28)
     counter.style.single_line=false
-    local update=footer.add{type="button",caption="Update list",tags={ssk_ui="bal_update"},
+    local update=footer.add{type="sprite-button",style="tool_button",sprite="utility/refresh",tags={ssk_ui="bal_update"},
       tooltip="Reapply filters and sorting, and include new items. Measured values keep updating while row order is held."}
-    update.style.width=110
     if limit < #normal then root.add { type = "button", caption = "Show 200 more", tags = { ssk_ui = "bal_more" } } end
   end
   local stock_status=Sampler.stock_status()
   local age=stock_status.updated_tick and time(math.max(0,game.tick-stock_status.updated_tick)/60).." ago" or "first scan pending"
   context.caption = string.format("%s · Averaged over %s · Rates update every 5 s\nChest stock: %s · At least 5 min between scans", scope, time(secs),age)
+  for _, group in ipairs(SUMMARY_GROUPS) do
+    local total = 0
+    for _, id in ipairs(group.ids) do total = total + (counts[id] or 0) end
+    summary_heads[group.id].caption = string.format("[color=%s]%s: %d[/color]", group.color, group.label, total)
+  end
   for id, el in pairs(summaries) do
     local st = Balance.STATUS[id]
     el.caption = string.format("[color=%s]%s: %d[/color]", st.color, st.label, counts[id] or 0)

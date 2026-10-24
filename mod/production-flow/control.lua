@@ -90,6 +90,8 @@ end)
 
 script.on_event(defines.events.on_gui_checked_state_changed, function(e) UI.on_checked(e) end)
 script.on_event(defines.events.on_gui_elem_changed, function(e) UI.on_elem_changed(e) end)
+script.on_event(defines.events.on_gui_text_changed, function(e) UI.on_text_changed(e) end)
+script.on_event(defines.events.on_string_translated, function(e) UI.on_string_translated(e) end)
 script.on_event(defines.events.on_gui_selected_tab_changed, function(e) UI.on_tab_changed(e) end)
 script.on_event(defines.events.on_gui_selection_state_changed, function(e) UI.on_selection(e) end)
 script.on_event(defines.events.on_gui_hover, function(e)

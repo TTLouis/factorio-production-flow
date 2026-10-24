@@ -118,6 +118,9 @@ local t = tables()[1]
 assert(t.children[7].caption == "0.000", "known zero stock must not become missing stock")
 assert(t.children[15].caption == "—", "missing stock must stay unavailable")
 assert(t.children[2].caption[4] == prototypes.item["test-1"].localised_name, "use prototype display name")
+local summary = root().ssk_bal_summary
+assert(summary.column_count == 3 and summary.ssk_bal_under and summary.ssk_bal_ok and summary.ssk_bal_over, "activity summary must have three themed columns")
+assert(summary.ssk_bal_over.ssk_bal_theme.caption:find("Overproducing: 205", 1, true), "summary must count the full filtered set, not just the first page")
 local reuse = root()
 fixture[1].prod = 3
 UI.refresh(player, true)
@@ -125,6 +128,8 @@ assert(root() == reuse and t.children[4].caption == "3.00", "live numbers must u
 fixture[1].status = "deficit"
 UI.refresh(player, true)
 assert(root()==reuse and t.children[3].caption:find("Deficit"), "live status changes must update cells without destroying controls")
+assert(summary.ssk_bal_under.ssk_bal_theme.caption:find("Underproducing: 1", 1, true)
+  and summary.ssk_bal_over.ssk_bal_theme.caption:find("Overproducing: 204", 1, true), "theme totals must update without rebuilding the list")
 local original_first=t.children[1]
 table.remove(fixture,1)
 UI.refresh(player,true)

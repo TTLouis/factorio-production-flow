@@ -11,6 +11,7 @@ local SK = require("scripts.sankey_ui")
 local BalanceUI = require("scripts.balance_ui")
 local Su = require("scripts.surfaces")
 local Help = require("scripts.help_ui")
+local MaterialPicker = require("scripts.material_picker")
 
 local UI = {}
 local WIN = "ssk_main"
@@ -166,12 +167,7 @@ function fill.graph(player, c, us)
   heading(c, "Look up an item or fluid")
   local pick = c.add { type = "flow", direction = "horizontal" }
   pick.style.vertical_align = "center"
-  label(pick, "Item:")
-  pick.add { type = "choose-elem-button", elem_type = "item", tags = { ssk_ui = "lookup_item" },
-             item = us.lookup and us.lookup.type == "item" and us.lookup.name or nil }
-  label(pick, "   Fluid:")
-  pick.add { type = "choose-elem-button", elem_type = "fluid", tags = { ssk_ui = "lookup_fluid" },
-             fluid = us.lookup and us.lookup.type == "fluid" and us.lookup.name or nil }
+  MaterialPicker.button(pick, us.lookup and Graph.key(us.lookup.type, us.lookup.name), "lookup")
 
   if us.lookup then
     local key = Graph.key(us.lookup.type, us.lookup.name)
@@ -294,7 +290,7 @@ function fill.model(player, c, us)
   end
 end
 
-function fill.balance(player, c, us, only_auto)
+function fill.balance(player, c, us, only_auto, keep_balance_rows)
   if not c.ssk_balance_split then
     c.clear()
     local split = c.add { type = "flow", name = "ssk_balance_split", direction = "horizontal" }
@@ -310,7 +306,7 @@ function fill.balance(player, c, us, only_auto)
     right.style.width, right.style.height = us.bal_chart_w, us.canvas_h + 100
   end
   local split = c.ssk_balance_split
-  local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto)
+  local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto or keep_balance_rows)
   local fx = SK.balance_state(us)
   if not fx.focus then fx.focus = first end
   fx.sel = fx.focus
@@ -350,7 +346,7 @@ local function update_history(player,us)
 end
 
 -- full = rebuild the Sankey tab from scratch (otherwise its scroll position is kept)
-function UI.refresh(player, only_auto, full)
+function UI.refresh(player, only_auto, full, keep_balance_rows)
   local us = ustate(player.index)
   local id = us.tab_id
   local c = content(player, id)
@@ -362,7 +358,7 @@ function UI.refresh(player, only_auto, full)
     fx.sidx = us.sidx
     SK.defaults(fx)
     if only_auto and not fx.live then return end
-    SK.fill(player, c, fx, us.canvas_w, math.max(100, us.canvas_h - 16), full, only_auto)
+    SK.fill(player, c, fx, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(fx)), full, only_auto)
     return
   end
   if id == "sankey" then
@@ -373,10 +369,11 @@ function UI.refresh(player, only_auto, full)
   end
   if only_auto and not AUTO_REFRESH[id] then return end
   if id ~= "balance" then c.clear() end
-  fill[id](player, c, us, only_auto)
+  fill[id](player, c, us, only_auto, keep_balance_rows)
 end
 
 function UI.close(player)
+  MaterialPicker.close(player)
   Help.close(player)
   local f = player.gui.screen[WIN]
   if f then f.destroy() end
@@ -400,12 +397,8 @@ function UI.open(player)
   drag.style.horizontally_stretchable = true
   drag.style.height = 24
   local function action_button(sprite, fallback, tooltip, tag)
-    if helpers.is_valid_sprite_path(sprite) then
-      tb.add { type = "sprite-button", style = "frame_action_button", sprite = sprite,
-               tooltip = tooltip, tags = { ssk_ui = tag } }
-    else
-      tb.add { type = "button", caption = fallback, tooltip = tooltip, tags = { ssk_ui = tag } }
-    end
+    tb.add { type = "sprite-button", style = "frame_action_button", sprite = sprite,
+      tooltip = tooltip, tags = { ssk_ui = tag } }
   end
   tb.style.vertical_align = "center"
   tb.add { type = "label", caption = "Surface:" }
@@ -492,13 +485,25 @@ function UI.is_open(player) return player.gui.screen[WIN] ~= nil end
 function UI.on_click(e)
   local el = e.element
   local player = game.get_player(e.player_index)
+  if el.tags and el.tags.ssk_picker == "open" then
+    MaterialPicker.open(player, el.tags.target, el.tags.current)
+    return true
+  elseif el.tags and el.tags.ssk_picker == "group" then
+    MaterialPicker.on_group(e)
+    return true
+  elseif el.tags and el.tags.ssk_picker == "pick" then
+    return UI.on_selection(e)
+  elseif el.tags and el.tags.ssk_picker == "close" then
+    MaterialPicker.close(player)
+    return true
+  end
   if el.name == "ssk_toggle" then UI.toggle(player); return true end
   local r = SK.on_click(e, (function()
     local u = ustate(e.player_index)
     return chart_state(u)
   end)())
   if r then
-    if r ~= "none" then UI.refresh(player) end
+    if r ~= "none" then UI.refresh(player, false, false, true) end
     return true
   end
   local a = el.tags and el.tags.ssk_ui
@@ -525,13 +530,8 @@ function UI.on_click(e)
   elseif a == "focus_item" then
     local us = ustate(e.player_index)
     local fx = us.tab_id == "balance" and SK.balance_state(us) or SK.focus_state(us)
-    if fx.focus and fx.focus ~= el.tags.key then
-      fx.focus_hist = fx.focus_hist or {}
-      table.insert(fx.focus_hist, fx.focus)
-      if #fx.focus_hist > 20 then table.remove(fx.focus_hist, 1) end
-    end
-    fx.focus = el.tags.key
-    if us.tab_id == "balance" then UI.refresh(player)
+    SK.select_focus(fx, el.tags.key)
+    if us.tab_id == "balance" then UI.refresh(player, false, false, true)
     else us.tab_id = "focus"; UI.open(player) end
   elseif a == "rebuild_graph" then Graph.build(); UI.refresh(player)
   elseif a == "rescan" then
@@ -548,6 +548,22 @@ function UI.on_click(e)
 end
 
 function UI.on_selection(e)
+  local handled, key, target = MaterialPicker.selection(e)
+  if handled then
+    if key then
+      local player = game.get_player(e.player_index)
+      local us = ustate(e.player_index)
+      if target == "lookup" then
+        local kind, name = key:match("^(%a+)/(.+)$")
+        us.lookup = { type = kind, name = name }
+        UI.refresh(player)
+      elseif target == us.tab_id then
+        SK.select_focus(chart_state(us), key)
+        UI.refresh(player, false, false, true)
+      end
+    end
+    return true
+  end
   local tags = e.element.tags
   if tags and tags.ssk_ui == "period" then
     ustate(e.player_index).period = Sampler.PERIODS[e.element.selected_index] or Sampler.DEFAULT_PERIOD
@@ -578,7 +594,7 @@ function UI.on_selection(e)
   local u0 = ustate(e.player_index)
   local r = SK.on_selection(e, chart_state(u0))
   if not r then return false end
-  UI.refresh(game.get_player(e.player_index))
+  UI.refresh(game.get_player(e.player_index), false, false, true)
   return true
 end
 
@@ -595,7 +611,7 @@ function UI.on_checked(e)
   local u0 = ustate(e.player_index)
   local r = SK.on_checked(e, chart_state(u0))
   if r then
-    if r == "rebuild" then UI.refresh(game.get_player(e.player_index)) end
+    if r == "rebuild" then UI.refresh(game.get_player(e.player_index), false, false, true) end
     return true
   end
   return false
@@ -606,7 +622,7 @@ function UI.on_elem_changed(e)
   if u0.tab_id == "focus" or u0.tab_id == "balance" then
     local r = SK.on_elem_changed(e, chart_state(u0))
     if r then
-      if r ~= "none" then UI.refresh(game.get_player(e.player_index), false, true) end
+      if r ~= "none" then UI.refresh(game.get_player(e.player_index), false, true, true) end
       return true
     end
   end
@@ -630,6 +646,7 @@ function UI.on_tab_changed(e)
 end
 
 function UI.on_closed(e)
+  if MaterialPicker.on_closed(e) then return true end
   if e.element and e.element.valid and e.element.name=="ssk_help" then
     local player=game.get_player(e.player_index)
     Help.close(player);player.opened=player.gui.screen[WIN]
@@ -637,6 +654,10 @@ function UI.on_closed(e)
   end
   if e.element and e.element.valid and e.element.name == WIN then
     local player=game.get_player(e.player_index)
+    if player.gui.screen.ssk_material_picker then
+      MaterialPicker.close(player)
+      return true
+    end
     if player.gui.screen.ssk_help then
       Help.close(player);player.opened=player.gui.screen[WIN]
       return true
@@ -646,6 +667,9 @@ function UI.on_closed(e)
   end
   return false
 end
+
+function UI.on_text_changed(e) return MaterialPicker.on_text_changed(e) end
+function UI.on_string_translated(e) MaterialPicker.on_translated(e) end
 
 function UI.auto_refresh()
   for _, p in pairs(game.connected_players) do

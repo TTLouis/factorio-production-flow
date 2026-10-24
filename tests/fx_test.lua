@@ -20,6 +20,23 @@ local live = 0
 for _, o in ipairs(RO) do if o.valid then live = live + 1 end end
 print("poly objects:", live)
 assert(live > 10, "polygon renderer drew nothing")
+-- A picker can select a material outside the recorded recipe graph. It must
+-- not turn Focus into an unfiltered factory chart or retain old polygons.
+local View = TREQ("scripts.view")
+for _, pick in ipairs({ {"f_item", "wood"}, {"f_fluid", "unrecorded-fluid"} }) do
+  UI.on_elem_changed({ element = { valid = true, tags = { ssk_sk = pick[1] }, elem_value = pick[2] }, player_index = 1 })
+  local L = View.build(player, fx, 1000, 600)
+  assert(not next(L.nodes) and #L.links == 0, "unrecorded focus leaked unrelated factory flows")
+  local canvas = find(player.gui.screen.ssk_main, "ssk_canvas")
+  assert(#canvas.children == 1 and type(canvas.children[1].caption) == "table"
+    and canvas.children[1].caption[2]:find("No recorded recipe flow", 1, true), "missing focus empty-state message")
+  for _, o in ipairs(RO) do assert(not o.valid, "empty focus retained old polygons") end
+  UI.refresh(player, true)
+  assert(not next(View.build(player, fx, 1000, 600).nodes), "live refresh restored unrelated flows")
+  UI.on_click({ element = { valid = true, name = "x", tags = { ssk_sk = "f_back" } }, player_index = 1 })
+  assert(fx.focus == "item/electronic-circuit", "back from unrecorded material")
+  assert(View.build(player, fx, 1000, 600).nodes[fx.focus], "back failed to restore focused chart")
+end
 UI.on_hover({ element = { valid = true, tags = { ssk_sk = "node", key = "item/electronic-circuit", fx = true } }, player_index = 1 }, true)
 UI.on_hover({ element = { valid = true, tags = { ssk_sk = "node", key = "item/electronic-circuit", fx = true } }, player_index = 1 }, false)
 UI.on_selection({ element = { valid = true, tags = { ssk_sk = "f_renderer" }, selected_index = 1 }, player_index = 1 })

@@ -9,6 +9,7 @@ local Sampler = require("scripts.sampler")
 local Gr = require("scripts.groups")
 local Canvas = require("scripts.canvas")
 local Geometry = require("scripts.ribbon_geometry")
+local MaterialPicker = require("scripts.material_picker")
 
 local SK = {}
 local hovered_nodes = {}
@@ -131,12 +132,26 @@ end
 ---------------------------------------------------------------------------
 -- toolbar
 ---------------------------------------------------------------------------
+local ACTION_SPRITES = {
+  f_back = "left_arrow", f_forward = "right_arrow", zoom_fit = "expand", center_selection = "center",
+  reflow = "refresh", f_options = "list_view", advanced = "list_view", reset_layout = "reset",
+  unpin = "pin_arrow", inputs_more = "add", inputs_less = "collapse", overview_reset = "collapse",
+  up = "indication_arrow", down = "down_arrow", hide = "filter_blacklist", expand = "expand", collapse = "collapse",
+  new_group = "add", ungroup = "reset", deselect = "close", unhide_all = "grid_view",
+}
 local function button(parent, caption, action, tooltip, extra)
-  local t = { ssk_sk = action }
-  if extra then for k, v in pairs(extra) do t[k] = v end end
-  local b = parent.add { type = "button", caption = caption, tooltip = tooltip, tags = t }
-  if action == "zoom_fit" or action == "center_selection" then b.style.minimal_width = 56
-  elseif #caption <= 3 then b.style.width = 32 end
+  local tags = { ssk_sk = action }
+  if extra then for k, v in pairs(extra) do tags[k] = v end end
+  local sprite = ACTION_SPRITES[action]
+  if sprite then
+    return parent.add { type = "sprite-button", style = action == "reset_layout" and "tool_button_red" or "tool_button",
+      sprite = "utility/" .. sprite, tooltip = tooltip or caption, tags = tags }
+  end
+  -- Vanilla has no zoom-in/out utility sprite. Its square tool button keeps
+  -- the game graphics, hover state, dimensions and click sound for these glyphs.
+  assert(action == "zoom_in" or action == "zoom_out", "Missing toolbar sprite: " .. action)
+  local b = parent.add { type = "button", style = "tool_button", caption = caption, tooltip = tooltip or caption, tags = tags }
+  b.style.width = 28
   return b
 end
 
@@ -167,6 +182,17 @@ local function option_row(bar)
   return row
 end
 
+local function right_group(row, us)
+  row.style.width = math.max(240, (us.toolbar_width or us.canvas_w or 900) - 12)
+  local spacer = row.add { type = "empty-widget", tags = { ssk_toolbar_spacer = true } }
+  spacer.style.horizontally_stretchable = true
+  spacer.style.minimal_width = 16
+  spacer.style.height = 1
+  local right = option_row(row)
+  right.tags = { ssk_toolbar_side = "right" }
+  return right
+end
+
 local function dropdown(row, caption, items, index, action, tooltip)
   small(row, caption)
   local d = row.add { type = "drop-down", items = items, selected_index = index, tags = { ssk_sk = action }, tooltip = tooltip }
@@ -194,73 +220,117 @@ local function renderer_picker(row, us)
     "Compare the same routes: atlas sprites, or one polygon mesh per ribbon drawn on a hidden surface and shown through a camera.")
 end
 
-local function zoom_buttons(row)
+local function zoom_buttons(row, compact)
   button(row, "−", "zoom_out", "Zoom out")
   button(row, "Fit graph", "zoom_fit", "Fit the chart to the window while keeping icons and text readable; dense charts keep scrolling.")
   button(row, "+", "zoom_in", "Zoom in")
-  button(row, "Center", "center_selection", "Center the selected item, or the whole chart when nothing is selected.")
+  if not compact then button(row, "Center", "center_selection", "Center the selected item, or the whole chart when nothing is selected.") end
 end
 
 local function reflow_button(row)
   button(row, "Reflow", "reflow", "Recalculate node order and spacing. Auto-update otherwise keeps the current layout.")
 end
 
-local function back_button(row)
-  button(row, "◀", "f_back", "Back to the previous item")
-end
-
 local function item_pickers(row, us)
   small(row, "Item / fluid:")
-  local t, n = nil, nil
-  if us.focus then t, n = string.match(us.focus, "^(%a+)/(.+)$") end
-  row.add { type = "choose-elem-button", elem_type = "item", item = (t == "item") and n or nil,
-            tags = { ssk_sk = "f_item" }, tooltip = "Pick an item to inspect" }
-  row.add { type = "choose-elem-button", elem_type = "fluid", fluid = (t == "fluid") and n or nil,
-            tags = { ssk_sk = "f_fluid" }, tooltip = "Pick a fluid to inspect" }
+  MaterialPicker.button(row, us.focus, us.neighborhood and "balance" or "focus")
+end
+
+local function material_caption(key)
+  local kind, name = key:match("^(%a+)/(.+)$")
+  local proto = prototypes[kind] and prototypes[kind][name]
+  return { "", "[" .. kind .. "=" .. name .. "] ", proto and proto.localised_name or name:gsub("%-", " ") }
+end
+
+local function navigation_controls(row, us)
+  local back, forward = us.focus_hist or {}, us.focus_forward or {}
+  local caption = material_caption
+  local previous = button(row, "◀", "f_back", #back > 0 and { "", "Back to ", caption(back[#back]) } or "No previous material")
+  previous.enabled = #back > 0
+  local next_ = button(row, "▶", "f_forward", #forward > 0 and { "", "Forward to ", caption(forward[#forward]) } or "No next material")
+  next_.enabled = #forward > 0
+  local items, steps = { "View history" }, {}
+  for i = #(us.focus_hist or {}), 1, -1 do
+    steps[#steps + 1] = -(#back - i + 1)
+    items[#items + 1] = { "", "◀ ", caption(back[i]) }
+  end
+  for i = #forward, 1, -1 do
+    steps[#steps + 1] = #forward - i + 1
+    items[#items + 1] = { "", "▶ ", caption(forward[i]) }
+  end
+  local recent = row.add { type = "drop-down", items = items, selected_index = 1,
+    tags = { ssk_sk = "f_history", steps = steps }, tooltip = "Jump backward or forward along your viewed-material path" }
+  recent.style.width = 160
+  recent.enabled = #items > 1
+  local clear = row.add { type = "sprite-button", style = "tool_button_red", sprite = "utility/trash",
+    tags = { ssk_sk = "f_clear_history" },
+    tooltip = "Clear viewed-material history. Keep the current material and collected production data." }
+  clear.enabled = #back + #forward > 0
+end
+
+local function trail_controls(bar, us)
+  local back, caption = us.focus_hist or {}, material_caption
+  local trail = option_row(bar)
+  small(trail, "Path:")
+  local slots = math.max(2, math.min(5, math.floor(((us.canvas_w or 900) - 210) / 60)))
+  local first = math.max(1, #back - slots + 2)
+  if first > 1 then small(trail, "…") end
+  for i = first, #back do
+    trail.add { type = "sprite-button", style = "slot_button", sprite = back[i],
+      tooltip = { "", "Return to ", caption(back[i]) }, tags = { ssk_sk = "f_trail", steps = -(#back - i + 1) } }
+    local arrow = trail.add { type = "sprite", sprite = "utility/right_arrow" }
+    arrow.style.width, arrow.style.height = 12, 12
+  end
+  if us.focus then
+    local current = small(trail, caption(us.focus))
+    current.style.width = 140
+    current.style.font = "default-bold"
+    current.style.single_line = true
+    current.tooltip = { "", "Current material: ", caption(us.focus) }
+  end
 end
 
 local function focus_toolbar(bar, us, player)
   bar.clear()
+  local strip = bar.add { type = "frame", style = "subheader_frame", direction = "horizontal", tags = { ssk_primary_controls = true } }
+  strip.style.height = 48
+  local main = option_row(strip)
+  item_pickers(main, us)
+  navigation_controls(main, us)
+  local actions = right_group(main, us)
+  zoom_buttons(actions, true)
+  label_toggle(actions, us)
+  button(actions, "Options", "f_options", "Show or hide less-used chart and layout controls").toggled = us.options_open == true
+  trail_controls(bar, us)
   if us.neighborhood then
-    local title = option_row(bar)
-    local heading = title.add { type = "label", caption = "Item flow", style = "caption_label" }
-    heading.style.width = 65
-    zoom_buttons(title)
-    local expand = button(title, "Expand inputs", "inputs_more", "Reveal another upstream production step without changing the selected item (up to 6 steps)")
-    expand.enabled = (us.input_depth or 1) < View.MAX_INPUT_DEPTH
-    if (us.input_depth or 1) > 1 then button(title, "Fewer inputs", "inputs_less", "Hide the furthest upstream step") end
-    if #(us.focus_hist or {}) > 0 then back_button(title) end
-    local row = option_row(bar)
-    item_pickers(row, us)
-    live_toggle(row, us)
-    label_toggle(row, us)
-    if developer_controls(player) then renderer_picker(row, us) end
-    local options = option_row(bar)
-    widths_picker(options, us)
-    colors_picker(options, us)
-    button(options, "Unpin", "unpin", "Clear the pinned highlight. Shift-click a node to pin one; click normally to inspect it.")
-    local making=bar.add{type="label",name="ssk_producers"}
-    making.style.width=math.max(100,(us.canvas_w or 900)-12)
-    making.style.font="default-small";making.style.single_line=true
-    return
+    local making = bar.add { type = "label", name = "ssk_producers" }
+    making.style.width = math.max(100, (us.toolbar_width or us.canvas_w or 900) - 12)
+    making.style.font = "default-small"
+    making.style.single_line = true
   end
-  local r1 = option_row(bar)
-  if #(us.focus_hist or {}) > 0 then back_button(r1) end
-  item_pickers(r1, us)
-  small(r1, "Steps:")
-  r1.add { type = "drop-down", items = { "1", "2", "3" }, selected_index = us.focus_steps or 2,
-           tags = { ssk_sk = "f_steps" }, tooltip = "How many items up- and downstream to show (multi-output recipes don't count as a step)" }
-  live_toggle(r1, us)
-  label_toggle(r1, us)
-  local r2 = option_row(bar)
-  zoom_buttons(r2)
-  reflow_button(r2)
-  hint(r2, "Click a node to re-center on it. Grey ends show flow outside this view.", math.max(160, (us.canvas_w or 1000) - 420))
-  local r3 = option_row(bar)
-  widths_picker(r3, us)
-  colors_picker(r3, us)
-  lines_picker(r3, us)
-  if developer_controls(player) then renderer_picker(r3, us) end
+  local options = bar.add { type = "frame", style = "inside_shallow_frame", name = "ssk_options", direction = "vertical", visible = us.options_open == true }
+  options.style.padding = 4
+  local row = option_row(options)
+  widths_picker(row, us)
+  colors_picker(row, us)
+  lines_picker(right_group(row, us), us)
+  row = option_row(options)
+  if us.neighborhood then
+    local expand = button(row, "Expand inputs", "inputs_more", "Reveal another upstream production step (up to 6)")
+    expand.enabled = (us.input_depth or 1) < View.MAX_INPUT_DEPTH
+    if (us.input_depth or 1) > 1 then button(row, "Fewer inputs", "inputs_less", "Hide the furthest upstream step") end
+  else
+    small(row, "Steps:")
+    row.add { type = "drop-down", items = { "1", "2", "3" }, selected_index = us.focus_steps or 2,
+      tags = { ssk_sk = "f_steps" }, tooltip = "Item steps to include upstream and downstream" }
+  end
+  local drawing = right_group(row, us)
+  button(drawing, "Center", "center_selection", "Center the selected material")
+  reflow_button(drawing)
+  button(drawing, "Unpin", "unpin", "Clear the pinned chain highlight")
+  row = option_row(options)
+  live_toggle(row, us)
+  if developer_controls(player) then renderer_picker(right_group(row, us), us) end
 end
 
 local function build_toolbar(bar, us, L, player)
@@ -285,8 +355,9 @@ local function build_toolbar(bar, us, L, player)
   local preset_picker = r1.add { type = "drop-down", items = items, selected_index = sel, tags = { ssk_sk = "preset" } }
   preset_picker.style.width = 190
 
-  zoom_buttons(r1)
-  button(r1, us.advanced and "Less" or "Advanced", "advanced", "Layout, tier range and line controls")
+  local actions = right_group(r1, us)
+  zoom_buttons(actions)
+  button(actions, "Advanced", "advanced", "Show or hide layout, tier range and line controls").toggled = us.advanced == true
   local controls = bar.add { type = "flow", direction = "vertical", name = "ssk_advanced" }
   controls.visible = us.advanced == true
   r1 = option_row(controls)
@@ -318,17 +389,18 @@ local function build_toolbar(bar, us, L, player)
            tags = { ssk_sk = "layout" },
            tooltip = "Routed columns reserve item headers and long-link tracks; crossings can remain. Scroll sideways for larger graphs.\nSwimlanes group related items and allow manual ordering; ribbons can overlap." }
   lines_picker(r1, us)
-  button(r1, "Reset layout", "reset_layout", "Forget manual ordering, hidden items and collapsed groups")
+  button(right_group(r1, us), "Reset layout", "reset_layout", "Forget manual ordering, hidden items and collapsed groups")
 
   if developer_controls(player) then renderer_picker(option_row(controls), us) end
   local r2 = option_row(bar)
   widths_picker(r2, us)
   colors_picker(r2, us)
-  live_toggle(r2, us)
-  label_toggle(r2, us)
-  reflow_button(r2)
-  button(r2, "Unpin", "unpin", "Clear the pinned highlight. Click a node to pin one.")
-  if us.view == "overview" then button(r2, "Collapse overview", "overview_reset", "Unfinished grouping: return expanded groups to the overview") end
+  local actions = right_group(r2, us)
+  live_toggle(actions, us)
+  label_toggle(actions, us)
+  reflow_button(actions)
+  button(actions, "Unpin", "unpin", "Clear the pinned highlight. Click a node to pin one.")
+  if us.view == "overview" then button(actions, "Collapse overview", "overview_reset", "Unfinished grouping: return expanded groups to the overview") end
   r2 = option_row(bar)
   local n = us.sel and L.nodes[us.sel]
   local clean = us.layout ~= "lanes"
@@ -673,8 +745,8 @@ local function rstate(pi, view)
 end
 
 function SK.toolbar_height(us)
-  if us.neighborhood then return 136 end
-  if us.view == "focus" then return 112 end
+  if us.neighborhood then return 120 + (us.options_open and 112 or 0) end
+  if us.view == "focus" then return 96 + (us.options_open and 112 or 0) end
   return (us.advanced and 272 or 96) + (us.sel and 32 or 0)
 end
 
@@ -740,6 +812,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     canvas.style.vertical_spacing = 0
   end
   c.ssk_bar.style.width = W
+  us.toolbar_width = W
   c.ssk_sp.style.height = viewH
   c.ssk_bar.style.height = SK.toolbar_height(us)
   c.ssk_bar.style.padding = 0
@@ -770,10 +843,17 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   for _ in pairs(L.nodes) do nn = nn + 1 end
   local count = 0
   if nn == 0 then
-    local l = canvas.add { type = "label", caption = (L.seconds < 2)
+    Canvas.clear(player.index)
+    local caption = (L.seconds < 2)
       and "Collecting data… rates appear after the first few seconds."
-      or "Nothing to show for this preset / scope / tier range." }
-    place(l, 40, 40, 600, 24)
+      or "Nothing to show for this preset / scope / tier range."
+    if us.view == "focus" and L.seconds >= 2 then
+      caption = { "", "No recorded recipe flow for ", localised_name({key=us.focus}),
+        " on this surface in the selected period. Try another material, surface or period." }
+    end
+    local l = canvas.add { type = "label", caption = caption }
+    l.style.single_line = false
+    place(l, 24, 40, math.max(100, W - 48), 80)
   else
     count = draw(canvas, L, us, rstate(player.index, us.view), player, CW, math.max(viewH - 4, L.content_h))
     if us.center_pending or (us.neighborhood and (us.centered_focus ~= us.focus or full)) then
@@ -859,6 +939,29 @@ local function move(player, us, dir, to_end)
 end
 
 -- returns: nil (not ours) | "redraw" | "rebuild"
+function SK.select_focus(us, key)
+  if not key or key == us.focus then return false end
+  us.focus_hist = us.focus_hist or {}
+  if us.focus then table.insert(us.focus_hist, us.focus) end
+  while #us.focus_hist > 20 do table.remove(us.focus_hist, 1) end
+  us.focus = key
+  us.focus_forward = {}
+  return true
+end
+
+function SK.step_history(us, steps)
+  if not steps or steps == 0 then return false end
+  us.focus_hist, us.focus_forward = us.focus_hist or {}, us.focus_forward or {}
+  local from = steps < 0 and us.focus_hist or us.focus_forward
+  local to = steps < 0 and us.focus_forward or us.focus_hist
+  if math.abs(steps) > #from then return false end
+  for _ = 1, math.abs(steps) do
+    if us.focus then to[#to + 1] = us.focus end
+    us.focus = table.remove(from)
+  end
+  return true
+end
+
 function SK.on_click(e, us)
   local tags = e.element.tags
   local a = tags and tags.ssk_sk
@@ -873,15 +976,14 @@ function SK.on_click(e, us)
   elseif a == "node" and us.view == "focus" then
     local k = base_key(tags.key)
     if string.sub(k, 1, 6) == "group/" or string.sub(k, 1, 7) == "recipe/" or k == us.focus then return "none" end
-    us.focus_hist = us.focus_hist or {}
-    if us.focus then table.insert(us.focus_hist, us.focus) end
-    if #us.focus_hist > 20 then table.remove(us.focus_hist, 1) end
-    us.focus = k
-  elseif a == "f_back" then
-    local h = us.focus_hist or {}
-    if #h > 0 then us.focus = table.remove(h) end
+    SK.select_focus(us, k)
+  elseif a == "f_clear_history" then
+    us.focus_hist, us.focus_forward = {}, {}
+  elseif a == "f_back" or a == "f_forward" or a == "f_trail" then
+    if not SK.step_history(us, a == "f_back" and -1 or a == "f_forward" and 1 or tags.steps) then return "none" end
   elseif a == "node" then
     us.sel = (us.sel ~= tags.key) and tags.key or nil
+  elseif a == "f_options" then us.options_open = not us.options_open
   elseif a == "advanced" then us.advanced = not us.advanced
   elseif a == "inputs_more" then us.input_depth = math.min(View.MAX_INPUT_DEPTH, (us.input_depth or 1) + 1)
   elseif a == "inputs_less" then us.input_depth = math.max(1, (us.input_depth or 1) - 1)
@@ -931,6 +1033,8 @@ function SK.on_selection(e, us)
   if a == "view" then
     us.view = i == 1 and "overview" or "detail"
     us.sel, us.tier_lo, us.tier_hi = nil, nil, nil
+  elseif a == "f_history" then
+    if not SK.step_history(us, tags.steps and tags.steps[i - 1]) then return "none" end
   elseif a == "layout" then us.layout = (i == 2) and "lanes" or "clean"
   elseif a == "f_steps" then us.focus_steps = i
   elseif a == "f_heights" then us.heights = (i == 2) and "sqrt" or "linear"
@@ -981,11 +1085,7 @@ function SK.on_elem_changed(e, us)
   if type(v) == "table" then v = v.name end
   if not v then return "none" end
   local k = ((a == "f_item") and "item/" or "fluid/") .. v
-  if k ~= us.focus then
-    us.focus_hist = us.focus_hist or {}
-    if us.focus then table.insert(us.focus_hist, us.focus) end
-    us.focus = k
-  end
+  SK.select_focus(us, k)
   return "rebuild"
 end
 
