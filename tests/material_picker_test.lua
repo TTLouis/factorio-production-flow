@@ -118,7 +118,7 @@ for _, tab in ipairs({ "balance", "focus" }) do
   SK.step_history(fx, -1); SK.select_focus(fx, "item/water")
   assert(#fx.focus_forward == 0, "a new branch must discard the abandoned forward path")
   for i = 1, 30 do SK.select_focus(fx, i % 2 == 0 and "item/wood" or "fluid/water") end
-  assert(#fx.focus_hist == 20, "view history must remain bounded")
+  assert(#fx.focus_hist == 6, "view history must keep only the last six materials")
   UI.on_click { element = find(main, function(e) return e.tags.ssk_picker == "open" end), player_index = 1 }
   dialog = player.gui.screen.ssk_material_picker
   assert(UI.on_closed { element = main, player_index = 1 } and player.opened == main and not dialog.valid

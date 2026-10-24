@@ -17,6 +17,13 @@ local ZOOM_STEP = 1.25
 
 local function round(v) return math.floor(v + 0.5) end
 
+-- Focus remembers the last few materials only; Last visits stays a short list.
+local HISTORY_LIMIT = 6
+
+local function trim_history(list)
+  while list and #list > HISTORY_LIMIT do table.remove(list, 1) end
+end
+
 function SK.defaults(us)
   us.view = us.view or "detail"
   us.tier_mode = us.tier_mode or "depth"
@@ -34,6 +41,8 @@ function SK.defaults(us)
   us.collapsed = us.collapsed or {}
   us.pos = us.pos or {}
   us.last_order = us.last_order or {}
+  trim_history(us.focus_hist)
+  trim_history(us.focus_forward)
 end
 
 -- Same rate formatting as the Balance table, so a value reads identically in both.
@@ -348,10 +357,11 @@ local function material_caption(key)
   return { "", "[" .. kind .. "=" .. name .. "] ", proto and proto.localised_name or name:gsub("%-", " ") }
 end
 
--- One history line: Back/Forward, the Last visits list, the visited icons
--- leading to the current material, and Clear on the right.
-local function history_controls(bar, us)
-  local row = option_row(bar)
+-- History after the item picker on the same line: Back/Forward, the Last visits
+-- list, the visited icons leading to the current material, and Clear.
+local function history_controls(row, us)
+  local divider = row.add { type = "line", direction = "vertical" }
+  divider.style.height = ROW_H
   local back, forward = us.focus_hist or {}, us.focus_forward or {}
   local caption = material_caption
   local previous = button(row, "◀", "f_back", #back > 0 and { "", "Back to ", caption(back[#back]) } or "No previous material")
@@ -372,7 +382,7 @@ local function history_controls(bar, us)
   recent.style.width = 160
   recent.enabled = #items > 1
   -- visited icons are tool-button sized so the line keeps the toolbar height
-  local slots = math.max(1, math.min(6, math.floor(((us.toolbar_width or us.canvas_w or 900) - 460) / 56)))
+  local slots = math.max(0, math.min(HISTORY_LIMIT, math.floor(((us.toolbar_width or us.canvas_w or 900) - 900) / 56)))
   local first = math.max(1, #back - slots + 1)
   if first > 1 then small(row, "…") end
   for i = first, #back do
@@ -390,7 +400,7 @@ local function history_controls(bar, us)
     current.style.single_line = true
     current.tooltip = { "", "Current material: ", caption(us.focus) }
   end
-  local clear = right_group(row, us).add { type = "sprite-button", style = "tool_button_red", sprite = "utility/trash",
+  local clear = row.add { type = "sprite-button", style = "tool_button_red", sprite = "utility/trash",
     tags = { ssk_sk = "f_clear_history" },
     tooltip = "Clear Last visits. Keeps the current material and collected production data." }
   clear.enabled = #back + #forward > 0
@@ -413,14 +423,14 @@ local function toolbar_strip(bar, us)
 end
 
 local function focus_toolbar(bar, us, player)
-  local rows, main = toolbar_strip(bar, us)
+  local _, main = toolbar_strip(bar, us)
   item_pickers(main, us)
+  -- Balance picks its material from the list beside the chart, so only Focus keeps history.
+  if not us.neighborhood then history_controls(main, us) end
   local actions = right_group(main, us)
   zoom_buttons(actions, true)
   label_toggle(actions, us)
   settings_button(actions, us)
-  -- Balance picks its material from the list beside the chart, so only Focus keeps history.
-  if not us.neighborhood then history_controls(rows, us) end
 end
 
 local function build_toolbar(bar, us, L, player)
@@ -794,8 +804,8 @@ local function rstate(pi, view)
 end
 
 function SK.toolbar_height(us)
-  -- Balance: material row only. Focus: + history. Full: + hint, or + selection and its actions.
-  local rows = us.neighborhood and 1 or us.view == "focus" and 2 or (us.sel and 3 or 2)
+  -- Balance and Focus: one material row (Focus history shares it). Full: + hint, or + selection and its actions.
+  local rows = (us.neighborhood or us.view == "focus") and 1 or (us.sel and 3 or 2)
   return 2 * STRIP_PAD_Y + FIRST_ROW_H + (rows - 1) * (ROW_H + ROW_GAP)
 end
 
@@ -961,7 +971,7 @@ function SK.select_focus(us, key)
   if not key or key == us.focus then return false end
   us.focus_hist = us.focus_hist or {}
   if us.focus then table.insert(us.focus_hist, us.focus) end
-  while #us.focus_hist > 20 do table.remove(us.focus_hist, 1) end
+  trim_history(us.focus_hist)
   us.focus = key
   us.focus_forward = {}
   return true
