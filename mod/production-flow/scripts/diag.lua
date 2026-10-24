@@ -184,7 +184,7 @@ function D.export(player, reason)
   local ok, data = pcall(D.snapshot)
   if not ok then
     D.log("export failed: " .. tostring(data))
-    if player then player.print("[Sankey] Export failed: " .. tostring(data)) end
+    if player then player.print("[Production Flow] Export failed: " .. tostring(data)) end
     return
   end
   local pi = player and player.index or target_player()
@@ -194,7 +194,7 @@ function D.export(player, reason)
   if reason == "manual" then
     local name = DIR .. "export-" .. game.tick .. ".json"
     helpers.write_file(name, json, false, pi)
-    if player then player.print("[Sankey] Exported diagnostics to script-output/" .. name) end
+    if player then player.print("[Production Flow] Exported diagnostics to script-output/" .. name) end
   end
 end
 

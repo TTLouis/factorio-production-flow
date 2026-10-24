@@ -6,7 +6,9 @@ local Model = require("scripts.model")
 local View = require("scripts.view")
 local Diag = require("scripts.diag")
 local ChestStock=require("scripts.chest_stock")
+local Balance=require("scripts.balance")
 local start, step, capture = nil, 0, nil
+local selection
 local captures, skipped, products, usage_labels = {}, {}, {}, {}
 
 local cases = {
@@ -64,6 +66,45 @@ if mode == "full" then
   }
 end
 
+if mode == "focus" then
+  cases={
+    {name="focus-petroleum-before",surface="nauvis",tab="focus",focus="fluid/petroleum-gas"},
+    {name="focus-wood",surface="nauvis",tab="focus",pick="item/wood",empty=true},
+    {name="focus-back",surface="nauvis",tab="focus",back=true},
+    {name="focus-wood-sprites",surface="nauvis",tab="focus",pick="item/wood",empty=true,renderer="sprites"},
+    {name="focus-unrecorded-fluid",surface="nauvis",tab="focus",pick="fluid/lithium-brine",empty=true},
+  }
+end
+
+if mode == "selection" then
+  cases={
+    {name="selection-priority",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1},
+    {name="selection-details",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,details=true},
+    {name="selection-groups",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,groups=true},
+  }
+end
+
+if mode == "picker" then
+  cases={
+    {name="picker-balance-browse",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,query=""},
+    {name="picker-fluid-group",surface="nauvis",tab="balance",focus="fluid/water",depth=1,query="",group_material="fluid/water"},
+    {name="picker-balance-catalog",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,query="iron"},
+    {name="picker-balance-history",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water"},
+    {name="picker-balance-groups",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water",groups=true,
+      favs={items={["item/steel-plate"]=true},groups={["plates"]=true}}},
+    {name="picker-balance-cleared",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water",clear=true},
+    {name="picker-balance-scroll-bottom",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water",bottom=true},
+    {name="picker-balance-options",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water",options=true},
+    {name="picker-focus-options",surface="nauvis",tab="focus",focus="item/electronic-circuit",pick="item/wood",options=true},
+    {name="picker-focus-catalog",surface="nauvis",tab="focus",focus="item/electronic-circuit",query="wood"},
+    {name="picker-focus-history",surface="nauvis",tab="focus",focus="item/electronic-circuit",pick="item/wood"},
+    {name="picker-focus-cleared",surface="nauvis",tab="focus",focus="item/electronic-circuit",pick="item/wood",clear=true},
+    {name="picker-focus-wood-empty",surface="nauvis",tab="focus",focus="item/electronic-circuit",pick="item/wood",stay_pick=true},
+    {name="picker-focus-six-visits",surface="nauvis",tab="focus",focus="item/electronic-circuit",pick="item/wood",six_visits=true},
+    {name="picker-full-controls",surface="nauvis",tab="sankey",view="detail"},
+  }
+end
+
 if mode == "scroll" then
   cases={
     {name="balance-scroll-top",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1},
@@ -73,6 +114,8 @@ if mode == "scroll" then
     {name="balance-groups-details",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,groups=true,details=true},
     {name="balance-scroll-groups",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,bottom=true,groups=true},
     {name="balance-beta-water",surface="vulcanus",tab="balance",focus="fluid/water",depth=1},
+    {name="balance-favourites",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,groups=true,
+      favs={items={["item/steel-plate"]=true,["item/stone"]=true},groups={["plates"]=true}}},
   }
 end
 
@@ -164,7 +207,7 @@ local function verify_usage(element, root, result)
   if key and key:match("#use$") then
     local node=find_action(root,"node",key)
     assert(node.tooltip[9]==" consumed", "Uses tooltip lost selected material")
-    assert(element.caption==node.tooltip[6]:gsub("fluid units/s","fluid/s"), "Uses label still shows consumer output")
+    assert(element.caption==node.tooltip[6], "Uses label still shows consumer output")
     result[key]=element.caption
   end
   for _,child in pairs(element.children) do verify_usage(child,root,result) end
@@ -208,21 +251,42 @@ function T.tick(UI, Sampler)
   end
   if not Sampler.stock_known(game.surfaces.nauvis.index) then return end
   if mode=="audit" and not Sampler.stock_known(audit_fixture.surface) then return end
+  if selection and selection.click_tick and game.tick>=selection.click_tick then
+    -- Wait until the before screenshot and native scroll layout have rendered.
+    -- Simulate rates changing after the displayed list was built, then exercise
+    -- the actual row handler without any subsequent scroll correction.
+    local original_rows=Balance.rows
+    Balance.rows=function(...)
+      local rows,seconds=original_rows(...)
+      local changed={}
+      for i=#rows,2,-1 do rows[i].status="ok"; changed[#changed+1]=rows[i] end
+      return changed,seconds
+    end
+    assert(UI.on_click{element=selection.target,player_index=selection.player.index})
+    Balance.rows=original_rows
+    assert(selection.list.valid and selection.items.valid and selection.target.valid,"Row selection rebuilt the scrolled list")
+    local fx=SK.balance_state(storage.ui[selection.player.index])
+    assert(fx.focus==selection.target.tags.key and fx.live==false,"Paused inspector did not select row")
+    selection.click_tick=nil; selection.done=true
+    capture=cases[step].name.."-after"
+    log("BALANCE SELECTION PASS "..cases[step].name.." key="..fx.focus)
+  end
   if elapsed % 60 ~= 0 then return end
   local player = game.connected_players[1]
   assert(player, "Graphical test has no connected player")
   if capture then
     assert(player.gui.screen.ssk_main, "Missing native GUI")
     if player.gui.screen.ssk_help then player.gui.screen.ssk_help.bring_to_front()
+    elseif player.gui.screen.ssk_material_picker then player.gui.screen.ssk_material_picker.bring_to_front()
     else player.gui.screen.ssk_main.bring_to_front() end
     if mode=="scroll" and cases[step].bottom then
       -- Live sampling can reorder rows between setup and capture. Exercise the
       -- current list after that refresh, immediately before engine rendering.
       local root=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root
-      local sections=root.ssk_bal_items.children
+      local sections=root.ssk_bal_list.ssk_bal_items.children
       local table=sections[#sections].ssk_bal_table
       local rows=table.children
-      root.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
+      root.ssk_bal_list.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
     end
     local usage={}
     verify_usage(player.gui.screen.ssk_main,player.gui.screen.ssk_main,usage)
@@ -247,6 +311,10 @@ function T.tick(UI, Sampler)
     log("SANKEY SAVE captured="..capture)
     captures[#captures+1] = capture
     capture = nil
+    if selection then
+      if selection.done then selection=nil
+      else selection.click_tick=game.tick+1 end
+    end
     return
   end
   step = step+1
@@ -254,7 +322,7 @@ function T.tick(UI, Sampler)
   if not c then
     if step == #cases+1 then
       Diag.export(player, "save-test")
-      helpers.write_file("save-test/gui.json", helpers.table_to_json({captures=captures, skipped=skipped, products=products, usage_labels=usage_labels}), false)
+      helpers.write_file("save-test/gui.json", helpers.table_to_json({captures=captures, skipped=skipped, products=products, usage_labels=usage_labels, display_scale=player.display_scale, display_resolution=player.display_resolution}), false)
       log("SANKEY SAVE GUI OK")
     end
     return
@@ -268,10 +336,11 @@ function T.tick(UI, Sampler)
   local us = storage.ui[player.index]
   assert(us.period == 600, "10m is not the initial default")
   us.surface, us.tab_id, us.view = c.surface, c.tab, c.view or "overview"
-  us.live, us.advanced = false, c.advanced or false
+  us.live = false
   us.renderer = c.renderer or "poly"
-  if mode=="scroll" or mode=="ux" or mode=="warmup" then
+  if mode=="scroll" or mode=="selection" or mode=="picker" or mode=="ux" or mode=="warmup" then
     us.bal_filter="all"; us.bal_details=c.details or false; us.bal_sort=c.groups and "groups" or "priority"; us.bal_group=nil
+    us.bal_favs=c.favs or nil
   end
   if (mode=="full" or mode=="names") then
     us.preset=c.preset or "all"; us.sel=nil; us.layout_snapshot=nil; us.auto_rank=nil
@@ -289,11 +358,43 @@ function T.tick(UI, Sampler)
     products[c.name]={surface=c.surface,focus=c.focus,seconds=seconds,producers=producers}
     if c.name=="balance-condensation" then assert(producers["steam-condensation"], "No measured steam condensation") end
   elseif c.tab == "focus" then
-    local fx=SK.focus_state(us); fx.focus=c.focus; fx.live=false
+    local fx=SK.focus_state(us); if c.focus then fx.focus=c.focus end; fx.live=false
+    if mode=="focus" then fx.renderer=c.renderer or "poly"; fx.show_labels=true; fx.focus_steps=3 end
     if (mode=="full" or mode=="names") then fx.show_labels=true; fx.focus_steps=2; fx.layout_snapshot=nil; fx.auto_rank=nil end
   end
   UI.open(player)
   assert(us.sidx==game.surfaces[c.surface].index,"Wrong rendered surface")
+  if c.advanced then
+    UI.on_click{player_index=player.index,element=find_action(player.gui.screen.ssk_main,"chart_settings")}
+    assert(us.settings_open and player.gui.screen.ssk_main.ssk_inner.ssk_tabs["content_"..c.tab].ssk_chart.ssk_settings,"Chart settings did not open")
+  end
+  if mode=="focus" then
+    local root=player.gui.screen.ssk_main
+    if c.pick then
+      local function matching(el, predicate)
+        if predicate(el) then return el end
+        for _,child in ipairs(el.children) do local hit=matching(child,predicate);if hit then return hit end end
+      end
+      UI.on_click{element=assert(matching(root,function(el) return el.tags.ssk_picker=="open" end)),player_index=player.index}
+      local dialog=assert(player.gui.screen.ssk_material_picker)
+      dialog.ssk_query.text=c.pick:match("/(.+)$"):gsub("%-"," ")
+      UI.on_text_changed{element=dialog.ssk_query,player_index=player.index}
+      local slot=assert(matching(dialog,function(el) return el.tags.ssk_picker=="pick" and el.tags.key==c.pick end))
+      assert(UI.on_click{element=slot,player_index=player.index})
+    elseif c.back then
+      assert(UI.on_click{element=find_action(root,"f_back"),player_index=player.index})
+    end
+    local fx=SK.focus_state(us)
+    local L=View.build(player,fx,us.canvas_w,us.canvas_h)
+    if c.empty then
+      assert(fx.focus==c.pick and not next(L.nodes) and #L.links==0,"Unrecorded Focus leaked factory chart")
+      assert(not find_node(root),"Empty Focus retained old GUI nodes")
+      for _,obj in pairs(storage.canvas[player.index].objs) do assert(not obj.valid,"Empty Focus retained polygons") end
+    else
+      assert(fx.focus=="fluid/petroleum-gas" and L.nodes[fx.focus] and #L.links>0,"Active Focus/back did not restore oil flow")
+    end
+    log("FOCUS REGRESSION PASS "..c.name.." selection="..fx.focus.." flows="..#L.links)
+  end
   if c.name=="full-platform-copper" or c.name=="full-vulcanus-copper" then
     local preset_picker=find_action(player.gui.screen.ssk_main,"preset")
     assert(us.preset_ids[preset_picker.selected_index]==us.preset,"Preset picker does not identify the displayed copper chain")
@@ -303,6 +404,9 @@ function T.tick(UI, Sampler)
   end
   assert(us.surface_names[find_scope(player.gui.screen.ssk_main).selected_index]==c.surface,"Surface picker does not identify rendered surface")
   if mode=="balance" or mode=="scroll" or mode=="ux" or mode=="warmup" or ((mode=="full" or mode=="names") and c.tab~="focus") then
+    -- Balance and Focus keep Center in Chart settings; close them again before capture.
+    local opened_settings=not find_action(player.gui.screen.ssk_main,"center_selection")
+    if opened_settings then UI.on_click{player_index=player.index,element=find_action(player.gui.screen.ssk_main,"chart_settings")} end
     for _,action in ipairs({"center_selection","zoom_fit"}) do
       local button=find_action(player.gui.screen.ssk_main,action)
       assert(button, "Missing Balance action "..action)
@@ -316,17 +420,18 @@ function T.tick(UI, Sampler)
       local center=find_action(player.gui.screen.ssk_main,"center_selection")
       UI.on_click({player_index=player.index,element=center})
     end
+    if opened_settings then UI.on_click{player_index=player.index,element=find_action(player.gui.screen.ssk_main,"chart_settings")} end
   end
   if mode=="scroll" then
     local left=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table
     local root=left.ssk_bal_root
-    assert(left.type=="flow" and root.ssk_bal_items.type=="scroll-pane")
+    assert(left.type=="flow" and root.ssk_bal_list.ssk_bal_items.type=="scroll-pane")
     assert(root.ssk_bal_summary and root.ssk_bal_context and root.ssk_bal_footer.ssk_bal_count)
     if c.bottom then
-      local sections=root.ssk_bal_items.children
+      local sections=root.ssk_bal_list.ssk_bal_items.children
       local table=sections[#sections].ssk_bal_table
       local rows=table.children
-      root.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
+      root.ssk_bal_list.ssk_bal_items.scroll_to_element(rows[#rows-table.column_count+1],"in-view")
     end
   end
   -- Native GUI identity check: a live refresh must retain the controls used by
@@ -351,13 +456,135 @@ function T.tick(UI, Sampler)
   end
   fx.live=was_live
 
+  if mode=="picker" and c.tab~="sankey" then
+    fx.settings_open = nil
+    UI.refresh(player,false,false,true)
+    local bar=find_named(root,"ssk_bar")
+    local chart=bar.parent
+    local toolbar_h,chart_h=bar.style.minimal_height,chart.ssk_sp.style.minimal_height
+    assert(not chart.ssk_settings,"Chart settings should start closed")
+    local list_before=find_named(root,"ssk_bal_root")
+    UI.on_click{player_index=player.index,element=find_action(root,"chart_settings")}
+    assert(chart.ssk_settings and find_action(chart.ssk_settings,"f_heights"),"Chart settings did not open")
+    assert(bar.style.minimal_height==toolbar_h and chart.ssk_sp.style.minimal_height==chart_h,"Chart settings moved the chart")
+    if list_before then assert(list_before.valid,"Chart settings rebuilt Balance list") end
+    UI.on_closed{player_index=player.index,element=root}
+    assert(root.valid and not chart.ssk_settings and player.opened==root,"Esc must close chart settings before the window")
+    if c.options then
+      UI.on_click{player_index=player.index,element=find_action(root,"chart_settings")}
+      assert(chart.ssk_settings,"Chart settings did not reopen")
+    end
+    fx.focus_hist,fx.focus_forward={},{}
+    SK.select_focus(fx,"item/copper-plate")
+    UI.refresh(player,false,false,true)
+    local function picker_action(el,action)
+      if el.tags and el.tags.ssk_picker==action then return el end
+      for _,child in pairs(el.children) do local hit=picker_action(child,action);if hit then return hit end end
+    end
+    local list=find_named(root,"ssk_bal_root")
+    UI.on_click{player_index=player.index,element=picker_action(root,"open")}
+    local dialog=assert(player.gui.screen.ssk_material_picker)
+    local grid=find_named(dialog,"ssk_results")
+    assert(grid.type=="table" and grid.tags.total>100,"Incomplete material icon grid")
+    local categories=dialog.ssk_material_inner.ssk_group_scroll.ssk_groups
+    for _,category in pairs(categories.children) do
+      assert(category.tags.group~="other" and category.tags.group~="signals", "Excluded selector category remains visible")
+    end
+    for _,query in ipairs({"parameter-", "blueprint", "deconstruction planner"}) do
+      dialog.ssk_query.text=query
+      UI.on_text_changed{player_index=player.index,element=dialog.ssk_query}
+      for _,key in ipairs(grid.tags.keys) do
+        local kind,name=key:match("^(%a+)/(.+)$")
+        local proto=prototypes[kind][name]
+        assert(not proto.parameter and proto.group.name~="other" and proto.group.name~="signals", "Excluded selector entry leaked into search")
+      end
+    end
+    UI.refresh(player,true)
+    assert(dialog.valid,"Live refresh destroyed open material picker")
+    if c.group_material then
+      local kind,name=c.group_material:match("^(%a+)/(.+)$")
+      local wanted=kind=="fluid" and "fluids" or prototypes[kind][name].group.name
+      local function group_button(el)
+        if el.tags.ssk_picker=="group" and el.tags.group==wanted then return el end
+        for _,child in pairs(el.children) do local hit=group_button(child);if hit then return hit end end
+      end
+      UI.on_click{player_index=player.index,element=assert(group_button(dialog))}
+    end
+    dialog.ssk_query.text=c.query or c.pick:match("/(.+)$"):gsub("%-"," ")
+    UI.on_text_changed{player_index=player.index,element=dialog.ssk_query}
+    if c.pick then
+      local function material_button(el)
+        if el.tags.ssk_picker=="pick" and el.tags.key==c.pick then return el end
+        for _,child in pairs(el.children) do local hit=material_button(child);if hit then return hit end end
+      end
+      UI.on_click{player_index=player.index,element=assert(material_button(dialog),"Material absent from icon grid")}
+      assert(fx.focus==c.pick and not dialog.valid,"Native material choice failed")
+      if list then assert(list.valid,"Native material choice rebuilt Balance list") end
+      if c.tab=="focus" then
+      local previous=fx.focus_hist[#fx.focus_hist]
+      UI.on_click{player_index=player.index,element=find_action(root,"f_back")}
+      assert(fx.focus==previous and #fx.focus_forward==1,"Back lost forward material")
+      UI.on_click{player_index=player.index,element=find_action(root,"f_forward")}
+      assert(fx.focus==c.pick,"Forward did not restore material")
+      UI.on_click{player_index=player.index,element=find_action(root,"f_trail")}
+      assert(fx.focus==c.focus and #fx.focus_forward==2,"Trail did not restore parent path")
+      UI.on_click{player_index=player.index,element=find_action(root,"f_forward")}
+      if c.clear then
+        local bins,focus=storage.bins,fx.focus
+        UI.on_click{player_index=player.index,element=find_action(root,"f_clear_history")}
+        assert(fx.focus==focus and #fx.focus_hist==0 and #fx.focus_forward==0 and storage.bins==bins,"Clear history changed material or production data")
+        assert(not find_action(root,"f_back").enabled and not find_action(root,"f_forward").enabled,"Cleared history still navigates")
+      end
+      end
+    else
+      assert(#grid.tags.keys>0,"Native search returned no materials")
+    end
+    if c.six_visits then
+      fx.focus,fx.focus_hist,fx.focus_forward="item/iron-plate",{},{}
+      for _,key in ipairs({"item/copper-plate","fluid/water","item/iron-gear-wheel","item/steel-plate","fluid/petroleum-gas","item/electronic-circuit"}) do
+        SK.select_focus(fx,key)
+      end
+      UI.refresh(player,false,false,true)
+      assert(#fx.focus_hist==6 and #find_action(root,"f_history").items==7,"Last visits must retain exactly six previous materials")
+    end
+    if c.stay_pick then
+      SK.select_focus(fx,c.pick)
+      UI.refresh(player,false,false,true)
+      local empty=View.build(player,fx,us.canvas_w,us.canvas_h)
+      assert(not next(empty.nodes) and not find_action(root,"node"),"Unrecorded wood restored unrelated factory flows")
+    end
+    if c.bottom then
+      local items=list.ssk_bal_list.ssk_bal_items
+      local sections=items.children
+      local t=sections[#sections].ssk_bal_table
+      items.scroll_to_element(t.children[#t.children-t.column_count+1],"in-view")
+    end
+    log("MATERIAL PICKER NATIVE PASS "..c.name)
+  end
+
+  if mode=="selection" then
+    local list=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root
+    local items=list.ssk_bal_list.ssk_bal_items
+    local sections=items.children
+    local table=sections[#sections].ssk_bal_table
+    local rows=table.children
+    local target=find_ui(rows[#rows-table.column_count+1],"focus_item")
+    assert(target.tags.ssk_ui=="focus_item","Last row has no inspect button")
+    items.scroll_to_element(target,"in-view")
+    selection={player=player,list=list,items=items,target=target}
+    capture=c.name.."-before"
+    return
+  end
+
   if mode=="ux" or mode=="warmup" then
     local help_button=find_ui(root,"help")
     assert(help_button.type=="sprite-button" and help_button.sprite=="utility/questionmark","Help must use built-in icon")
     assert(not find_ui(root,"export") and not find_action(root,"f_renderer"),"Normal menus expose development tools")
-    if c.name=="ux-stock" then
-      local making=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus.ssk_bar.ssk_producers
-      assert(making.tags.ssk_recipes[1]=="steel-plate","Main producing recipe must precede recycling")
+    if c.tab=="balance" then
+      local chart=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus
+      assert(not find_action(chart,"f_back") and not find_action(chart,"f_history"),"Balance chart must not show Focus history")
+      local context=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root.ssk_bal_context
+      assert(not context.visible,"Balance list must not repeat the surface and period")
     end
     if c.recent then
       local period=find_ui(root,"period");period.selected_index=1
@@ -372,12 +599,7 @@ function T.tick(UI, Sampler)
     if c.help_tab then
       UI.on_click({player_index=player.index,element=find_ui(root,"help")})
       assert(player.gui.screen.ssk_help,"Help action did not open")
-      player.gui.screen.ssk_help.ssk_help_tabs.selected_tab_index=c.help_tab
-    end
-    if c.name=="ux-copper" then
-      local making=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus.ssk_bar.ssk_producers
-      local found=false;for _,name in pairs(making.tags.ssk_recipes) do if name=="casting-copper" then found=true end end
-      assert(found,"Copper inspector must identify its recorded casting recipe")
+      player.gui.screen.ssk_help.ssk_help_inner.ssk_help_tabs.selected_tab_index=c.help_tab
     end
     if mode=="warmup" then
       assert(root.ssk_window_bar.ssk_history.visible,"Fresh-install history indicator missing")

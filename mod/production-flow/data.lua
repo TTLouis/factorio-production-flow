@@ -72,6 +72,18 @@ protos[#protos + 1] = {
   scale = 0.5,
   flags = { "gui-icon" },
 }
+-- Balance favourite toggles use the base game's Browse Games star: gold when set,
+-- grey outline otherwise.
+for _, v in ipairs({ { "ssk-star", { 32, 600 } }, { "ssk-star-off", { 0, 600 } } }) do
+  protos[#protos + 1] = { type = "sprite", name = v[1], filename = "__core__/graphics/gui-new.png",
+    position = v[2], size = 32, scale = 0.5, priority = "extra-high-no-scale", flags = { "gui-icon" } }
+end
+-- Chart settings use the base game's side-menu gear, darkened like the other
+-- tool button icons (the original is drawn light for dark side-menu buttons).
+-- The 32 px crop is the gear itself, so it matches 16 px utility icons.
+protos[#protos + 1] = { type = "sprite", name = "ssk-gear", filename = "__core__/graphics/side-menu-buttons.png",
+  x = 16, y = 6 * 64 + 16, size = 32, scale = 0.5, tint = { 0.22, 0.22, 0.22 },
+  priority = "extra-high-no-scale", flags = { "gui-icon" } }
 data:extend(protos)
 
 -- Native table grids separate items while retaining the paired Details lines.
@@ -79,6 +91,10 @@ data.raw["gui-style"].default.ssk_balance_grid = {
   type = "table_style", parent = "table",
   horizontal_line_color = {0.16, 0.17, 0.18, 1},
   vertical_line_color = {0.31, 0.33, 0.35, 1},
-  top_cell_padding = 3, bottom_cell_padding = 3,
+  top_cell_padding = 5, bottom_cell_padding = 5,
   left_cell_padding = 3, right_cell_padding = 3,
+}
+data.raw["gui-style"].default.ssk_balance_header = {
+  type = "frame_style", parent = "subheader_frame", padding = 0,
+  vertical_flow_style = { type = "vertical_flow_style", vertical_spacing = 0 },
 }

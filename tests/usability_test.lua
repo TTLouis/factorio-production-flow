@@ -9,6 +9,7 @@ local function find(e,pred)
  for _,c in ipairs(e.children) do local x=find(c,pred);if x then return x end end
 end
 local root=player.gui.screen.ssk_main
+UI.on_click({element=find(root,function(e)return e.tags.ssk_sk=="chart_settings" end),player_index=1})
 local live=find(root,function(e)return e.tags.ssk_sk=="live" end)
 assert(live.caption=="Auto-update chart","update control must name its scope")
 local period=find(root,function(e)return e.tags.ssk_ui=="period" end)
@@ -25,7 +26,7 @@ assert(help.type=="sprite-button" and help.sprite=="utility/questionmark","Help 
 assert(not find(root,function(e)return e.tags.ssk_ui=="export" or e.tags.ssk_sk=="f_renderer" end),"normal menus must exclude developer controls")
 UI.on_click({element=help,player_index=1})
 local h=player.gui.screen.ssk_help
-assert(h and h.ssk_help_tabs,"in-game help must open without replacing the main window")
+assert(h and h.ssk_help_inner.ssk_help_tabs,"in-game help must open without replacing the main window")
 UI.refresh(player,true)
 assert(player.gui.screen.ssk_help==h and player.gui.screen.ssk_main==root,"updates must leave help open")
 UI.on_closed({element=root,player_index=1})

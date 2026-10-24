@@ -15,10 +15,16 @@ The save runner copies a Space Age save using only bundled mods, records at leas
 are checked. The isolated stage is under `tests/out/`. Reuse the returned stage
 with `--stage tests/out/<stage> --phase full` or `--phase scroll`. Additional
 phases are `ux` (controls and help), `audit` (network reservations versus physical
-stored items) and `warmup` (fresh-install defaults and incomplete history).
+stored items), `focus` (active and empty Focus flows, both renderers and Back),
+`selection` (scrolled Balance row selection before/after captures), `picker` (combined material search, Back/Forward, trail and Clear
+history, compact/expanded Balance and Focus controls, framed list headers and
+grouped activity counts), and `warmup` (fresh-install defaults and incomplete history).
 Phase-specific evidence records native image hashes and the clean archive hash.
 Development tabs, exports and renderer comparisons are hidden unless the
 per-player **Show development tools** setting is enabled.
+
+GUI changes follow the vanilla button, frame and label rules in
+[ui-style.md](ui-style.md).
 
 The prototype rename to production-flow makes it a separate mod from the old
 unpublished signal-sankey experiments. Do not enable both in the same test.

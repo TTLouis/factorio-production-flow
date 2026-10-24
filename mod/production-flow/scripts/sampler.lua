@@ -396,7 +396,7 @@ local PROBE_TICKS = 600
 function Sm.probe_start(player)
   local e = player.selected
   if not (e and e.valid and TYPESET[e.type]) then
-    player.print("[Sankey] Hover a crafting machine (running at full speed, not output-blocked) and run /sankey-probe again.")
+    player.print("[Production Flow] Hover a crafting machine (running at full speed, not output-blocked) and run /sankey-probe again.")
     return
   end
   local r = Sm.current_recipe(e)
@@ -407,7 +407,7 @@ function Sm.probe_start(player)
   log(string.format("probe start: %s unit %d recipe %s speed %.3f entity_prod %.3f force_recipe_prod %.3f pf %d",
     e.name, e.unit_number, tostring(r), e.crafting_speed, e.productivity_bonus or 0, fr and fr.productivity_bonus or 0, e.products_finished))
   player.print(string.format(
-    "[Sankey] Probing [entity=%s] recipe=%s  crafting_speed=%.3f  entity.productivity_bonus=%.3f  force recipe productivity_bonus=%.3f  products_finished=%d. Result in %d s...",
+    "[Production Flow] Probing [entity=%s] recipe=%s  crafting_speed=%.3f  entity.productivity_bonus=%.3f  force recipe productivity_bonus=%.3f  products_finished=%d. Result in %d s...",
     e.name, tostring(r), e.crafting_speed, e.productivity_bonus or 0, fr and fr.productivity_bonus or 0,
     e.products_finished, PROBE_TICKS / 60))
 end
@@ -438,7 +438,7 @@ function Sm.probe_tick(tick)
         log(string.format("probe result: %s recipe %s pf +%d in %.0fs, expected %.2f normal / %.2f incl bonus, prod %.3f -> %s",
           e.name, p.recipe, d, secs, base, base * (1 + prod), prod, verdict))
         player.print(string.format(
-          "[Sankey] Probe result: products_finished +%d in %.0f s. Expected at 100%% uptime: %.1f normal / %.1f incl. bonus (prod %.0f%%). Ratio %.3f -> %s",
+          "[Production Flow] Probe result: products_finished +%d in %.0f s. Expected at 100%% uptime: %.1f normal / %.1f incl. bonus (prod %.0f%%). Ratio %.3f -> %s",
           d, secs, base, base * (1 + prod), prod * 100, base > 0 and d / base or 0, verdict))
       end
     end

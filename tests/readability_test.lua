@@ -8,7 +8,7 @@ end
 local us = { view = "overview", renderer = "poly", period = 600, canvas_w = 1200 }
 SK.fill(player, c, us, 1200, 800, true)
 assert(us.tier_mode == "depth" and SK.toolbar_height(us) < 120, "compact production-depth defaults")
-assert(not c.ssk_bar.ssk_advanced.visible, "Advanced starts closed")
+assert(not c.ssk_settings, "Chart settings start closed")
 assert(not c.ssk_info.caption:find("crossing cost", 1, true) and c.ssk_info.tooltip:find("crossing cost", 1, true), "diagnostics hidden in compact mode")
 local group = find(c, function(e) return e.tags.ssk_label and e.tags.ssk_label:sub(1, 6) == "group/" end)
 assert(group and group.visible, "overview groups need visible names")
@@ -16,9 +16,13 @@ local expanded_us = { view = "overview", period = 600, overview_open = { compone
 SK.defaults(expanded_us)
 local expanded_group = V.build(player, expanded_us, 1200, 800)
 assert(expanded_group.nodes["item/iron-plate"] and expanded_group.nodes["group/@smelting"], "expanded group must expose its input while retaining unrelated grouped materials")
-SK.on_click({ player_index = 1, element = { tags = { ssk_sk = "advanced" } } }, us)
+SK.on_click({ player_index = 1, element = { tags = { ssk_sk = "chart_settings" } } }, us)
 SK.fill(player, c, us, 1200, 800, false)
-assert(c.ssk_bar.ssk_advanced.visible and c.ssk_info.caption:find("crossing cost", 1, true), "Advanced reveals diagnostics")
+assert(c.ssk_settings and c.ssk_info.caption:find("crossing cost", 1, true), "Chart settings reveal diagnostics")
+for _, name in ipairs({ "layout", "tier_mode", "tier_lo", "tier_hi", "split_raw", "reset_layout", "f_lines", "live" }) do
+  assert(find(c.ssk_settings, function(e) return e.tags.ssk_sk == name end), "Full Sankey settings lack " .. name)
+end
+assert(c.children[#c.children] == c.ssk_settings, "Chart settings must be drawn over the chart")
 for _, lines in ipairs({ "curves", "metro" }) do
   local cfg = { view = "detail", layout = "clean", lines = lines, renderer = "poly", period = 600, canvas_w = 1200 }
   SK.fill(player, c, cfg, 1200, 800, true)
@@ -55,6 +59,7 @@ assert(third.nodes["item/copper-ore#input3"] and fx.focus == "item/electronic-ci
 SK.on_click({ player_index = 1, element = { tags = { ssk_sk = "inputs_less" } } }, fx)
 assert(fx.input_depth == 2 and fx.focus == "item/electronic-circuit")
 for _ = 1, 8 do SK.on_click({ player_index = 1, element = { tags = { ssk_sk = "inputs_more" } } }, fx) end
+fx.settings_open = true -- the input step buttons live in Chart settings
 SK.fill(player, c, fx, 520, 600, false)
 local expand = find(c, function(e) return e.tags.ssk_sk == "inputs_more" end)
 assert(fx.input_depth == 6 and expand and not expand.enabled, "modded chain expansion is bounded")

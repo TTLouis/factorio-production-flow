@@ -9,9 +9,27 @@ BU.FILTERS = { "problems", "all", "shortages", "surpluses", "capacity" }
 local FILTER_NAMES = { "Problems only", "Everything", "Supply/activity", "Surpluses", "Spare capacity" }
 local SHORTAGE = { deficit = true, limited = true, starved = true }
 local LIMIT = 200
+-- The item list pane is bal_width + 24 wide and always reserves its scrollbar,
+-- so rows, group headers and the column header all fill the remaining width.
+local SCROLLBAR = 12
+local LIST_PADDING = 4
+local function list_width(width) return (width or 900) + 24 - SCROLLBAR - 2 * LIST_PADDING end
 
-local function text(parent, caption, tooltip)
-  return parent.add { type = "label", caption = caption, tooltip = tooltip }
+-- Favourites stay at the top of the list whatever the filters; saved per player.
+function BU.favourites(us)
+  us.bal_favs = us.bal_favs or {}
+  us.bal_favs.items = us.bal_favs.items or {}
+  us.bal_favs.groups = us.bal_favs.groups or {}
+  return us.bal_favs
+end
+
+-- scan cadence and the column legend are development detail; Help explains both
+local function developer(player)
+  return player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value == true
+end
+
+local function text(parent, caption, tooltip, style)
+  return parent.add { type = "label", caption = caption, tooltip = tooltip, style = style }
 end
 
 local function fmt(x)
@@ -98,7 +116,7 @@ end
 local function columns(details, width)
   local out = {}
   width = width or 900
-  local compact = { focus=24, status=146, prod=60, cons=60, net=62, stock=65, eta=66 }
+  local compact = { focus=52, status=146, prod=60, cons=60, net=62, stock=65, eta=66 }
   local detail = { prod="pu", cons="cu", net="netp", stock="trend" }
   local subhead = { prod="Util. %", cons="Util. %", net="Net %", stock="/min" }
   local total = 0
@@ -123,7 +141,8 @@ local function columns(details, width)
     end
   end
   for _,col in ipairs(out) do
-    if col.id=="item" then col.width=math.max(24,width-total-(#out-1)*6-8) end
+    -- every cell adds 3 + 3 px padding; the item column takes the rest of the pane
+    if col.id=="item" then col.width=math.max(24,list_width(width)-total-#out*6) end
     col.narrow=width<680
     col.stock_in_item=width<550
     col.details=details
@@ -144,7 +163,21 @@ local function caption(v, col)
   return v[col.id]
 end
 
-local function make_table(parent, cols)
+local function grid(parent, name, cols)
+  local t = parent.add { type = "table", name = name, style="ssk_balance_grid",
+    column_count = #cols, draw_horizontal_lines=true, draw_vertical_lines=true }
+  t.style.horizontal_spacing = 0
+  t.style.left_cell_padding, t.style.right_cell_padding = 3, 3
+  t.style.vertical_spacing = 0
+  return t
+end
+
+-- The column header stays above the scroller, so it remains visible while the
+-- rows scroll. It uses the same widths as the row tables beneath it.
+local function make_header(parent, cols)
+  local header = parent.add { type = "frame", name = "ssk_bal_header", style = "ssk_balance_header", direction = "vertical" }
+  header.style.width = cols.list_width
+  header.style.height = cols[1].details and 88 or 68
   -- A band brackets related columns without spending any extra list width.
   local groups = {}
   for _,col in ipairs(cols) do
@@ -154,43 +187,49 @@ local function make_table(parent, cols)
     if not g or g.id~=id then g={id=id,width=0,count=0}; groups[#groups+1]=g end
     g.width=g.width+col.width+(g.count>0 and 6 or 0); g.count=g.count+1
   end
-  local band=parent.add {type="table",name="ssk_bal_column_groups",style="ssk_balance_grid",
-    column_count=#groups,draw_vertical_lines=true,draw_horizontal_line_after_headers=true}
+  local band=header.add {type="table",name="ssk_bal_column_groups",style="ssk_balance_grid",
+    column_count=#groups,draw_vertical_lines=true}
   band.style.horizontal_spacing=0
   for _,g in ipairs(groups) do
     local title=g.id=="item" and "Item & status" or g.id=="stock" and "Chest stock"
       or cols[1].details and "Rates & utilisation" or "Production rates"
-    local heading=text(band,title)
-    heading.style.width=g.width; heading.style.font="default-bold"
-    heading.style.font_color={0.85,0.80,0.67}
+    local heading=band.add{type="label",caption=title,style="caption_label"}
+    heading.style.width=g.width
     heading.style.horizontal_align="center"
   end
-  local t = parent.add { type = "table", name = "ssk_bal_table", style="ssk_balance_grid",
-    column_count = #cols, draw_horizontal_line_after_headers = true,
-    draw_horizontal_lines=true, draw_vertical_lines=true }
-  t.style.horizontal_spacing = 0
-  t.style.left_cell_padding, t.style.right_cell_padding = 3, 3
-  t.style.vertical_spacing = 0
+  local t = grid(header, "ssk_bal_columns", cols)
   for _, col in ipairs(cols) do
-    local l = text(t, col.name, col.help)
-    l.style.font = "default-bold"
+    local l = text(t, col.name, col.help, "bold_label")
     l.style.width = col.width
     l.style.single_line = false
     l.style.horizontal_align = col.numeric and "right" or "left"
   end
-  return t
+  local line = header.add { type = "line", direction = "horizontal" }
+  line.style.width = cols.list_width
+  return header
 end
 
-local function add_row(parent, r, g, cols)
+local function star_button(parent, set, tags, what)
+  local b = parent.add { type = "sprite-button", name = "ssk_bal_fav", style = "tool_button",
+    sprite = set and "ssk-star" or "ssk-star-off", tags = tags,
+    tooltip = set and "Remove " .. what .. " from favourites"
+      or "Add " .. what .. " to favourites: always listed at the top, whatever the filters" }
+  b.style.width, b.style.height = 24, 24
+  return b
+end
+
+local function add_row(parent, r, g, cols, fav)
   local cells, v = {}, values(r)
   for _, col in ipairs(cols) do
     local el
     if col.id == "focus" then
-      local spec = { type = "sprite-button", style = "tool_button", sprite = "utility/search",
+      el = parent.add { type = "flow", direction = "horizontal" }
+      el.style.horizontal_spacing = 4
+      star_button(el, fav, { ssk_ui = "bal_fav", key = r.key }, "this item")
+      local spec = { type = "sprite-button", name = "ssk_bal_inspect", style = "tool_button", sprite = "utility/search",
         tooltip = "Show this item's materials and uses on the right", tags = { ssk_ui = "focus_item", key = r.key } }
-      if not helpers.is_valid_sprite_path(spec.sprite) then spec.type = "button"; spec.sprite = nil; spec.caption = ">" end
-      el = parent.add(spec)
-      el.style.height = 24
+      local inspect = el.add(spec)
+      inspect.style.width, inspect.style.height = 24, 24
     else
       local tooltip = col.id == "item" and { "", item_name(r.key), "\n", group_name(g), "\n", r.key }
         or col.id == "status" and Balance.STATUS[r.status].help or col.help
@@ -209,6 +248,74 @@ local function add_row(parent, r, g, cols)
   return cells
 end
 
+-- A full-width title bar opens each section: favourites, a group, or the rest.
+local function section_header(section, width, caption, star)
+  local header=section.add {type="frame",name="ssk_bal_group_header",
+    style="repeated_subheader_frame",direction="horizontal"}
+  header.style.width=width
+  header.style.left_padding,header.style.right_padding=6,8
+  header.style.vertical_align="center"
+  if star then star_button(header, star.set, star.tags, "this group") end
+  local h=header.add{type="label",caption=caption,tooltip=caption,style="caption_label"}
+  if star then h.style.left_margin=6 end
+  h.style.width=width-14-(star and 30 or 0)
+  h.style.single_line=true
+  return header
+end
+
+-- Display order: favourite items, favourite groups (whole), then the filtered
+-- list. Favourites ignore Show / Group and do not count towards the row limit.
+local function arrange(us, rows, filtered, by_key, info)
+  local favs = BU.favourites(us)
+  local display, used = {}, {}
+  local function push(r, section)
+    used[r.key] = true
+    display[#display + 1] = { row = r, section = section }
+  end
+  local present = {}
+  for _, r in ipairs(rows) do present[r.key] = r end
+  local missing = {}
+  for _, r in ipairs(rows) do if favs.items[r.key] then push(r, "fav") end end
+  for key in pairs(favs.items) do if not present[key] then missing[#missing + 1] = key end end
+  table.sort(missing)
+  for _, key in ipairs(missing) do
+    push({ key = key, prod = 0, cons = 0, net = 0, netp = 0, status = "ok", inactive = true }, "fav")
+  end
+  local fav_groups = {}
+  for gid in pairs(favs.groups) do fav_groups[#fav_groups + 1] = info(gid) end
+  table.sort(fav_groups, Groups.less)
+  local empty = {}
+  for _, g in ipairs(fav_groups) do
+    local members = {}
+    for _, r in ipairs(rows) do
+      if by_key[r.key].id == g.id and not used[r.key] then members[#members + 1] = r end
+    end
+    table.sort(members, function(a, b)
+      local oa, ob = Balance.STATUS[a.status].order, Balance.STATUS[b.status].order
+      if oa ~= ob then return oa < ob end
+      return a.key < b.key
+    end)
+    for _, r in ipairs(members) do push(r, "fg:" .. g.id) end
+    if #members == 0 then empty[#empty + 1] = { group = g, before = #display + 1 } end
+  end
+  local nfav = #display
+  local normal = {}
+  for _, r in ipairs(filtered) do
+    if not used[r.key] and not favs.groups[by_key[r.key].id] then normal[#normal + 1] = r end
+  end
+  return display, normal, nfav, empty
+end
+
+-- Themes group the existing indicators; their individual meanings and help stay visible.
+local SUMMARY_GROUPS = {
+  { id = "under", label = "Underproducing", color = "1,0.45,0.4", ids = { "deficit", "limited", "starved" },
+    help = "Deficits and activity warnings. A supply warning or low activity needs investigation; it does not prove insufficient production." },
+  { id = "ok", label = "OK", color = "0.5,0.9,0.5", ids = { "ok", "source", "stored" },
+    help = "No detected rate or utilisation warning. Source / sink and stock-only materials have no machine activity assessment." },
+  { id = "over", label = "Overproducing", color = "1,0.85,0.35", ids = { "surplus", "overbuilt" },
+    help = "Measured surplus or spare producer capacity. Spare capacity alone does not mean stock is accumulating." },
+}
+
 function BU.fill(player, c, us, scope, only_auto)
   local rows, secs = Balance.rows(us.sidx, us.period)
   local groups, seen, by_key, counts = {}, {}, {}, {}
@@ -218,10 +325,17 @@ function BU.fill(player, c, us, scope, only_auto)
     by_key[r.key] = seen[id]
   end
   table.sort(groups, Groups.less)
+  local function info(id)
+    seen[id] = seen[id] or Groups.info(player.index, id)
+    return seen[id]
+  end
+  local function group_of(key)
+    by_key[key] = by_key[key] or info(Groups.of(player.index, key))
+    return by_key[key]
+  end
   -- A saved filter survives temporary inactivity; it can still be cleared.
   if us.bal_group and not seen[us.bal_group] then
-    local g = Groups.info(player.index, us.bal_group)
-    groups[#groups + 1] = g
+    groups[#groups + 1] = info(us.bal_group)
     table.sort(groups, Groups.less)
   end
   local filtered = {}
@@ -240,49 +354,68 @@ function BU.fill(player, c, us, scope, only_auto)
       return a.key < b.key
     end)
   end
-  local matching_count=#filtered
+  local favs = BU.favourites(us)
+  local display, normal, nfav, empty = arrange(us, rows, filtered, by_key, info)
+  local matching_count = nfav + #normal
+  local limit = math.min(#normal, us.bal_limit or LIMIT)
+  for i = 1, limit do
+    local r = normal[i]
+    display[#display + 1] = { row = r, section = us.bal_sort == "groups" and "g:" .. by_key[r.key].id or "all" }
+  end
   local previous=c.ssk_bal_root
   local live_reuse=only_auto and previous and previous.tags.visible_keys
   if live_reuse then
     -- Keep click targets and open dropdowns alive. Explicit Refresh/filter actions
     -- reapply membership and ordering; live updates only change measured values.
     local current={}; for _,r in ipairs(rows) do current[r.key]=r end
-    filtered={}
+    display={}
     for _,key in ipairs(previous.tags.visible_keys) do
-      filtered[#filtered+1]=current[key] or {key=key,prod=0,cons=0,net=0,netp=0,status="ok",inactive=true}
+      display[#display+1]={row=current[key] or {key=key,prod=0,cons=0,net=0,netp=0,status="ok",inactive=true}}
     end
   end
-  local shown = math.min(#filtered, us.bal_limit or LIMIT)
-  local signature = { tostring(us.bal_height), tostring(us.bal_width), tostring(us.bal_details), us.bal_sort or "priority", us.bal_filter or "problems", us.bal_group or "", tostring(shown), tostring(#filtered), tostring(#rows == 0) }
+  local shown = #display
+  local list = {}
+  for i, d in ipairs(display) do list[i] = d.row end
+  local signature = { tostring(us.bal_height), tostring(us.bal_width), tostring(us.bal_details), us.bal_sort or "priority", us.bal_filter or "problems", us.bal_group or "", tostring(shown), tostring(matching_count), tostring(#rows == 0) }
   for _, g in ipairs(groups) do signature[#signature + 1] = g.id end
+  local fav_keys = {}
+  for key in pairs(favs.items) do fav_keys[#fav_keys + 1] = "*" .. key end
+  for gid in pairs(favs.groups) do fav_keys[#fav_keys + 1] = "#" .. gid end
+  table.sort(fav_keys)
+  for _, k in ipairs(fav_keys) do signature[#signature + 1] = k end
+  for _, e in ipairs(empty) do signature[#signature + 1] = "empty:" .. e.group.id end
   for i = 1, shown do
-    local r = filtered[i]
-    signature[#signature + 1] = r.key .. ":" .. r.status .. ":" .. (by_key[r.key] and by_key[r.key].id or "")
+    local r = list[i]
+    signature[#signature + 1] = r.key .. ":" .. r.status .. ":" .. (display[i].section or "")
   end
   signature = table.concat(signature, "|")
 
   -- Reuse existing cells while the visible rows stay the same. Live sampling
   -- updates values without destroying the table, dropdowns or scroll position.
   local same = live_reuse or (c.ssk_bal_root and c.ssk_bal_root.tags.signature == signature)
-  local root, summaries, cells, context, counter
+  local root, summaries, summary_heads, cells, context, counter
+  local cols = columns(us.bal_details, us.bal_width)
+  local list_w = list_width(us.bal_width)
+  cols.list_width = list_w
   if same then
     root = c.ssk_bal_root
     context, counter = root.ssk_bal_context, root.ssk_bal_footer.ssk_bal_count
-    summaries, cells = {}, {}
-    for _, id in ipairs({ "deficit", "limited", "starved", "surplus", "overbuilt", "ok", "source", "stored" }) do
-      summaries[id] = root.ssk_bal_summary["ssk_bal_" .. id]
+    summaries, summary_heads, cells = {}, {}, {}
+    for _, group in ipairs(SUMMARY_GROUPS) do
+      local column = root.ssk_bal_summary["ssk_bal_" .. group.id]
+      summary_heads[group.id] = column.ssk_bal_theme
+      for _, id in ipairs(group.ids) do summaries[id] = column["ssk_bal_" .. id] end
     end
     for i = 1, shown do
-      local entry = root.ssk_bal_items["ssk_bal_section_" .. i]
+      local entry = root.ssk_bal_list.ssk_bal_items["ssk_bal_section_" .. i]
       if entry then -- Sections are named for the first row they contain.
         local t = entry.ssk_bal_table
         -- Reading children copies the whole array through the Factorio API.
         -- Cache it once, not once for every cell in the table.
         local children = t.children
-        local cols = columns(us.bal_details, us.bal_width)
-        local offset = #cols
+        local offset = 0
         local j = i
-        while j <= shown and (j == i or not root.ssk_bal_items["ssk_bal_section_" .. j]) do
+        while j <= shown and (j == i or not root.ssk_bal_list.ssk_bal_items["ssk_bal_section_" .. j]) do
           cells[j] = {}
           for k, col in ipairs(cols) do cells[j][col.id] = children[offset + k] end
           offset = offset + #cols
@@ -292,7 +425,7 @@ function BU.fill(player, c, us, scope, only_auto)
     end
   else
     c.clear()
-    local visible_keys={}; for i=1,shown do visible_keys[i]=filtered[i].key end
+    local visible_keys={}; for i=1,shown do visible_keys[i]=list[i].key end
     root = c.add { type = "flow", name = "ssk_bal_root", direction = "vertical", tags = { signature = signature, visible_keys=visible_keys } }
     root.style.vertical_spacing = 8
     root.style.width = (us.bal_width or 900) + 24
@@ -305,6 +438,10 @@ function BU.fill(player, c, us, scope, only_auto)
     for i, id in ipairs(BU.FILTERS) do if id == us.bal_filter then fi = i end end
     local filter = toolbar.add { type = "drop-down", items = FILTER_NAMES, selected_index = fi, tags = { ssk_ui = "bal_filter" } }
     filter.style.width = 145
+    toolbar.style.width = (us.bal_width or 900) + 24
+    local spacer = toolbar.add { type = "empty-widget" }
+    spacer.style.horizontally_stretchable = true
+    spacer.style.minimal_width = 16
     text(toolbar, "Group:")
     local names, gi = { "All groups" }, 1
     us.bal_group_ids = {}
@@ -313,104 +450,160 @@ function BU.fill(player, c, us, scope, only_auto)
       if g.id == us.bal_group then gi = i + 1 end
     end
     local picker = toolbar.add { type = "drop-down", items = names, selected_index = gi, tags = { ssk_ui = "bal_group" } }
-    picker.style.width = math.min(240, math.max(120, (us.bal_width or 900) - 290))
+    picker.style.width = math.min(240, math.max(120, (us.bal_width or 900) - 322))
+    if us.bal_group then
+      star_button(toolbar, favs.groups[us.bal_group], { ssk_ui = "bal_fav_group", gid = us.bal_group }, "this group")
+    end
     toolbar = root.add { type = "flow", direction = "horizontal" }
+    toolbar.style.vertical_align = "center"
     toolbar.style.horizontal_spacing = 8
     text(toolbar, "Order:")
     toolbar.add { type = "drop-down", items = { "Priority", "Item groups" }, selected_index = us.bal_sort == "groups" and 2 or 1,
       tags = { ssk_ui = "bal_sort" } }
+    toolbar.style.width = (us.bal_width or 900) + 24
+    local spacer = toolbar.add { type = "empty-widget" }
+    spacer.style.horizontally_stretchable = true
+    spacer.style.minimal_width = 16
     toolbar.add { type = "checkbox", caption = "Details", state = us.bal_details == true, tags = { ssk_ui = "bal_details" },
       tooltip = "Show net percentage, producer / consumer utilisation and recent stock trend." }
     context = root.add { type = "label", name = "ssk_bal_context" }
     context.style.single_line = false
     context.style.maximal_width = us.bal_width or 900
-    local summary = root.add { type = "table", name = "ssk_bal_summary", column_count = 2 }
-    summary.style.horizontal_spacing = 18
-    summaries = {}
-    for _, id in ipairs({ "deficit", "limited", "starved", "surplus", "overbuilt", "ok", "source", "stored" }) do
-      summaries[id] = summary.add { type = "label", name = "ssk_bal_" .. id, tooltip = Balance.STATUS[id].help }
-      summaries[id].style.width = math.floor((us.bal_width or 900) / 2) - 18
-      summaries[id].style.single_line = true
+    local summary = root.add { type = "table", name = "ssk_bal_summary", column_count = 3 }
+    summary.style.horizontal_spacing = 8
+    summary.vertical_centering = false
+    local width = math.floor(((us.bal_width or 900) + 24 - 16) / 3)
+    summaries, summary_heads = {}, {}
+    for _, group in ipairs(SUMMARY_GROUPS) do
+      local column = summary.add { type = "flow", name = "ssk_bal_" .. group.id, direction = "vertical" }
+      column.style.width = width
+      column.style.vertical_spacing = 0
+      local heading = column.add { type = "label", name = "ssk_bal_theme", tooltip = group.help }
+      heading.style.font = "default-bold"
+      heading.style.width = width
+      heading.style.single_line = true
+      summary_heads[group.id] = heading
+      for _, id in ipairs(group.ids) do
+        local label = column.add { type = "label", name = "ssk_bal_" .. id, tooltip = Balance.STATUS[id].help }
+        label.style.width = width
+        label.style.font = "default-small"
+        label.style.single_line = true
+        summaries[id] = label
+      end
     end
-    local hint = text(root, "Rates /s · chest stock, all qualities · — unavailable · ≈ estimated empty time")
+    local hint = text(root, "Rates /s · chest stock, all qualities · — unavailable · ≈ estimated empty time · ★ keeps a row or group at the top")
+    hint.visible = developer(player)
     hint.style.font="default-small"
     hint.style.font_color = { 0.65, 0.65, 0.65 }
     hint.style.single_line = false
     hint.style.maximal_width = us.bal_width or 900
-    -- Only the item list scrolls; filters, summary and pagination stay visible.
-    local items = root.add { type = "scroll-pane", name = "ssk_bal_items",
-      horizontal_scroll_policy = "never", vertical_scroll_policy = "auto" }
-    items.style.width = (us.bal_width or 900) + 24
-    items.style.horizontally_stretchable = true
+    -- Only the item list scrolls; filters, summary, column header and pagination
+    -- stay visible. A deep frame bounds the list and a raised header clearly
+    -- separates fixed headings from the independently scrolling rows.
+    local list_flow = root.add { type = "frame", name = "ssk_bal_list", style = "inside_deep_frame", direction = "vertical" }
+    list_flow.style.width = (us.bal_width or 900) + 24
+    list_flow.style.padding = LIST_PADDING
+    list_flow.style.vertically_stretchable = true
+    if shown > 0 then make_header(list_flow, cols) end
+    local items = list_flow.add { type = "scroll-pane", name = "ssk_bal_items", style = "naked_scroll_pane",
+      horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
+    items.style.width = (us.bal_width or 900) + 24 - 2 * LIST_PADDING
     items.style.vertically_stretchable = true
     items.style.minimal_height = 0
     cells = {}
-    local cols, t, last = columns(us.bal_details, us.bal_width), nil, nil
-    for i = 1, shown do
-      local r, g = filtered[i], by_key[filtered[i].key]
-      if not t or (us.bal_sort == "groups" and last ~= g.id) then
-        local section = items.add { type = "flow", name = "ssk_bal_section_" .. i, direction = "vertical" }
-        if us.bal_sort == "groups" then
-          local group_width=(us.bal_width or 900)-2
-          section.style.vertical_spacing=0
-          section.style.top_margin=i>1 and 14 or 0
-          local header=section.add {type="frame",name="ssk_bal_group_header",
-            style="repeated_subheader_frame",direction="horizontal"}
-          header.style.width=group_width
-          header.style.left_padding,header.style.right_padding=8,8
-          local h=text(header,group_name(g),group_name(g))
-          h.style.font="default-bold"
-          h.style.font_color={0.95,0.85,0.65}
-          h.style.width=group_width-16
-          h.style.single_line=true
-        end
-        t = make_table(section, cols)
+    local t, last
+    local e = 1
+    local function empty_groups(before)
+      while empty[e] and empty[e].before <= before do
+        local g = empty[e].group
+        local section = items.add { type = "flow", name = "ssk_bal_empty_" .. e, direction = "vertical" }
+        section.style.vertical_spacing = 0
+        section.style.top_margin = #items.children > 1 and 8 or 0
+        section_header(section, list_w, group_name(g), { set = true, tags = { ssk_ui = "bal_fav_group", gid = g.id } })
+        local note = text(section, "No items in this group right now.")
+        note.style.font_color = { 0.65, 0.65, 0.65 }
+        note.style.left_margin, note.style.top_margin, note.style.bottom_margin = 8, 4, 4
+        e = e + 1
       end
-      cells[i] = add_row(t, r, g, cols)
-      if us.bal_sort=="groups" and (i==shown or by_key[filtered[i+1].key].id~=g.id) then
-        local divider=t.parent.add {type="line",name="ssk_bal_group_end",direction="horizontal"}
-        divider.style.width=(us.bal_width or 900)-2
-      end
-      last = g.id
     end
-    if shown == 0 then
-      text(items, #rows == 0 and "No measured activity or chest stock yet. Let sampling finish, then Update list."
+    for i = 1, shown do
+      empty_groups(i)
+      local r, d = list[i], display[i]
+      local g = group_of(r.key)
+      if not t or last ~= d.section then
+        local section = items.add { type = "flow", name = "ssk_bal_section_" .. i, direction = "vertical" }
+        section.style.vertical_spacing = 0
+        section.style.top_margin = #items.children > 1 and 8 or 0
+        if d.section == "fav" then
+          section_header(section, list_w, "[img=ssk-star] Favourites")
+        elseif d.section:sub(1, 3) == "fg:" then
+          section_header(section, list_w, group_name(g), { set = true, tags = { ssk_ui = "bal_fav_group", gid = g.id } })
+        elseif d.section:sub(1, 2) == "g:" then
+          section_header(section, list_w, group_name(g), { set = false, tags = { ssk_ui = "bal_fav_group", gid = g.id } })
+        elseif nfav > 0 or #empty > 0 then
+          section_header(section, list_w, "All other items")
+        end
+        t = grid(section, "ssk_bal_table", cols)
+      end
+      cells[i] = add_row(t, r, g, cols, favs.items[r.key] == true)
+      last = d.section
+    end
+    empty_groups(math.huge)
+    if #normal == 0 then
+      local note = text(items, #rows == 0 and "No measured activity or chest stock yet. Let sampling finish, then Update list."
         or "No items match this view. Try Everything or All groups.")
+      if shown > 0 then note.style.top_margin = 8 end
     end
     local footer=root.add{type="flow",name="ssk_bal_footer",direction="horizontal"}
     footer.style.vertical_align="center"
     counter=footer.add{type="label",name="ssk_bal_count"}
-    counter.style.width=math.max(100,(us.bal_width or 900)-120)
+    counter.style.width=math.max(100,(us.bal_width or 900)-28)
     counter.style.single_line=false
-    local update=footer.add{type="button",caption="Update list",tags={ssk_ui="bal_update"},
+    local update=footer.add{type="sprite-button",style="tool_button",sprite="utility/refresh",tags={ssk_ui="bal_update"},
       tooltip="Reapply filters and sorting, and include new items. Measured values keep updating while row order is held."}
-    update.style.width=110
-    if shown < #filtered then root.add { type = "button", caption = "Show 200 more", tags = { ssk_ui = "bal_more" } } end
+    if limit < #normal then
+      -- the one text button: a long-form command centred under the list, as vanilla does
+      local more = root.add { type = "flow", direction = "horizontal" }
+      more.style.horizontal_align = "center"
+      more.style.horizontally_stretchable = true
+      more.add { type = "button", caption = "Show 200 more", tags = { ssk_ui = "bal_more" },
+        tooltip = "Add the next 200 matching rows to the list" }
+    end
   end
   local stock_status=Sampler.stock_status()
   local age=stock_status.updated_tick and time(math.max(0,game.tick-stock_status.updated_tick)/60).." ago" or "first scan pending"
-  context.caption = string.format("%s  ·  Averaged over %s  ·  Rates update every 5 s\nChest stock: %s  ·  Wait %s after each scan", scope, time(secs),age,time(stock_status.interval/60))
+  -- Keep Claude's quiet normal view and main's configurable scan cadence.
+  context.visible = developer(player)
+  context.caption = developer(player)
+    and string.format("%s · Averaged over %s · Rates update every 5 s\nChest stock: %s · Wait %s after each scan", scope, time(secs), age, time(stock_status.interval / 60))
+    or string.format("%s · Averaged over %s", scope, time(secs))
+  for _, group in ipairs(SUMMARY_GROUPS) do
+    local total = 0
+    for _, id in ipairs(group.ids) do total = total + (counts[id] or 0) end
+    summary_heads[group.id].caption = string.format("[color=%s]%s: %d[/color]", group.color, group.label, total)
+  end
   for id, el in pairs(summaries) do
     local st = Balance.STATUS[id]
     el.caption = string.format("[color=%s]%s: %d[/color]", st.color, st.label, counts[id] or 0)
   end
   for i = 1, shown do
-    local v = values(filtered[i])
-    for _,col in ipairs(columns(us.bal_details,us.bal_width)) do
+    local v = values(list[i])
+    for _,col in ipairs(cols) do
       if col.id~="focus" then cells[i][col.id].caption=caption(v,col) end
     end
     if cells[i].status then
-      cells[i].status.tooltip=filtered[i].inactive and "No measured activity in the current window. Update list to reapply filters and sorting."
-        or Balance.STATUS[filtered[i].status].help
+      cells[i].status.tooltip=list[i].inactive and "No measured activity in the current window. Update list to reapply filters and sorting."
+        or Balance.STATUS[list[i].status].help
     end
-    local net = filtered[i].net
+    local net = list[i].net
     cells[i].net.style.font_color = net < 0 and { 1, 0.45, 0.4 } or net > 0 and { 1, 0.85, 0.35 } or { 1, 1, 1 }
-    cells[i].focus.toggled = us.bal_fx and us.bal_fx.focus == filtered[i].key or false
+    cells[i].focus.ssk_bal_inspect.toggled = us.bal_fx and us.bal_fx.focus == list[i].key or false
   end
   counter.caption = live_reuse and string.format("List order held · %d rows · %d match now",shown,matching_count)
-    or string.format("Showing %d of %d matching items", shown, #filtered)
-  counter.tooltip="Live updates keep rows in place while updating values. Update list or change a filter to reapply row membership and ordering."
-  return filtered[1] and filtered[1].key
+    or string.format("Showing %d of %d matching items", shown, matching_count)
+      .. (nfav > 0 and string.format(" · %d favourite%s", nfav, nfav == 1 and "" or "s") or "")
+  counter.tooltip="Automatic updates keep rows in place while updating values. Update list or change a filter to reapply row membership and ordering."
+  return list[1] and list[1].key
 end
 
 return BU

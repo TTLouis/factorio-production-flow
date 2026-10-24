@@ -11,6 +11,7 @@ local SK = require("scripts.sankey_ui")
 local BalanceUI = require("scripts.balance_ui")
 local Su = require("scripts.surfaces")
 local Help = require("scripts.help_ui")
+local MaterialPicker = require("scripts.material_picker")
 
 local UI = {}
 local WIN = "ssk_main"
@@ -61,9 +62,15 @@ local function tabs_for(player)
   return list
 end
 
+-- Same rate formatting as the Balance table and the charts.
 local function fmt(x)
-  if x >= 100 then return string.format("%.0f", x) end
-  if x >= 1 then return string.format("%.2f", x) end
+  local a = math.abs(x)
+  if a >= 1000000 then return string.format("%.2fM", x / 1000000) end
+  if a >= 10000 then return string.format("%.1fk", x / 1000) end
+  if a >= 100 then return string.format("%.0f", x) end
+  if a >= 10 then return string.format("%.1f", x) end
+  if a >= 1 then return string.format("%.2f", x) end
+  if a > 0 and a < 0.001 then return "<0.001" end
   return string.format("%.3f", x)
 end
 
@@ -82,11 +89,14 @@ end
 ---------------------------------------------------------------------------
 -- single-line by default; wrap = true for long free text (needs a maximal_width to wrap at)
 local function label(parent, caption, style, wrap)
-  if style == "info_label" then
-    style = nil
-    caption = "[color=0.65,0.65,0.65]" .. caption .. "[/color]"
-  end
+  local hint = style == "info_label"
+  if hint then style = nil end
   local l = parent.add { type = "label", caption = caption, style = style }
+  -- same small grey hint text as the Balance and chart toolbars
+  if hint then
+    l.style.font = "default-small"
+    l.style.font_color = { 0.65, 0.65, 0.65 }
+  end
   if wrap then
     l.style.single_line = false
     l.style.maximal_width = 1400
@@ -157,12 +167,7 @@ function fill.graph(player, c, us)
   heading(c, "Look up an item or fluid")
   local pick = c.add { type = "flow", direction = "horizontal" }
   pick.style.vertical_align = "center"
-  label(pick, "Item:")
-  pick.add { type = "choose-elem-button", elem_type = "item", tags = { ssk_ui = "lookup_item" },
-             item = us.lookup and us.lookup.type == "item" and us.lookup.name or nil }
-  label(pick, "   Fluid:")
-  pick.add { type = "choose-elem-button", elem_type = "fluid", tags = { ssk_ui = "lookup_fluid" },
-             fluid = us.lookup and us.lookup.type == "fluid" and us.lookup.name or nil }
+  MaterialPicker.button(pick, us.lookup and Graph.key(us.lookup.type, us.lookup.name), "lookup")
 
   if us.lookup then
     local key = Graph.key(us.lookup.type, us.lookup.name)
@@ -285,7 +290,7 @@ function fill.model(player, c, us)
   end
 end
 
-function fill.balance(player, c, us, only_auto)
+function fill.balance(player, c, us, only_auto, keep_balance_rows)
   if not c.ssk_balance_split then
     c.clear()
     local split = c.add { type = "flow", name = "ssk_balance_split", direction = "horizontal" }
@@ -296,12 +301,13 @@ function fill.balance(player, c, us, only_auto)
     left.style.width, left.style.height = left_w, us.canvas_h + 100
     us.bal_width = left_w - 24
     us.bal_height = us.canvas_h + 100
-    local right = split.add { type = "flow", name = "ssk_balance_focus", direction = "vertical" }
+    -- the chart panel: toolbar strip on top, chart below, in one vanilla inset
+    local right = split.add { type = "frame", name = "ssk_balance_focus", style = "inside_deep_frame", direction = "vertical" }
     us.bal_chart_w = us.canvas_w - left_w - 12
     right.style.width, right.style.height = us.bal_chart_w, us.canvas_h + 100
   end
   local split = c.ssk_balance_split
-  local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto)
+  local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto or keep_balance_rows)
   local fx = SK.balance_state(us)
   if not fx.focus then fx.focus = first end
   fx.sel = fx.focus
@@ -340,8 +346,13 @@ local function update_history(player,us)
   label.tooltip="The selected period is still filling. Rates use the recorded history available so far, not an assumed full window. Recording continues while the factory runs."
 end
 
+-- Focus and Full Sankey draw into one vanilla panel: toolbar strip on top, chart below.
+local function chart_panel(c)
+  return c.ssk_chart or c.add { type = "frame", name = "ssk_chart", style = "inside_deep_frame", direction = "vertical" }
+end
+
 -- full = rebuild the Sankey tab from scratch (otherwise its scroll position is kept)
-function UI.refresh(player, only_auto, full)
+function UI.refresh(player, only_auto, full, keep_balance_rows)
   local us = ustate(player.index)
   local id = us.tab_id
   local c = content(player, id)
@@ -353,21 +364,31 @@ function UI.refresh(player, only_auto, full)
     fx.sidx = us.sidx
     SK.defaults(fx)
     if only_auto and not fx.live then return end
-    SK.fill(player, c, fx, us.canvas_w, math.max(100, us.canvas_h - 16), full, only_auto)
+    SK.fill(player, chart_panel(c), fx, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(fx)), full, only_auto)
     return
   end
   if id == "sankey" then
     SK.defaults(us)
     if only_auto and not us.live then return end
-    SK.fill(player, c, us, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(us)), full, only_auto)
+    SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(us)), full, only_auto)
     return
   end
   if only_auto and not AUTO_REFRESH[id] then return end
   if id ~= "balance" then c.clear() end
-  fill[id](player, c, us, only_auto)
+  fill[id](player, c, us, only_auto, keep_balance_rows)
+end
+
+-- Chart settings float over the chart; Esc, tab changes and reopening close them.
+local function close_chart_settings(us)
+  local open = false
+  for _, s in pairs({ us, us.fx, us.bal_fx }) do
+    if s.settings_open then s.settings_open, open = nil, true end
+  end
+  return open
 end
 
 function UI.close(player)
+  MaterialPicker.close(player)
   Help.close(player)
   local f = player.gui.screen[WIN]
   if f then f.destroy() end
@@ -376,6 +397,8 @@ end
 function UI.open(player)
   UI.close(player)
   local us = ustate(player.index)
+  close_chart_settings(us)
+  local developer = player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value
   local res, sc = player.display_resolution, player.display_scale
   local W, H = UI.dimensions(res, sc)
 
@@ -390,20 +413,16 @@ function UI.open(player)
   local drag = tb.add { type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true }
   drag.style.horizontally_stretchable = true
   drag.style.height = 24
-  local function action_button(sprite, fallback, tooltip, tag)
-    if helpers.is_valid_sprite_path(sprite) then
-      tb.add { type = "sprite-button", style = "frame_action_button", sprite = sprite,
-               tooltip = tooltip, tags = { ssk_ui = tag } }
-    else
-      tb.add { type = "button", caption = fallback, tooltip = tooltip, tags = { ssk_ui = tag } }
-    end
+  local function action_button(sprite, tooltip, tag)
+    tb.add { type = "sprite-button", style = "frame_action_button", sprite = sprite,
+      tooltip = tooltip, tags = { ssk_ui = tag } }
   end
   tb.style.vertical_align = "center"
   tb.add { type = "label", caption = "Surface:" }
   local sitems, ssel = { "Where I am (" .. Su.rich(player.surface) .. ")" }, 1
   us.surface_names = {}
   for i, x in ipairs(surface_choices(us.surface)) do
-    sitems[#sitems + 1] = string.format("%s  (%d machines)", x.label, x.n)
+    sitems[#sitems + 1] = developer and string.format("%s  (%d machines)", x.label, x.n) or x.label
     us.surface_names[i + 1] = x.name
     if us.surface == x.name then ssel = i + 1 end
   end
@@ -422,12 +441,12 @@ function UI.open(player)
   local history=tb.add{type="label",name="ssk_history"}
   history.style.font="default-small-bold";history.style.font_color={1,0.82,0.35}
   history.style.maximal_width=190
-  action_button("utility/questionmark", "?", "Help: controls, calculations, stock, alerts and chart limits", "help")
+  action_button("utility/questionmark", "Help: controls, calculations, stock, alerts and chart limits", "help")
   if player.mod_settings["ssk-debug-tabs"] and player.mod_settings["ssk-debug-tabs"].value then
-    action_button("utility/export_slot", "Export", "Export diagnostics to script-output/production-flow/", "export")
+    action_button("utility/export_slot", "Export diagnostics to script-output/production-flow/", "export")
   end
-  action_button("utility/refresh", "Refresh", "Refresh", "refresh")
-  action_button("utility/close", "X", "Close", "close")
+  action_button("utility/refresh", "Refresh", "refresh")
+  action_button("utility/close", "Close", "close")
 
   local inner = f.add { type = "frame", name = "ssk_inner", style = "inside_deep_frame", direction = "vertical" }
   inner.style.horizontally_stretchable = true
@@ -483,13 +502,25 @@ function UI.is_open(player) return player.gui.screen[WIN] ~= nil end
 function UI.on_click(e)
   local el = e.element
   local player = game.get_player(e.player_index)
+  if el.tags and el.tags.ssk_picker == "open" then
+    MaterialPicker.open(player, el.tags.target, el.tags.current)
+    return true
+  elseif el.tags and el.tags.ssk_picker == "group" then
+    MaterialPicker.on_group(e)
+    return true
+  elseif el.tags and el.tags.ssk_picker == "pick" then
+    return UI.on_selection(e)
+  elseif el.tags and el.tags.ssk_picker == "close" then
+    MaterialPicker.close(player)
+    return true
+  end
   if el.name == "ssk_toggle" then UI.toggle(player); return true end
   local r = SK.on_click(e, (function()
     local u = ustate(e.player_index)
     return chart_state(u)
   end)())
   if r then
-    if r ~= "none" then UI.refresh(player) end
+    if r ~= "none" then UI.refresh(player, false, false, true) end
     return true
   end
   local a = el.tags and el.tags.ssk_ui
@@ -508,21 +539,21 @@ function UI.on_click(e)
     local us = ustate(e.player_index)
     us.bal_limit = (us.bal_limit or 200) + 200
     UI.refresh(player)
+  elseif a == "bal_fav" or a == "bal_fav_group" then
+    local favs = BalanceUI.favourites(ustate(e.player_index))
+    local set, id = a == "bal_fav" and favs.items or favs.groups, el.tags.key or el.tags.gid
+    set[id] = not set[id] or nil
+    UI.refresh(player)
   elseif a == "focus_item" then
     local us = ustate(e.player_index)
     local fx = us.tab_id == "balance" and SK.balance_state(us) or SK.focus_state(us)
-    if fx.focus and fx.focus ~= el.tags.key then
-      fx.focus_hist = fx.focus_hist or {}
-      table.insert(fx.focus_hist, fx.focus)
-      if #fx.focus_hist > 20 then table.remove(fx.focus_hist, 1) end
-    end
-    fx.focus = el.tags.key
-    if us.tab_id == "balance" then UI.refresh(player)
+    SK.select_focus(fx, el.tags.key)
+    if us.tab_id == "balance" then UI.refresh(player, false, false, true)
     else us.tab_id = "focus"; UI.open(player) end
   elseif a == "rebuild_graph" then Graph.build(); UI.refresh(player)
   elseif a == "rescan" then
     local n = Sampler.rescan()
-    player.print("[Sankey] Rescanned: " .. n .. " crafting machines.")
+    player.print("[Production Flow] Rescanned: " .. n .. " crafting machines.")
     UI.refresh(player)
   elseif a == "rt_margin" or a == "rt_screen" then
     UI.close(player)
@@ -534,6 +565,22 @@ function UI.on_click(e)
 end
 
 function UI.on_selection(e)
+  local handled, key, target = MaterialPicker.selection(e)
+  if handled then
+    if key then
+      local player = game.get_player(e.player_index)
+      local us = ustate(e.player_index)
+      if target == "lookup" then
+        local kind, name = key:match("^(%a+)/(.+)$")
+        us.lookup = { type = kind, name = name }
+        UI.refresh(player)
+      elseif target == us.tab_id then
+        SK.select_focus(chart_state(us), key)
+        UI.refresh(player, false, false, true)
+      end
+    end
+    return true
+  end
   local tags = e.element.tags
   if tags and tags.ssk_ui == "period" then
     ustate(e.player_index).period = Sampler.PERIODS[e.element.selected_index] or Sampler.DEFAULT_PERIOD
@@ -564,7 +611,7 @@ function UI.on_selection(e)
   local u0 = ustate(e.player_index)
   local r = SK.on_selection(e, chart_state(u0))
   if not r then return false end
-  UI.refresh(game.get_player(e.player_index))
+  UI.refresh(game.get_player(e.player_index), false, false, true)
   return true
 end
 
@@ -581,7 +628,7 @@ function UI.on_checked(e)
   local u0 = ustate(e.player_index)
   local r = SK.on_checked(e, chart_state(u0))
   if r then
-    if r == "rebuild" then UI.refresh(game.get_player(e.player_index)) end
+    if r == "rebuild" then UI.refresh(game.get_player(e.player_index), false, false, true) end
     return true
   end
   return false
@@ -592,7 +639,7 @@ function UI.on_elem_changed(e)
   if u0.tab_id == "focus" or u0.tab_id == "balance" then
     local r = SK.on_elem_changed(e, chart_state(u0))
     if r then
-      if r ~= "none" then UI.refresh(game.get_player(e.player_index), false, true) end
+      if r ~= "none" then UI.refresh(game.get_player(e.player_index), false, true, true) end
       return true
     end
   end
@@ -610,12 +657,15 @@ function UI.on_tab_changed(e)
   local f = e.element
   if not (f.valid and f.name == "ssk_tabs" and f.parent and f.parent.parent and f.parent.parent.name == WIN) then return false end
   local list = tabs_for(game.get_player(e.player_index))
-  ustate(e.player_index).tab_id = list[f.selected_tab_index] or "balance"
+  local us = ustate(e.player_index)
+  us.tab_id = list[f.selected_tab_index] or "balance"
+  close_chart_settings(us)
   UI.refresh(game.get_player(e.player_index), false, true)
   return true
 end
 
 function UI.on_closed(e)
+  if MaterialPicker.on_closed(e) then return true end
   if e.element and e.element.valid and e.element.name=="ssk_help" then
     local player=game.get_player(e.player_index)
     Help.close(player);player.opened=player.gui.screen[WIN]
@@ -623,8 +673,17 @@ function UI.on_closed(e)
   end
   if e.element and e.element.valid and e.element.name == WIN then
     local player=game.get_player(e.player_index)
+    if player.gui.screen.ssk_material_picker then
+      MaterialPicker.close(player)
+      return true
+    end
     if player.gui.screen.ssk_help then
       Help.close(player);player.opened=player.gui.screen[WIN]
+      return true
+    end
+    if close_chart_settings(ustate(player.index)) then
+      player.opened = player.gui.screen[WIN]
+      UI.refresh(player, false, false, true)
       return true
     end
     UI.close(player)
@@ -632,6 +691,9 @@ function UI.on_closed(e)
   end
   return false
 end
+
+function UI.on_text_changed(e) return MaterialPicker.on_text_changed(e) end
+function UI.on_string_translated(e) MaterialPicker.on_translated(e) end
 
 function UI.auto_refresh()
   for _, p in pairs(game.connected_players) do
