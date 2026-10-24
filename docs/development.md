@@ -20,6 +20,9 @@ Phase-specific evidence records native image hashes and the clean archive hash.
 Development tabs, exports and renderer comparisons are hidden unless the
 per-player **Show development tools** setting is enabled.
 
+GUI changes follow the vanilla button, frame and label rules in
+[ui-style.md](ui-style.md).
+
 The prototype rename to production-flow makes it a separate mod from the old
 unpublished signal-sankey experiments. Do not enable both in the same test.
 History from the experimental mod is not migrated; the beta collects new history.
