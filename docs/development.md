@@ -42,6 +42,10 @@ release workflow below handles publication.
 
 ## Publishing from GitHub
 
+Before drafting update notes or a mod description, follow the
+[release writing guide](release-writing-guide.md). Keep public copy concise and
+player-facing; reserve fuller technical explanations for GitHub.
+
 The **Publish Mod Portal** Actions workflow runs when a GitHub release is
 published, including beta pre-releases. Ordinary pushes do not publish. The
 release tag must be `v` followed by the exact version in `info.json`.
