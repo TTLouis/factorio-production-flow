@@ -5,6 +5,11 @@
 Production Flow shows what your factory makes, what it consumes, and how recipes
 connect on the selected surface. Public beta: **0.1.3**, by **TTLouis**.
 
+**Feedback needed:** Help shape the beta by sharing what works, what is confusing,
+and what needs improving. Report bugs or suggest improvements on
+[GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues) or the
+[Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion).
+
 **New in 0.1.3:** compact chart controls, a combined item/fluid icon
 selector, Focus navigation, Balance favourites and framed headings, plus the
 configurable chest-stock cooldown (1-minute minimum, 5-minute default).
@@ -96,9 +101,21 @@ exports and local preview galleries are excluded from Git.
 
 ## Feedback and contributions
 
-Include the Factorio/mod versions, surface, time window, material or recipe,
-expected behavior and a screenshot when reporting an issue. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Player feedback is especially useful for:
+
+- Balance controls, labels and numbers that are unclear or look incorrect.
+- Focus and Full Sankey layout, navigation and readability on real factories.
+- Modpack compatibility, multiplayer behavior and large-factory performance.
+
+Share feedback on [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues)
+or the [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion).
+For bugs, include the Factorio/mod versions, relevant mods, surface, time window,
+material or recipe, steps to reproduce, expected and actual behavior, and a
+screenshot if possible. For slowdowns, include your factory size and whether the
+Production Flow window was open. General impressions and suggestions are welcome
+too; you do not need a full bug report to share them.
+
+For code contributions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

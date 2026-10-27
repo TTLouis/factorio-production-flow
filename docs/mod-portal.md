@@ -11,6 +11,8 @@ Production Flow uses interactive Sankey charts to show where your factory's reso
 
 Compare recorded item and fluid rates, then explore the recipes connecting their inputs and consumers.
 
+**Feedback needed:** Try the beta in your factory and share what works, what is confusing, or what you would like improved. Feedback on Balance, chart readability, mod compatibility and performance is especially helpful. Leave a message in the [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion) or [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues). For bugs, include your Factorio/mod versions, what you expected, what happened and a screenshot if possible.
+
 **Balance is the main focus of this beta.** Compare made, used and net rates, inspect an item's inputs and consumers, and review utilisation and chest stock in an organized list. Item/fluid selection and production measurements are independent of chest storage. In-game help explains the controls, numbers and chart limits.
 
 Underproducing, OK and Overproducing summaries organize the activity counts. A single fixed heading row stays aligned with the columns, including with Details enabled. A framed list and extra space before its scrollbar keep the scrolling area clear. Star an item or group to keep it at the top, and use the Refresh table icon above the list to reapply filters and sorting.
