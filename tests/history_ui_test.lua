@@ -73,10 +73,11 @@ local net_camera = named(root, "ssk_history_net_camera")
 assert(camera.style.width == stock_camera.style.width and camera.style.width == net_camera.style.width
   and camera.position[1] == stock_camera.position[1] and camera.position[1] == net_camera.position[1],
   "rate, stock and net charts must align")
-assert(camera.position[2] < stock_camera.position[2] and stock_camera.position[2] < net_camera.position[2],
-  "Net rate must be below Chest stock")
+assert(stock_camera.parent.parent.children[1].name == "ssk_history_stock_title"
+  and stock_camera.position[2] < camera.position[2] and camera.position[2] < net_camera.position[2],
+  "Chest stock must be above Rate history and Net rate")
 local lower_fraction = (stock_camera.style.height + net_camera.style.height + 84) / (us.canvas_h + 100)
-assert(math.abs(lower_fraction - 1 / 3) < 0.02, "stock and net should share the lower third of the inspector")
+assert(math.abs(lower_fraction - 1 / 3) < 0.02, "stock and net should share a third of the inspector")
 assert(named(root, "ssk_history_products").column_count == 4, "consumption entries must fit on one row")
 local rate_targets = camera.parent.ssk_history_tooltips.children
 local net_targets = net_camera.parent.ssk_history_tooltips.children

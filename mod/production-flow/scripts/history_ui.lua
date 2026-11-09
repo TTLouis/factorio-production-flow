@@ -114,6 +114,18 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   body.style.left_margin, body.style.top_margin = 8, 4
   body.style.vertical_spacing = 4
 
+  local stock = row(body, "ssk_history_stock_title")
+  label(stock, nil, "Chest stock", "caption_label")
+  spacer(stock)
+  small(stock, "ssk_history_stock_legend", swatch(MEASURED) .. " Measured  " .. swatch(ESTIMATED) .. " Estimated")
+  body.add { type = "flow", name = "ssk_history_stock_plot", direction = "vertical" }
+  local stock_state = small(body, "ssk_history_stock_state", "", chart_width)
+  stock_state.style.single_line = false
+  local note = small(body, "ssk_history_stock_note", "", chart_width)
+  note.style.single_line = false
+  note.tooltip = "Estimates use the recorded Made minus Used rate and are adjusted to meet the next measured scan. Light blue bars show physical chest counts at scan completion."
+
+  body.add { type = "line", direction = "horizontal" }
   local rate = row(body, "ssk_history_rate_title")
   label(rate, nil, "Rate history", "caption_label")
   spacer(rate)
@@ -139,18 +151,6 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
     label(product, "material_name", "", nil, cell_width - rate_width - 4)
     small(product, "rate", "", rate_width).style.horizontal_align = "right"
   end
-
-  body.add { type = "line", direction = "horizontal" }
-  local stock = row(body, "ssk_history_stock_title")
-  label(stock, nil, "Chest stock", "caption_label")
-  spacer(stock)
-  small(stock, "ssk_history_stock_legend", swatch(MEASURED) .. " Measured  " .. swatch(ESTIMATED) .. " Estimated")
-  body.add { type = "flow", name = "ssk_history_stock_plot", direction = "vertical" }
-  local stock_state = small(body, "ssk_history_stock_state", "", chart_width)
-  stock_state.style.single_line = false
-  local note = small(body, "ssk_history_stock_note", "Dark blue bars estimate stock between completed scans.", chart_width)
-  note.style.single_line = false
-  note.tooltip = "Estimates use the recorded Made minus Used rate and are adjusted to meet the next measured scan. Light blue bars show physical chest counts at scan completion."
 
   local net = body.add { type = "flow", name = "ssk_history_net_section", direction = "vertical" }
   net.style.horizontally_stretchable = true
@@ -436,14 +436,15 @@ function H.fill(player, panel, us, key, width, height)
   local toolbar_height = width < 620 and 116 or 92
   local scroll_height = math.max(72, height - toolbar_height - 56)
   local scroll = panel.ssk_history_scroll
-  if not scroll or not scroll.ssk_history_body.ssk_history_net_section then
+  local body = scroll and scroll.ssk_history_body
+  local first = body and body.children[1]
+  if not first or first.name ~= "ssk_history_stock_title" then
     panel.clear()
     build(panel, width, chart_width, toolbar_height, scroll_height)
-    scroll = panel.ssk_history_scroll
+    body = panel.ssk_history_scroll.ssk_history_body
   end
   local controls = panel.ssk_history_toolbar.ssk_history_controls
   local header = controls.ssk_history_header
-  local body = scroll.ssk_history_body
   local view = us.bal_history_view or "all"
   for _, spec in ipairs(VIEWS) do
     controls.ssk_history_views["ssk_history_" .. spec[1]].state = spec[1] == view
@@ -508,34 +509,39 @@ function H.fill(player, panel, us, key, width, height)
     or h and not h.stock_supported and "Chest stock history is available for items. Fluid tanks are outside chest scans."
     or "No completed chest stock scan in the selected period."
   body.ssk_history_stock_title.ssk_history_stock_legend.visible = stock == true
-  body.ssk_history_stock_note.visible = stock == true
+  local stock_note = body.ssk_history_stock_note
+  stock_note.visible = stock == true
+  if stock then
+    stock_note.caption = #h.stock == 1 and "One completed stock scan in this period. Estimates need two."
+      or "Dark blue bars estimate stock between completed scans."
+  end
 
   local net = body.ssk_history_net_section
   net.visible = rates == true
   net.ssk_history_net_title.ssk_history_net_legend.caption = "0 = balanced   " .. units
-  -- Split the lower third between the stock and net plots, leaving room for
-  -- the stock heading and note, and the net heading and divider.
+  -- Allow a third of the inspector for the stock and net sections together,
+  -- including their headings, note, and divider.
   local stock_heading_height, net_heading_height = 48, 36
-  local lower_plot_height = math.max(136, math.floor(height / 3) - stock_heading_height - net_heading_height)
-  local stock_height = math.floor(lower_plot_height / 2)
-  local net_height = lower_plot_height - stock_height
+  local compact_plot_height = math.max(136, math.floor(height / 3) - stock_heading_height - net_heading_height)
+  local stock_height = math.floor(compact_plot_height / 2)
+  local net_height = compact_plot_height - stock_height
   -- Leave room for the coverage message so the plot cameras keep their size.
-  local rate_height = math.max(72, scroll_height - 162 - net_heading_height - lower_plot_height)
-  local stock_top = rate_height + PLOT_GAP
-  local net_top = stock_top + stock_height + PLOT_GAP
+  local rate_height = math.max(72, scroll_height - 162 - net_heading_height - compact_plot_height)
+  local rate_top = stock_height + PLOT_GAP
+  local net_top = rate_top + rate_height + PLOT_GAP
   local painter, stock_regions
   if rates or stock then
-    painter = Canvas.begin(player, chart_width, rates and net_top + net_height or stock_top + stock_height)
+    painter = Canvas.begin(player, chart_width, rates and net_top + net_height or stock_height)
+    if stock then stock_regions = draw_stock(painter, h, chart_width, stock_height, 0) end
     local paths
-    if active then paths = draw_rates(painter, h, chart_width, rate_height, view, 0) end
-    if stock then stock_regions = draw_stock(painter, h, chart_width, stock_height, stock_top) end
+    if active then paths = draw_rates(painter, h, chart_width, rate_height, view, rate_top) end
     if rates then draw_rates(painter, h, chart_width, net_height, "net", net_top, paths) end
   else
     Canvas.clear(player.index)
   end
   local buckets = rates and rate_regions(h, chart_width, units)
-  camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0, buckets)
-  camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top, stock_regions)
+  camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, 0, stock_regions)
+  camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, rate_top, buckets)
   camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top, buckets)
 end
 
