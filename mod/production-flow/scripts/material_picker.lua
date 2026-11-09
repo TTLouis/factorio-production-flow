@@ -185,10 +185,12 @@ end
 function P.open(player, target, current)
   P.close(player)
   local group = ""
-  if current then
-    local kind, name = current:match("^(%a+)/(.+)$")
-    local proto = prototypes[kind] and prototypes[kind][name]
-    group = kind == "fluid" and "fluids" or proto and proto.group and proto.group.name or ""
+  local kind, name = (current or ""):match("^(%a+)/(.+)$")
+  if kind == "fluid" then
+    group = "fluids"
+  elseif kind == "item" then
+    local proto = prototypes.item[name]
+    group = proto and proto.group and proto.group.name or ""
   end
   local f = player.gui.screen.add { type = "frame", name = NAME, direction = "vertical", tags = { target = target, group = group, current = current or "" } }
   local title = f.add { type = "flow", name = "ssk_title", direction = "horizontal" }

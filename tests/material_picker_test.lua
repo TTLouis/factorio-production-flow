@@ -25,6 +25,27 @@ player.request_translations = function(strings)
   for i, s in ipairs(strings) do next_id = next_id + 1; ids[i] = next_id; requests[next_id] = s end
   return ids
 end
+
+-- Factorio rejects nil prototype keys, while a plain Lua table returns nil.
+setmetatable(prototypes, { __index = function(_, key)
+  assert(type(key) == "string", "prototype lookup requires a string key")
+end })
+us.tab_id = "focus"
+local fresh_focus = SK.focus_state(us)
+fresh_focus.focus = nil
+UI.open(player)
+local search_slot = find(player.gui.screen.ssk_main, function(e) return e.tags.ssk_picker == "open" end)
+assert(search_slot.sprite == "utility/search" and search_slot.tags.current == "")
+assert(UI.on_click { element = search_slot, player_index = 1 })
+local fresh_dialog = player.gui.screen.ssk_material_picker
+local query = fresh_dialog.ssk_title.ssk_query
+query.text = "wood"
+assert(UI.on_text_changed { element = query, player_index = 1 })
+local wood = find(fresh_dialog, function(e) return e.tags.ssk_picker == "pick" and e.tags.key == "item/wood" end)
+assert(UI.on_click { element = wood, player_index = 1 })
+assert(fresh_focus.focus == "item/wood" and not fresh_dialog.valid)
+setmetatable(prototypes, nil)
+
 for _, tab in ipairs({ "balance", "focus" }) do
   us.tab_id, us.bal_filter = tab, "all"
   local fx = tab == "balance" and SK.balance_state(us) or SK.focus_state(us)
