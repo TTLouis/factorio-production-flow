@@ -34,6 +34,9 @@ function P.button(row, key, target)
   return b
 end
 
+-- Per-player serialized state: locale identifies the translation cache, names maps
+-- typed material keys to translated text, and pending maps translation IDs to keys.
+-- A locale change replaces both maps; GUI selection remains in the frame tags.
 local function state(player)
   storage.material_picker = storage.material_picker or {}
   local s = storage.material_picker[player.index]
@@ -67,14 +70,18 @@ local function fit(player, f, group_count, material_rows)
   return tab_size
 end
 
--- Use the game's filter-group buttons and deep slot grid, populated exclusively
--- from item/fluid prototypes. The signal choose-elem dialog cannot filter types.
-local function populate(player)
-  local f = player.gui.screen[NAME]
-  if not f then return end
-  local s, entries, groups, matched, total = state(player), {}, {}, {}, 0
-  local query = f.ssk_title.ssk_query.text:lower()
-  local chosen_group = query == "" and f.tags.group or ""
+local function matches_query(query, display, name)
+  return query == "" or display:lower():find(query, 1, true)
+    or name:lower():gsub("%-", " "):find(query, 1, true)
+end
+
+-- Entries are transient tables: key is the typed item/fluid key, name and kind
+-- identify the prototype, group selects a tab, subgroup marks row boundaries,
+-- and sort is the complete group/subgroup/prototype ordering key.
+-- Groups and total cover all selectable prototypes, even while searching;
+-- entries and matched_groups cover only the current text query.
+local function collect_catalog(picker_state, query)
+  local entries, groups, matched_groups, total = {}, {}, {}, 0
   for _, kind in ipairs({ "item", "fluid" }) do
     for name, proto in pairs(prototypes[kind]) do
       if selectable(proto) then
@@ -85,10 +92,9 @@ local function populate(player)
         total = total + 1
         local subgroup = proto.subgroup or { name = kind, order = "" }
         groups[group.name] = group
-        local display = s.names[key] or name:gsub("%-", " ")
-        if query == "" or display:lower():find(query, 1, true)
-          or name:lower():gsub("%-", " "):find(query, 1, true) then
-          matched[group.name] = true
+        local display = picker_state.names[key] or name:gsub("%-", " ")
+        if matches_query(query, display, name) then
+          matched_groups[group.name] = true
           entries[#entries + 1] = { key = key, name = name, kind = kind, group = group.name,
             subgroup = group.name .. "/" .. subgroup.name,
             sort = (group.order or "") .. "\t" .. group.name .. "\t"
@@ -97,6 +103,10 @@ local function populate(player)
       end
     end
   end
+  return entries, groups, matched_groups, total
+end
+
+local function order_catalog(entries, groups)
   table.sort(entries, function(a, b) return a.sort < b.sort end)
   local group_list = {}
   for _, group in pairs(groups) do group_list[#group_list + 1] = group end
@@ -104,49 +114,76 @@ local function populate(player)
     if (a.order or "") ~= (b.order or "") then return (a.order or "") < (b.order or "") end
     return a.name < b.name
   end)
-  if query == "" then
-    if not chosen_group or chosen_group == "" or not groups[chosen_group] then
-      chosen_group = group_list[1] and group_list[1].name or ""
-      local tags = f.tags; tags.group = chosen_group; f.tags = tags
-    end
-    local visible = {}
-    for _, entry in ipairs(entries) do if entry.group == chosen_group then visible[#visible + 1] = entry end end
-    entries = visible
+  return group_list
+end
+
+-- Search spans every group without changing the remembered browsing tab.
+local function filter_group(frame, query, entries, groups, group_list, chosen_group)
+  if query ~= "" then return entries, chosen_group end
+  if not chosen_group or chosen_group == "" or not groups[chosen_group] then
+    chosen_group = group_list[1] and group_list[1].name or ""
+    local tags = frame.tags; tags.group = chosen_group; frame.tags = tags
   end
-  local grid = f.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll.ssk_results
+  local visible = {}
+  for _, entry in ipairs(entries) do if entry.group == chosen_group then visible[#visible + 1] = entry end end
+  entries = visible
+  return entries, chosen_group
+end
+
+local function render_materials(frame, entries)
+  local grid = frame.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll.ssk_results
   grid.clear()
-  local keys, last, occupied = {}, nil, 0
+  local keys, last_subgroup, occupied = {}, nil, 0
   local columns = grid.column_count
   for _, entry in ipairs(entries) do
-    if last and entry.subgroup ~= last then
+    if last_subgroup and entry.subgroup ~= last_subgroup then
       while occupied % columns ~= 0 do
         local gap = grid.add { type = "empty-widget" }
         gap.style.width, gap.style.height = SLOT, SLOT
         occupied = occupied + 1
       end
     end
-    local b = grid.add { type = "sprite-button", style = "slot_button", sprite = entry.key,
-      toggled = entry.key == f.tags.current, tooltip = label(entry.key),
+    grid.add { type = "sprite-button", style = "slot_button", sprite = entry.key,
+      toggled = entry.key == frame.tags.current, tooltip = label(entry.key),
       elem_tooltip = { type = entry.kind, name = entry.name },
       tags = { ssk_picker = "pick", key = entry.key } }
     keys[#keys + 1] = entry.key
-    occupied, last = occupied + 1, entry.subgroup
+    occupied, last_subgroup = occupied + 1, entry.subgroup
   end
-  local tab_size = fit(player, f, #group_list, math.ceil(occupied / columns))
-  local tabs = f.ssk_material_inner.ssk_group_scroll.ssk_groups
+  return grid, keys, math.ceil(occupied / columns)
+end
+
+local function render_groups(frame, group_list, matched_groups, query, chosen_group, tab_size)
+  local tabs = frame.ssk_material_inner.ssk_group_scroll.ssk_groups
   tabs.clear()
   for _, group in ipairs(group_list) do
     local tab = tabs.add { type = "sprite-button", style = "filter_group_button_tab_slightly_larger", sprite = "item-group/" .. group.name,
       toggled = query == "" and chosen_group == group.name, tooltip = group.localised_name or group.name,
       tags = { ssk_picker = "group", group = group.name } }
-    tab.enabled = query == "" or matched[group.name] == true
+    tab.enabled = query == "" or matched_groups[group.name] == true
     tab.style.width, tab.style.height = tab_size, tab_size
     local before = math.floor((tab_size - 64) / 2)
     local after = tab_size - 64 - before
     tab.style.left_padding, tab.style.right_padding, tab.style.top_padding, tab.style.bottom_padding = before, after, before, after
   end
+end
+
+-- Use the game's filter-group buttons and deep slot grid, populated exclusively
+-- from item/fluid prototypes. The signal choose-elem dialog cannot filter types.
+local function populate(player)
+  local frame = player.gui.screen[NAME]
+  if not frame then return end
+  local picker_state = state(player)
+  local query = frame.ssk_title.ssk_query.text:lower()
+  local chosen_group = query == "" and frame.tags.group or ""
+  local entries, groups, matched_groups, total = collect_catalog(picker_state, query)
+  local group_list = order_catalog(entries, groups)
+  entries, chosen_group = filter_group(frame, query, entries, groups, group_list, chosen_group)
+  local grid, keys, material_rows = render_materials(frame, entries)
+  local tab_size = fit(player, frame, #group_list, material_rows)
+  render_groups(frame, group_list, matched_groups, query, chosen_group, tab_size)
   grid.tags = { keys = keys, total = total }
-  f.ssk_count.caption = #entries == 0 and "No matching materials" or (#entries .. " materials")
+  frame.ssk_count.caption = #entries == 0 and "No matching materials" or (#entries .. " materials")
 end
 
 function P.on_group(e)
@@ -192,6 +229,7 @@ function P.open(player, target, current)
     local proto = prototypes.item[name]
     group = proto and proto.group and proto.group.name or ""
   end
+  -- Frame tags retain the selection target, browsing group and current typed key.
   local f = player.gui.screen.add { type = "frame", name = NAME, direction = "vertical", tags = { target = target, group = group, current = current or "" } }
   local title = f.add { type = "flow", name = "ssk_title", direction = "horizontal" }
   title.style.horizontal_spacing = 8

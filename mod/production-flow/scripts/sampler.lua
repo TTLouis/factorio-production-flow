@@ -12,6 +12,50 @@ local TYPES = { "assembling-machine", "furnace", "rocket-silo" }
 local TYPESET = { ["assembling-machine"] = true, furnace = true, ["rocket-silo"] = true }
 local BIN_TICKS = 60
 
+-- Saved-state keys remain compact for compatibility with existing saves.
+-- Material keys use "item/<name>" or "fluid/<name>"; recipe keys are bare names.
+---@class ProductionFlowMachine
+---@field e LuaEntity Tracked entity; validity is checked when sampled.
+---@field u integer Unit number, also the key in storage.machines.
+---@field s integer Surface index captured on registration.
+---@field r string? Recipe observed at the previous sample.
+---@field pf number Previous products_finished counter.
+---@field spd number Last observed crafting speed.
+---@field silo boolean? Whether rocket-part accounting applies.
+---@field rp number? Previous rocket_parts counter.
+---@field req number? Rocket parts required per rocket.
+
+---@class ProductionFlowRecipeSample
+---@field c number Completed crafts, including productivity bonus crafts.
+---@field p number Sum of completed crafts multiplied by productivity bonus.
+
+---@class ProductionFlowNodeSample
+---@field i number Produced quantity (statistics input_counts).
+---@field o number Consumed quantity (statistics output_counts).
+
+---@class ProductionFlowHistoryBin
+---@field id integer Absolute bin index, not the ring slot.
+---@field secs number? Recorded seconds in coarse bins; absent in fine bins.
+---@field rec table<integer, table<string, ProductionFlowRecipeSample>> Surface -> recipe -> sample.
+---@field stat table<integer, table<string, ProductionFlowNodeSample>> Surface -> material -> sample.
+
+-- Query results are new tables; callers may use them without mutating history.
+---@class ProductionFlowRecipeRate
+---@field cps number Completed crafts per second, including productivity bonuses.
+---@field prod number Craft-weighted productivity bonus, not a production rate.
+
+---@class ProductionFlowNodeRate
+---@field prod number Produced material units per second.
+---@field cons number Consumed material units per second.
+
+---@class ProductionFlowRates
+---@field recipes table<string, ProductionFlowRecipeRate> Indexed by recipe name.
+---@field nodes table<string, ProductionFlowNodeRate> Indexed by material key.
+
+---@class ProductionFlowStockEntry
+---@field count number Latest completed scan quantity, all qualities combined.
+---@field per_min number? Change per game minute; absent without elapsed history.
+
 -- Verified on a real base (v0.0.7 export): products_finished INCLUDES productivity bonus crafts.
 -- normal crafts = pf / (1 + prod); inputs = normal * amount; outputs = normal * (amount + eligible * prod)
 Sm.PF_INCLUDES_BONUS = true
@@ -254,6 +298,10 @@ end
 ---------------------------------------------------------------------------
 -- returns {recipes = {[r] = {cps, prod}}, nodes = {[key] = {prod, cons}}}, seconds
 -- period: seconds to average over (nil / 0 = the fine rate window)
+---@param sidx integer? Surface index; nil combines all recorded surfaces.
+---@param period number? Requested observation period in seconds.
+---@return ProductionFlowRates rates
+---@return number seconds Actual recorded duration used as the denominator.
 function Sm.rates(sidx, period)
   local now_id = math.floor(game.tick / BIN_TICKS)
   local rc, st, nfull = {}, {}, 0
@@ -314,6 +362,8 @@ function Sm.rates(sidx, period)
   return out, secs
 end
 
+---@param sidx integer? Surface index; nil combines all registered surfaces.
+---@return table<string, integer> counts Recipe name -> registered machine count.
 function Sm.machine_counts(sidx)
   local m = {}
   for _, rec in pairs(storage.machines) do
@@ -323,6 +373,8 @@ function Sm.machine_counts(sidx)
 end
 
 -- capacity in NORMAL crafts/s per recipe if every machine ran at 100 % (Balance tab)
+---@param sidx integer? Surface index; nil combines all registered surfaces.
+---@return table<string, number> capacity Recipe name -> normal crafts per second.
 function Sm.capacity(sidx)
   local g = storage.graph
   local cap = {}
@@ -350,6 +402,8 @@ function Sm.stock_surfaces()
 end
 
 -- { [key] = { count = now, per_min = trend } }
+---@param sidx integer? Surface index; nil combines all scanned surfaces.
+---@return table<string, ProductionFlowStockEntry> stock Indexed by material key.
 function Sm.stock(sidx)
   local h = storage.stock or {}
   local out = {}

@@ -63,56 +63,69 @@ local function tarjan(verts, adj)
 end
 M._tarjan = tarjan
 
--- sidx: surface index, or nil for all surfaces
-function M.build(sidx, period)
-  local g = Graph.get()
-  local rates, secs = Sampler.rates(sidx, period)
-  local mcount = Sampler.machine_counts(sidx)
+-- Table contracts used by the build phases:
+-- rates (ProductionFlowRates) = { recipes = { [recipe_name] = { cps, prod } },
+--           nodes = { [material_key] = { prod, cons } } } from Sampler.rates.
+-- cps counts crafts per second; prod is the productivity bonus. Node totals and
+-- edge rates are amounts per second. Keys use item/, fluid/ or recipe/ prefixes.
+-- edges is an ordered array of { from, to, rate, reversing, cycle }; reversing
+-- retains the recipe value (including nil), and cycle is filled after tiering.
+-- meas_in sums recipe production; meas_out sums recipe consumption.
+-- residuals[material_key] = { prod, cons, meas_in, meas_out, other_src,
+-- other_sink }; only the unexplained source/sink amounts are clamped to zero.
+-- The returned model retains the sampler tables as rates and machines. Its used
+-- and verts arrays are sorted; vertices maps each key to { tier, comp, kind }.
+-- sccs lists multi-member components in topological order, with sorted members.
 
+local function used_recipes(graph, rates, machine_counts)
   -- in-use recipes: measured activity OR at least one machine set to it
   local used = {}
-  for r in pairs(rates.recipes) do if g.recipes[r] then used[r] = true end end
-  for r in pairs(mcount) do if g.recipes[r] then used[r] = true end end
+  for r in pairs(rates.recipes) do if graph.recipes[r] then used[r] = true end end
+  for r in pairs(machine_counts) do if graph.recipes[r] then used[r] = true end end
   local used_list = sorted_keys(used)
 
-  local verts, vset = {}, {}
-  local function addv(v)
-    if not vset[v] then vset[v] = true; verts[#verts + 1] = v end
+  return used_list
+end
+
+local function assemble_graph(graph, rates, used_list)
+  local verts, vertex_set = {}, {}
+  local function add_vertex(v)
+    if not vertex_set[v] then vertex_set[v] = true; verts[#verts + 1] = v end
   end
 
   local edges = {}
-  local adjset = {} -- tiering adjacency, reversing recipes excluded
-  local meas_in, meas_out = {}, {}
+  local adjacency_sets = {} -- tiering adjacency, reversing recipes excluded
+  local measured_inputs, measured_outputs = {}, {}
   local function link(a, b, tier_edge)
     if not tier_edge then return end
-    local s = adjset[a]
-    if not s then s = {}; adjset[a] = s end
+    local s = adjacency_sets[a]
+    if not s then s = {}; adjacency_sets[a] = s end
     s[b] = true
   end
 
-  for _, r in ipairs(used_list) do
-    local rec = g.recipes[r]
-    local rv = "recipe/" .. r
-    local rr = rates.recipes[r]
-    local cps = rr and rr.cps or 0
-    local prod = rr and rr.prod or 0
-    -- crafts counted by products_finished include bonus crafts: normal crafts consume inputs
-    local normal = Sampler.PF_INCLUDES_BONUS and cps / (1 + prod) or cps
-    local tier_edge = not rec.reversing
-    addv(rv)
-    for _, ing in ipairs(rec.ingredients) do
-      addv(ing.key)
-      local rate = normal * ing.amount
-      edges[#edges + 1] = { from = ing.key, to = rv, rate = rate, reversing = rec.reversing }
-      meas_out[ing.key] = (meas_out[ing.key] or 0) + rate
-      link(ing.key, rv, tier_edge)
+  for _, recipe_name in ipairs(used_list) do
+    local recipe = graph.recipes[recipe_name]
+    local recipe_key = "recipe/" .. recipe_name
+    local recipe_rate = rates.recipes[recipe_name]
+    local crafts_per_second = recipe_rate and recipe_rate.cps or 0
+    local productivity = recipe_rate and recipe_rate.prod or 0
+    -- products_finished includes bonus crafts; only normal crafts consume inputs.
+    local normal_crafts_per_second = Sampler.PF_INCLUDES_BONUS and crafts_per_second / (1 + productivity) or crafts_per_second
+    local tier_edge = not recipe.reversing
+    add_vertex(recipe_key)
+    for _, ingredient in ipairs(recipe.ingredients) do
+      add_vertex(ingredient.key)
+      local rate = normal_crafts_per_second * ingredient.amount
+      edges[#edges + 1] = { from = ingredient.key, to = recipe_key, rate = rate, reversing = recipe.reversing }
+      measured_outputs[ingredient.key] = (measured_outputs[ingredient.key] or 0) + rate
+      link(ingredient.key, recipe_key, tier_edge)
     end
-    for _, p in ipairs(rec.products) do
-      addv(p.key)
-      local rate = normal * (p.amount + p.prod * prod)
-      edges[#edges + 1] = { from = rv, to = p.key, rate = rate, reversing = rec.reversing }
-      meas_in[p.key] = (meas_in[p.key] or 0) + rate
-      link(rv, p.key, tier_edge)
+    for _, product in ipairs(recipe.products) do
+      add_vertex(product.key)
+      local rate = normal_crafts_per_second * (product.amount + product.prod * productivity)
+      edges[#edges + 1] = { from = recipe_key, to = product.key, rate = rate, reversing = recipe.reversing }
+      measured_inputs[product.key] = (measured_inputs[product.key] or 0) + rate
+      link(recipe_key, product.key, tier_edge)
     end
   end
 
@@ -120,9 +133,13 @@ function M.build(sidx, period)
   table.sort(verts)
   local adj = {}
   for _, v in ipairs(verts) do
-    if adjset[v] then adj[v] = sorted_keys(adjset[v]) end
+    if adjacency_sets[v] then adj[v] = sorted_keys(adjacency_sets[v]) end
   end
 
+  return verts, edges, adj, measured_inputs, measured_outputs
+end
+
+local function calculate_tiers(verts, edges, adj)
   -- SCC + longest-path tiering on the condensation
   local comp, ncomp = tarjan(verts, adj)
   local members = {}
@@ -157,12 +174,16 @@ function M.build(sidx, period)
     if #members[c] > 1 then sccs[#sccs + 1] = members[c] end
   end
 
+  return vertices, max_tier, sccs
+end
+
+local function assemble_residuals(verts, vertices, rates, measured_inputs, measured_outputs)
   -- residuals: force-stat totals minus measured recipe edges (D6)
   local residuals = {}
   for _, v in ipairs(verts) do
     if vertices[v].kind ~= "recipe" then
       local tot = rates.nodes[v] or { prod = 0, cons = 0 }
-      local mi, mo = meas_in[v] or 0, meas_out[v] or 0
+      local mi, mo = measured_inputs[v] or 0, measured_outputs[v] or 0
       residuals[v] = {
         prod = tot.prod, meas_in = mi, other_src = math.max(0, tot.prod - mi),
         cons = tot.cons, meas_out = mo, other_sink = math.max(0, tot.cons - mo),
@@ -170,8 +191,23 @@ function M.build(sidx, period)
     end
   end
 
+  return residuals
+end
+
+-- sidx: surface index, or nil for all surfaces. period is passed through to
+-- Sampler.rates, including nil. Statistics-only materials do not add vertices:
+-- the model covers materials in the selected in-use recipes.
+function M.build(sidx, period)
+  local graph = Graph.get()
+  local rates, seconds = Sampler.rates(sidx, period)
+  local machine_counts = Sampler.machine_counts(sidx)
+  local used_list = used_recipes(graph, rates, machine_counts)
+  local verts, edges, adj, measured_inputs, measured_outputs = assemble_graph(graph, rates, used_list)
+  local vertices, max_tier, sccs = calculate_tiers(verts, edges, adj)
+  local residuals = assemble_residuals(verts, vertices, rates, measured_inputs, measured_outputs)
+
   return {
-    seconds = secs,
+    seconds = seconds,
     used = used_list,
     vertices = vertices,
     verts = verts,
@@ -179,7 +215,7 @@ function M.build(sidx, period)
     sccs = sccs,
     max_tier = max_tier,
     residuals = residuals,
-    machines = mcount,
+    machines = machine_counts,
     rates = rates,
   }
 end

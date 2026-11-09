@@ -35,78 +35,142 @@ B.STATUS = {
                 help = "Mined, pumped or consumed outside crafting machines (labs, fuel, building…): no machine data." },
 }
 
-local function util_of(names, rates, cap, used)
-  local done, possible = 0, 0
-  for _, r in ipairs(names) do
-    if used[r] and cap[r] and cap[r] > 0 then
-      local rr = rates.recipes[r]
-      local normal = 0
-      if rr then normal = Sampler.PF_INCLUDES_BONUS and rr.cps / (1 + rr.prod) or rr.cps end
-      done = done + normal
-      possible = possible + cap[r]
+-- Residuals are keyed by material ("item/name" or "fluid/name") and contain
+-- optional prod/cons rates per second. Stock entries contain count and optional
+-- per_min trend; missing stock means unknown, distinct from a known zero count.
+-- Graph recipe names, rate recipe names and capacity keys share the same IDs.
+
+---@param recipe_names string[]
+---@param rates ProductionFlowRates Recipe rates indexed by recipe name.
+---@param capacity table<string, number> Normal crafts per second by recipe.
+---@param used table<string, boolean> Non-reversing recipes included in the model.
+---@return number|nil utilisation Nil when no included positive capacity exists.
+local function utilisation_of(recipe_names, rates, capacity, used)
+  local completed, possible = 0, 0
+  for _, recipe_name in ipairs(recipe_names) do
+    if used[recipe_name] and capacity[recipe_name] and capacity[recipe_name] > 0 then
+      local recipe_rate = rates.recipes[recipe_name]
+      local normal_crafts = 0
+      if recipe_rate then
+        normal_crafts = Sampler.PF_INCLUDES_BONUS
+          and recipe_rate.cps / (1 + recipe_rate.prod) or recipe_rate.cps
+      end
+      completed = completed + normal_crafts
+      possible = possible + capacity[recipe_name]
     end
   end
   if possible <= 0 then return nil end
-  return done / possible
+  return completed / possible
 end
 
-function B.rows(sidx, period)
-  local g = Graph.get()
-  local m = Model.build(sidx, period)
-  local cap = Sampler.capacity(sidx)
-  local stock = Sampler.stock(sidx)
+---@return table<string, boolean> used Recipe membership, excluding reversing recipes.
+local function used_recipes(graph, model)
   local used = {}
-  for _, r in ipairs(m.used) do
-    local rec = g.recipes[r]
-    if rec and not rec.reversing then used[r] = true end
+  for _, recipe_name in ipairs(model.used) do
+    local recipe = graph.recipes[recipe_name]
+    if recipe and not recipe.reversing then used[recipe_name] = true end
   end
+  return used
+end
 
+-- Copy membership without mutating model residuals; positive stock adds empty
+-- residual entries so stored-only materials can become rows.
+---@return table<string, table> residuals Original residual values or empty tables.
+local function residuals_with_stock(model_residuals, stock)
   local residuals = {}
-  for key,res in pairs(m.residuals) do residuals[key]=res end
-  for key,st in pairs(stock) do
-    if st.count>0 and not residuals[key] then residuals[key]={} end
+  for key, residual in pairs(model_residuals) do residuals[key] = residual end
+  for key, entry in pairs(stock) do
+    if entry.count > 0 and not residuals[key] then residuals[key] = {} end
   end
+  return residuals
+end
+
+-- A completed stock scan supplies known zeros for items, never for fluids.
+---@return ProductionFlowStockEntry|nil entry
+local function stock_for(key, stock, known)
+  local entry = stock[key]
+  if not entry and known and key:sub(1, 5) == "item/" then entry = { count = 0 } end
+  return entry
+end
+
+---@return string status A key in B.STATUS; precedence is significant.
+local function status_for(reference, net_fraction, producer_utilisation, consumer_utilisation, stock)
+  local status
+  if reference <= 1e-3 then status = "stored"
+  elseif net_fraction < -B.NET_TOL then status = "deficit"
+  elseif net_fraction > B.NET_TOL then status = "surplus"
+  elseif producer_utilisation == nil or consumer_utilisation == nil then
+    status = (producer_utilisation == nil and consumer_utilisation == nil) and "source" or "ok"
+  elseif consumer_utilisation < B.LOW and producer_utilisation >= B.HIGH then status = "limited"
+  elseif consumer_utilisation < B.LOW and producer_utilisation < B.LOW then status = "starved"
+  elseif producer_utilisation < B.LOW and consumer_utilisation >= B.HIGH then status = "overbuilt"
+  else status = "ok" end
+  -- A deficit without machine production or known stock is a source/sink.
+  if status == "deficit" and producer_utilisation == nil and not stock then status = "source" end
+  return status
+end
+
+---@return number|nil seconds Prefer a measured stock drain, then a negative net rate.
+local function time_to_empty(stock, net)
+  if stock and stock.count > 0 then
+    local drain = (stock.per_min and stock.per_min < 0) and (-stock.per_min / 60)
+      or ((net < 0) and -net or 0)
+    if drain > 0 then return stock.count / drain end
+  end
+end
+
+-- Rows retain public abbreviated field names used by the Balance UI/exporters:
+-- prod/cons/net are per-second rates, netp is net / max(prod, cons), pu/cu are
+-- optional utilisation ratios, stock/trend are optional count/per-minute values,
+-- and eta is optional seconds to empty. Unknown optional fields remain absent.
+---@return table|nil row Nil for negligible throughput without positive stock.
+local function material_row(key, residual, graph, model, capacity, used, stock, known)
+  local produced, consumed = residual.prod or 0, residual.cons or 0
+  local reference = math.max(produced, consumed)
+  if reference > 1e-3 or (stock[key] and stock[key].count > 0) then
+    local node = graph.nodes[key]
+    local producer_utilisation = node and utilisation_of(node.producers, model.rates, capacity, used)
+    local consumer_utilisation = node and utilisation_of(node.consumers, model.rates, capacity, used)
+    local net = produced - consumed
+    local net_fraction = reference > 0 and net / reference or 0
+    local entry = stock_for(key, stock, known)
+    return {
+      key = key, prod = produced, cons = consumed, net = net, netp = net_fraction,
+      pu = producer_utilisation, cu = consumer_utilisation,
+      stock = entry and entry.count, trend = entry and entry.per_min,
+      eta = time_to_empty(entry, net),
+      status = status_for(reference, net_fraction, producer_utilisation, consumer_utilisation, entry),
+    }
+  end
+end
+
+local function row_before(a, b)
+  local order_a, order_b = B.STATUS[a.status].order, B.STATUS[b.status].order
+  if order_a ~= order_b then return order_a < order_b end
+  local severity_a, severity_b = math.abs(a.netp), math.abs(b.netp)
+  if severity_a ~= severity_b then return severity_a > severity_b end
+  return a.key < b.key
+end
+
+---@param sidx number|nil Surface index, passed through to the model and samplers.
+---@param period number|nil Model sampling period, passed through unchanged.
+---@return table[] rows Sorted by status, descending absolute netp, then material key.
+---@return number seconds Model's measured window length.
+function B.rows(sidx, period)
+  local graph = Graph.get()
+  local model = Model.build(sidx, period)
+  local capacity = Sampler.capacity(sidx)
+  local stock = Sampler.stock(sidx)
+  local used = used_recipes(graph, model)
+  local residuals = residuals_with_stock(model.residuals, stock)
   local known = Sampler.stock_known(sidx)
   local rows = {}
-  for key, res in pairs(residuals) do
-    local prod, cons = res.prod or 0, res.cons or 0
-    local ref = math.max(prod, cons)
-    if ref > 1e-3 or (stock[key] and stock[key].count>0) then
-      local nd = g.nodes[key]
-      local pu = nd and util_of(nd.producers, m.rates, cap, used)
-      local cu = nd and util_of(nd.consumers, m.rates, cap, used)
-      local net = prod - cons
-      local netp = ref>0 and net / ref or 0
-      local st = stock[key]
-      if not st and known and key:sub(1,5)=="item/" then st={count=0} end
-      local status
-      if ref<=1e-3 then status = "stored"
-      elseif netp < -B.NET_TOL then status = "deficit"
-      elseif netp > B.NET_TOL then status = "surplus"
-      elseif pu == nil or cu == nil then status = (pu == nil and cu == nil) and "source" or "ok"
-      elseif cu < B.LOW and pu >= B.HIGH then status = "limited"
-      elseif cu < B.LOW and pu < B.LOW then status = "starved"
-      elseif pu < B.LOW and cu >= B.HIGH then status = "overbuilt"
-      else status = "ok" end
-      -- a deficit with nothing producing it in a machine is just a sink being fed from mining / stock
-      if status == "deficit" and pu == nil and not st then status = "source" end
-      local eta
-      if st and st.count > 0 then
-        local drain = (st.per_min and st.per_min < 0) and (-st.per_min / 60) or ((net < 0) and -net or 0)
-        if drain > 0 then eta = st.count / drain end
-      end
-      rows[#rows + 1] = { key = key, prod = prod, cons = cons, net = net, netp = netp, pu = pu, cu = cu,
-                          stock = st and st.count, trend = st and st.per_min, eta = eta, status = status }
-    end
+  for key, residual in pairs(residuals) do
+    local row = material_row(key, residual, graph, model, capacity, used, stock, known)
+    if row then rows[#rows + 1] = row end
   end
-  table.sort(rows, function(a, b)
-    local oa, ob = B.STATUS[a.status].order, B.STATUS[b.status].order
-    if oa ~= ob then return oa < ob end
-    local sa, sb = math.abs(a.netp), math.abs(b.netp)
-    if sa ~= sb then return sa > sb end
-    return a.key < b.key
-  end)
-  return rows, m.seconds
+  table.sort(rows, row_before)
+  return rows, model.seconds
 end
 
 return B
