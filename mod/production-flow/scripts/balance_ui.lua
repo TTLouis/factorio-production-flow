@@ -2,11 +2,13 @@
 local Balance = require("scripts.balance")
 local Graph = require("scripts.graph")
 local Groups = require("scripts.groups")
+local Watch = require("scripts.watch")
 
-local Sampler = require("scripts.sampler")
 local BU = {}
 BU.FILTERS = { "problems", "all", "shortages", "surpluses", "capacity" }
+BU.SORTS = { "priority", "groups", "deficit", "empty" }
 local FILTER_NAMES = { "Problems only", "Everything", "Supply/activity", "Surpluses", "Spare capacity" }
+local SORT_NAMES = { "Priority", "Item groups", "Biggest deficit", "Soonest empty" }
 local SHORTAGE = { deficit = true, limited = true, starved = true }
 local LIMIT = 200
 -- The item list pane is bal_width + 24 wide and always reserves its scrollbar,
@@ -63,6 +65,12 @@ end
 local function group_name(g)
   return { "", g.super_localised_name and { "?", g.super_localised_name, g.super_name } or g.super_name,
     " › ", g.localised_name and { "?", g.localised_name, g.name } or g.name }
+end
+
+local function item_tooltip(key, group, warning)
+  local tooltip = { "", item_name(key), "\n", group_name(group), "\n", key, "\nClick to inspect this material." }
+  if warning then return { "", tooltip, "\n\n", warning } end
+  return tooltip
 end
 
 function BU.matches(r, filter)
@@ -208,14 +216,15 @@ local function add_row(parent, r, g, cols, fav)
       el.style.horizontal_spacing = 4
       star_button(el, fav, { ssk_ui = "bal_fav", key = r.key }, "this item")
       local spec = { type = "sprite-button", name = "ssk_bal_inspect", style = "tool_button", sprite = "utility/search",
-        tooltip = "Show this item's materials and uses on the right", tags = { ssk_ui = "focus_item", key = r.key } }
+        tooltip = "Inspect this material on the right", tags = { ssk_ui = "focus_item", key = r.key } }
       local inspect = el.add(spec)
       inspect.style.width, inspect.style.height = 24, 24
     else
-      local tooltip = col.id == "item" and { "", item_name(r.key), "\n", group_name(g), "\n", r.key }
+      local tooltip = col.id == "item" and item_tooltip(r.key, g)
         or col.id == "status" and Balance.STATUS[r.status].help or col.help
       el = text(parent, caption(v,col), tooltip)
       el.style.horizontal_align = col.numeric and "right" or "left"
+      if col.id == "item" then el.tags = { ssk_ui = "bal_material", key = r.key } end
       if col.id == "item" or col.id == "status" then el.style.font = "default-bold" end
       if col.id == "net" and r.net ~= 0 then
         el.style.font_color = r.net < 0 and { 1, 0.45, 0.4 } or { 1, 0.85, 0.35 }
@@ -246,22 +255,24 @@ end
 
 -- Display order: favourite items, favourite groups (whole), then the filtered
 -- list. Favourites ignore Show / Group and do not count towards the row limit.
-local function arrange(us, rows, filtered, by_key, info)
-  local favs = BU.favourites(us)
+local function arrange(favs, rows, filtered, by_key, info, order)
   local display, used = {}, {}
   local function push(r, section)
     used[r.key] = true
     display[#display + 1] = { row = r, section = section }
   end
-  local present = {}
-  for _, r in ipairs(rows) do present[r.key] = r end
-  local missing = {}
-  for _, r in ipairs(rows) do if favs.items[r.key] then push(r, "fav") end end
+  local present, fav_items, missing = {}, {}, {}
+  for _, r in ipairs(rows) do
+    present[r.key] = true
+    if favs.items[r.key] then fav_items[#fav_items + 1] = r end
+  end
   for key in pairs(favs.items) do if not present[key] then missing[#missing + 1] = key end end
   table.sort(missing)
   for _, key in ipairs(missing) do
-    push({ key = key, prod = 0, cons = 0, net = 0, netp = 0, status = "ok", inactive = true }, "fav")
+    fav_items[#fav_items + 1] = { key = key, prod = 0, cons = 0, net = 0, netp = 0, status = "ok", inactive = true }
   end
+  Balance.sort(fav_items, order)
+  for _, r in ipairs(fav_items) do push(r, "fav") end
   local fav_groups = {}
   for gid in pairs(favs.groups) do fav_groups[#fav_groups + 1] = info(gid) end
   table.sort(fav_groups, Groups.less)
@@ -276,6 +287,7 @@ local function arrange(us, rows, filtered, by_key, info)
       if oa ~= ob then return oa < ob end
       return a.key < b.key
     end)
+    Balance.sort(members, order)
     for _, r in ipairs(members) do push(r, "fg:" .. g.id) end
     if #members == 0 then empty[#empty + 1] = { group = g, before = #display + 1 } end
   end
@@ -284,6 +296,7 @@ local function arrange(us, rows, filtered, by_key, info)
   for _, r in ipairs(filtered) do
     if not used[r.key] and not favs.groups[by_key[r.key].id] then normal[#normal + 1] = r end
   end
+  Balance.sort(normal, order)
   return display, normal, nfav, empty
 end
 
@@ -298,7 +311,11 @@ local SUMMARY_GROUPS = {
 }
 
 function BU.fill(player, c, us, scope, only_auto)
-  local rows, secs = Balance.rows(us.sidx, us.period)
+  local rows, secs, stock, stock_known, totals = Balance.rows(us.sidx, us.period)
+  local favs = BU.favourites(us)
+  local warnings = Watch.evaluate(player, us, secs, stock, stock_known, totals)
+  local previous = c.ssk_bal_root
+  local live_reuse = only_auto and previous and previous.tags.visible_keys
   local groups, seen, by_key, counts = {}, {}, {}, {}
   for _, r in ipairs(rows) do
     local id = Groups.of(player.index, r.key)
@@ -335,16 +352,14 @@ function BU.fill(player, c, us, scope, only_auto)
       return a.key < b.key
     end)
   end
-  local favs = BU.favourites(us)
-  local display, normal, nfav, empty = arrange(us, rows, filtered, by_key, info)
+  local order = not live_reuse and us.bal_sort or nil
+  local display, normal, nfav, empty = arrange(favs, rows, filtered, by_key, info, order)
   local matching_count = nfav + #normal
   local limit = math.min(#normal, us.bal_limit or LIMIT)
   for i = 1, limit do
     local r = normal[i]
     display[#display + 1] = { row = r, section = us.bal_sort == "groups" and "g:" .. by_key[r.key].id or "all" }
   end
-  local previous=c.ssk_bal_root
-  local live_reuse=only_auto and previous and previous.tags.visible_keys
   if live_reuse then
     -- Keep click targets and open dropdowns alive. Explicit Refresh/filter actions
     -- reapply membership and ordering; live updates only change measured values.
@@ -409,46 +424,68 @@ function BU.fill(player, c, us, scope, only_auto)
     local visible_keys={}; for i=1,shown do visible_keys[i]=list[i].key end
     root = c.add { type = "flow", name = "ssk_bal_root", direction = "vertical", tags = { signature = signature, visible_keys=visible_keys } }
     root.style.vertical_spacing = 8
-    root.style.width = (us.bal_width or 900) + 24
+    local toolbar_width = (us.bal_width or 900) + 24
+    root.style.width = toolbar_width
     root.style.height = us.bal_height or 600
     local toolbar = root.add { type = "flow", name = "ssk_bal_controls", direction = "horizontal" }
+    local spacing = 4
     toolbar.style.vertical_align = "center"
-    toolbar.style.horizontal_spacing = 8
-    text(toolbar, "Show:")
+    toolbar.style.horizontal_spacing = spacing
+    toolbar.style.width = toolbar_width
+    local show_label_width, group_label_width, order_label_width = 38, 44, 40
+    local labels_width = show_label_width + group_label_width + order_label_width + 3 * spacing
+    local details_width = 76
+    -- Allow for the four gaps between the three pickers, spacer and refresh button.
+    local picker_budget = toolbar_width - 8 - 28 - 4 * spacing
+    if us.bal_group then picker_budget = picker_budget - 24 - spacing end
+    local labelled_width = 3 * 120 + labels_width
+    local inline_details = picker_budget >= labelled_width + details_width + spacing
+    if inline_details then picker_budget = picker_budget - details_width - spacing end
+    local show_labels = picker_budget >= labelled_width
+    if show_labels then picker_budget = picker_budget - labels_width end
+    local picker_width = math.max(36, math.min(134, math.floor(picker_budget / 3)))
+
+    if show_labels then text(toolbar, "Show:").style.width = show_label_width end
     local fi = 1
     for i, id in ipairs(BU.FILTERS) do if id == us.bal_filter then fi = i end end
-    local filter = toolbar.add { type = "drop-down", items = FILTER_NAMES, selected_index = fi, tags = { ssk_ui = "bal_filter" } }
-    filter.style.width = 145
-    toolbar.style.width = (us.bal_width or 900) + 24
-    local spacer = toolbar.add { type = "empty-widget" }
-    spacer.style.horizontally_stretchable = true
-    spacer.style.minimal_width = 16
-    text(toolbar, "Group:")
+    local filter = toolbar.add { type = "drop-down", items = FILTER_NAMES, selected_index = fi,
+      tags = { ssk_ui = "bal_filter" }, tooltip = "Show " .. FILTER_NAMES[fi] }
+    filter.style.width = picker_width
+
+    if show_labels then text(toolbar, "Group:").style.width = group_label_width end
     local names, gi = { "All groups" }, 1
     us.bal_group_ids = {}
     for i, g in ipairs(groups) do
       names[i + 1] = group_name(g); us.bal_group_ids[i + 1] = g.id
       if g.id == us.bal_group then gi = i + 1 end
     end
-    local picker = toolbar.add { type = "drop-down", items = names, selected_index = gi, tags = { ssk_ui = "bal_group" } }
-    picker.style.width = math.min(240, math.max(120, (us.bal_width or 900) - 358))
+    local picker = toolbar.add { type = "drop-down", items = names, selected_index = gi,
+      tags = { ssk_ui = "bal_group" }, tooltip = { "", "Material group\n", names[gi] } }
+    picker.style.width = math.max(36, math.min(240, picker_budget - 2 * picker_width))
     if us.bal_group then
       star_button(toolbar, favs.groups[us.bal_group], { ssk_ui = "bal_fav_group", gid = us.bal_group }, "this group")
     end
-    refresh = toolbar.add { type = "sprite-button", name = "ssk_bal_refresh", style = "tool_button", sprite = "utility/refresh",
-      tags = { ssk_ui = "bal_update" }, tooltip = "Refresh table" }
-    toolbar = root.add { type = "flow", direction = "horizontal" }
-    toolbar.style.vertical_align = "center"
-    toolbar.style.horizontal_spacing = 8
-    text(toolbar, "Order:")
-    toolbar.add { type = "drop-down", items = { "Priority", "Item groups" }, selected_index = us.bal_sort == "groups" and 2 or 1,
-      tags = { ssk_ui = "bal_sort" } }
-    toolbar.style.width = (us.bal_width or 900) + 24
+
+    if show_labels then text(toolbar, "Order:").style.width = order_label_width end
+    local sort_index = 1
+    for i, id in ipairs(BU.SORTS) do if id == us.bal_sort then sort_index = i end end
+    toolbar.add { type = "drop-down", items = SORT_NAMES, selected_index = sort_index,
+      tags = { ssk_ui = "bal_sort" }, tooltip = "Sort by " .. SORT_NAMES[sort_index] }.style.width = picker_width
+
     local spacer = toolbar.add { type = "empty-widget" }
     spacer.style.horizontally_stretchable = true
-    spacer.style.minimal_width = 16
-    toolbar.add { type = "checkbox", caption = "Details", state = us.bal_details == true, tags = { ssk_ui = "bal_details" },
+    spacer.style.minimal_width = 8
+    local details_row = toolbar
+    if not inline_details then
+      details_row = root.add { type = "flow", direction = "horizontal" }
+      details_row.style.width = toolbar_width
+      details_row.style.vertical_align = "center"
+      details_row.add { type = "empty-widget" }.style.horizontally_stretchable = true
+    end
+    details_row.add { type = "checkbox", caption = "Details", state = us.bal_details == true, tags = { ssk_ui = "bal_details" },
       tooltip = "Show net percentage, producer / consumer utilisation and recent stock trend." }
+    refresh = toolbar.add { type = "sprite-button", name = "ssk_bal_refresh", style = "tool_button", sprite = "utility/refresh",
+      tags = { ssk_ui = "bal_update" }, tooltip = "Refresh table" }
     local summary = root.add { type = "table", name = "ssk_bal_summary", column_count = 3 }
     summary.style.horizontal_spacing = 8
     summary.vertical_centering = false
@@ -549,7 +586,13 @@ function BU.fill(player, c, us, scope, only_auto)
     el.caption = string.format("[color=%s]%s: %d[/color]", st.color, st.label, counts[id] or 0)
   end
   for i = 1, shown do
-    local v = values(list[i])
+    local r = list[i]
+    local v = values(r)
+    if favs.items[r.key] then
+      local warning = warnings and warnings[r.key]
+      if warning then v.item = { "", "[img=utility/warning_icon] ", v.item } end
+      cells[i].item.tooltip = item_tooltip(r.key, group_of(r.key), warning)
+    end
     for _,col in ipairs(cols) do
       if col.id~="focus" then cells[i][col.id].caption=caption(v,col) end
     end

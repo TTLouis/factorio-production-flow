@@ -1,14 +1,22 @@
 local player = game.players[1]
 local RO = {}
+local function object(kind, args)
+  local o = { valid = true, k = kind, a = args }
+  o.destroy = function() o.valid = false end
+  RO[#RO + 1] = o
+  return o
+end
 rendering = {
-  draw_rectangle = function(a) local o = { valid = true, k = "rect", a = a }; o.destroy = function() o.valid = false end; RO[#RO + 1] = o; return o end,
+  draw_rectangle = function(a) return object("rect", a) end,
+  draw_line = function(a) return object("line", a) end,
+  draw_text = function(a) return object("text", a) end,
   draw_polygon = function(a)
     assert(#a.vertices >= 3, "polygon needs 3+ vertices")
     for _, vertex in ipairs(a.vertices) do
       assert(type(vertex[1]) == "number" and type(vertex[2]) == "number" and not vertex.target,
         "Factorio polygon vertex must be a MapPosition, not {target=...}")
     end
-    local o = { valid = true, k = "poly", a = a }; o.destroy = function() o.valid = false end; RO[#RO + 1] = o; return o
+    return object("poly", a)
   end,
 }
 local SURF

@@ -156,8 +156,81 @@ assert(root()~=reuse, "manual Refresh must reapply list membership")
 fixture = {}
 UI.refresh(player)
 assert(#links() == 0 and not root().ssk_bal_footer, "empty data state")
+
+-- Sort equal measurements in their original priority order. Explicit refresh
+-- reorders the table, while a live refresh keeps the same scrolled targets.
+local function sort_row(name, net, eta, status)
+  return { key = "item/" .. name, prod = 100 + net, cons = 100, net = net, netp = net / 100,
+    eta = eta, status = status }
+end
+local relative = sort_row("relative", -6, 30, "deficit")
+local tied_first = sort_row("tied-z", -10, 30, "deficit")
+local tied_second = sort_row("tied-a", -10, nil, "deficit")
+local biggest = sort_row("biggest", -100, 120, "ok")
+biggest.prod, biggest.cons, biggest.netp = 2400, 2500, -0.04
+local surplus = sort_row("surplus", 30, 15, "surplus")
+local steady = sort_row("steady", 0, nil, "ok")
+fixture = { relative, tied_first, tied_second, surplus, biggest, steady }
+local function expect_order(...)
+  local expected, actual = { ... }, keys()
+  assert(#actual == #expected, "wrong number of sorted rows")
+  for i, row in ipairs(expected) do
+    assert(actual[i] == row.key, "row " .. i .. " should be " .. row.key .. ", got " .. actual[i])
+  end
+end
+select("bal_sort", 1)
+expect_order(relative, tied_first, tied_second, surplus, biggest, steady)
+select("bal_sort", 3)
+assert(us.bal_sort == "deficit")
+expect_order(biggest, tied_first, tied_second, relative, surplus, steady)
+select("bal_sort", 4)
+assert(us.bal_sort == "empty")
+local sort_picker = find(root(), function(e) return e.tags.ssk_ui == "bal_sort" end)[1]
+assert(sort_picker.items[3] == "Biggest deficit" and sort_picker.items[4] == "Soonest empty"
+  and sort_picker.selected_index == 4, "Order dropdown labels and selection must agree")
+expect_order(surplus, relative, tied_first, biggest, tied_second, steady)
+local sorted = root()
+local sorted_pane = sorted.ssk_bal_list.ssk_bal_items
+biggest.eta, surplus.eta = 5, nil
+UI.refresh(player, true)
+assert(root() == sorted and sorted.ssk_bal_list.ssk_bal_items == sorted_pane)
+expect_order(surplus, relative, tied_first, biggest, tied_second, steady)
+click(sorted.ssk_bal_controls.ssk_bal_refresh.tags)
+expect_order(biggest, relative, tied_first, tied_second, surplus, steady)
+click({ ssk_ui = "bal_fav", key = surplus.key })
+select("bal_sort", 3)
+expect_order(surplus, biggest, tied_first, tied_second, relative, steady)
+check_header_alignment()
+
+-- A watch can warn or recover as measurements change without changing the
+-- row list, item width, or scroller. Its evaluation sees the existing sample.
+local Watch = TREQ("scripts.watch")
+local saved_evaluate = Watch.evaluate
+local stock, totals = {}, {}
+B.rows = function() return fixture, 60, stock, true, totals end
+local watch_calls, warning = 0, "Watched stock is low."
+Watch.evaluate = function(p, state, seconds, raw_stock, known, raw_totals)
+  assert(p == player and state == us and seconds == 60)
+  assert(raw_stock == stock and known and raw_totals == totals)
+  watch_calls = watch_calls + 1
+  return { [surplus.key] = warning }
+end
+local watched = root()
+local watched_cell = tables()[1].children[2]
+UI.refresh(player, true)
+assert(watch_calls == 1 and root() == watched, "one watch evaluation per Balance update")
+assert(watched_cell.caption[2] == "[img=utility/warning_icon] " and watched_cell.tooltip[4] == warning,
+  "the favourite's existing item cell must show its watch warning")
+warning = nil
+UI.refresh(player, true)
+assert(watch_calls == 2 and root() == watched and tables()[1].children[2] == watched_cell)
+assert(watched_cell.caption[2] ~= "[img=utility/warning_icon] " and watched_cell.tooltip[6] == surplus.key,
+  "watch recovery must clear the icon and restore the item tooltip")
+Watch.evaluate = saved_evaluate
+click({ ssk_ui = "bal_fav", key = surplus.key })
+
 B.rows = saved_rows
 prototypes.item["test-1"] = old_proto
-us.bal_details, us.bal_filter, us.bal_limit = false, "problems", nil
+us.bal_details, us.bal_filter, us.bal_limit, us.bal_sort = false, "problems", nil, "priority"
 UI.refresh(player)
 print("BAL UI OK")

@@ -203,7 +203,7 @@ for _, id in ipairs({ "balance", "focus", "sankey" }) do
     assert(LABELS > before, "tab " .. id .. " rendered nothing")
   end
 end
-assert(#win.ssk_inner.ssk_tabs.children == 6, "Release must only have three tabs even with old debug preference")
+assert(#win.ssk_inner.ssk_tabs.children == 8, "Release must have four tabs even with old debug preference")
 for _, name in ipairs({"sankey-test", "sankey-probe", "sankey-export"}) do
   assert(not handlers["cmd_"..name], "Release registered development command: "..name)
 end
@@ -250,8 +250,10 @@ dofile(TESTDIR .. "/balance_readability_test.lua")
 dofile(TESTDIR .. "/full_readability_test.lua")
 dofile(TESTDIR .. "/recipe_api_test.lua")
 dofile(TESTDIR .. "/selection_refresh_test.lua")
+dofile(TESTDIR .. "/history_ui_test.lua")
 dofile(TESTDIR .. "/plain_names_test.lua")
 dofile(TESTDIR .. "/usability_test.lua")
 dofile(TESTDIR .. "/chest_stock_test.lua")
 dofile(TESTDIR .. "/material_picker_test.lua")
+dofile(TESTDIR .. "/watch_test.lua")
 print("ALL OK")

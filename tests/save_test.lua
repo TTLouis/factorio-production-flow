@@ -7,6 +7,8 @@ local View = require("scripts.view")
 local Diag = require("scripts.diag")
 local ChestStock=require("scripts.chest_stock")
 local Balance=require("scripts.balance")
+local History=require("scripts.history")
+local Transfers=require("scripts.transfers")
 local start, step, capture = nil, 0, nil
 local selection
 local captures, skipped, products, usage_labels = {}, {}, {}, {}
@@ -178,10 +180,30 @@ if mode=="ux" then
   }
 elseif mode=="warmup" then
   cases={{name="ux-warmup",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1}}
+elseif mode=="diagnostics" then
+  cases={
+    {name="diagnostics-watch",surface="nauvis",tab="balance",focus="item/iron-plate",watch=true},
+    {name="diagnostics-biggest-deficit",surface="nauvis",tab="balance",focus="item/iron-plate",sort=3},
+    {name="diagnostics-soonest-empty",surface="nauvis",tab="balance",focus="item/iron-plate",sort=4},
+    {name="diagnostics-watch-warning",surface="nauvis",tab="balance",focus="item/iron-plate",watch_warning=true},
+    {name="diagnostics-machine-status",surface="ssk-diagnostics-fixture",tab="balance",focus="item/iron-gear-wheel",machine="status"},
+    {name="diagnostics-machine-preview",surface="ssk-diagnostics-fixture",tab="balance",focus="item/iron-gear-wheel",machine="preview"},
+  }
+elseif mode=="history-view" then
+  cases={
+    {name="history-rates-and-stock",surface="nauvis",tab="balance",focus="item/iron-plate"},
+    {name="history-net",surface="nauvis",tab="balance",focus="item/iron-plate",metric="net"},
+    {name="history-long-window",surface="nauvis",tab="balance",focus="item/iron-plate",long_period=true},
+    {name="history-selected-fluid",surface="vulcanus",tab="balance",focus="fluid/water"},
+  }
+elseif mode=="transfer-view" then
+  cases={{name="transfers-delivered-cargo",surface="nauvis",tab="transfers"}}
 end
-local function find_ui(el,action)
-  if el.tags and el.tags.ssk_ui==action then return el end
-  for _,child in pairs(el.children) do local x=find_ui(child,action);if x then return x end end
+local after_capture, diagnostic_machine
+local stock_fixture, transfer_fixture
+local function find_ui(el,action,tag)
+  if el.tags and el.tags[tag or "ssk_ui"]==action then return el end
+  for _,child in pairs(el.children) do local x=find_ui(child,action,tag);if x then return x end end
 end
 
 local function find_node(element)
@@ -204,6 +226,143 @@ local function find_scope(element)
   for _,child in pairs(element.children) do local found=find_scope(child); if found then return found end end
 end
 
+local function find_named(element, name)
+  if element.name==name then return element end
+  for _,child in ipairs(element.children) do
+    local result=find_named(child,name)
+    if result then return result end
+  end
+end
+
+local function exercise_history(UI, player, root, us, case)
+  local split=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split
+  local list=split.ssk_balance_table.ssk_bal_root
+  local items=list.ssk_bal_list.ssk_bal_items
+  local function click(element)
+    assert(UI.on_click{player_index=player.index,element=assert(element)},"History action was not handled")
+  end
+  click(find_named(split.ssk_balance_focus,"ssk_bal_flow"))
+  assert(find_node(split.ssk_balance_focus),"Flow did not render for the same material")
+  click(find_named(split.ssk_balance_focus,"ssk_bal_history"))
+  local panel=assert(find_named(split.ssk_balance_focus,"ssk_history_panel"),"History did not open in Balance")
+  assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera")
+  assert(SK.balance_state(us).focus==case.focus and items.valid,"History lost the Balance selection or scroller")
+  if case.name=="history-rates-and-stock" then
+    local function row_for(element,key)
+      if element.tags.ssk_ui=="focus_item" and element.tags.key==key then return element end
+      for _,child in ipairs(element.children) do
+        local row=row_for(child,key)
+        if row then return row end
+      end
+    end
+    click(row_for(items,"item/copper-plate"))
+    assert(SK.balance_state(us).focus=="item/copper-plate" and items.valid,"Selecting a material lost History or the Balance list")
+    click(row_for(items,case.focus))
+    panel=assert(find_named(split.ssk_balance_focus,"ssk_history_panel"))
+  end
+  local metric=assert(find_ui(panel,case.metric or "all","view"),"History metric control is missing")
+  metric.state=true
+  assert(UI.on_checked{player_index=player.index,element=metric},"History metric change was not handled")
+  panel=assert(find_named(split.ssk_balance_focus,"ssk_history_panel"))
+  local mode_control=assert(find_ui(panel,case.metric or "all","view"))
+  assert(mode_control.state,"Wrong History metric selected")
+  local function choose_period(index)
+    local period=assert(find_ui(root,"period"))
+    period.selected_index=index
+    assert(UI.on_selection{player_index=player.index,element=period},"History period change was not handled")
+  end
+  if case.long_period then
+    choose_period(4)
+    assert(us.period==36000,"History must use the selected ten-hour period")
+    items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
+  end
+  UI.refresh(player,true)
+  assert(items.valid and mode_control.valid,"History refresh rebuilt a selector or the scrolled table")
+  local history=History.build(us.sidx,us.period,case.focus)
+  local measured, estimated=0,0
+  for _,sample in ipairs(history.stock) do
+    if sample.measured then measured=measured+1 else estimated=estimated+1 end
+  end
+  if case.focus=="item/iron-plate" then
+    assert(measured>=2 and (case.long_period or estimated>0),"History must render measured and estimated stock")
+    assert(#history.usage_keys>0,"Active iron plate must have usage history")
+    assert(find_named(panel,"ssk_history_stock_camera"),"Item History needs a native stock plot")
+  else
+    assert(not history.stock_supported and #history.stock==0,"Fluid must not show measured chest stock")
+  end
+  after_capture=function()
+    if case.long_period then
+      choose_period(2)
+      items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
+    end
+    click(find_named(split.ssk_balance_focus,"ssk_bal_flow"))
+    assert(items.valid and find_node(split.ssk_balance_focus),"Returning to Flow lost the selection or list")
+    assert(not panel.visible,"Flow left History visible")
+  end
+  log("BALANCE HISTORY PASS "..case.name.." measured="..measured.." estimated="..estimated)
+end
+
+local function send_fixture_cargo(fixture, name, count, offset)
+  local ground, force=game.surfaces.nauvis,game.forces.player
+  local spawn=force.get_spawn_position(ground)
+  local position=assert(ground.find_non_colliding_position("cargo-pod-container",{spawn.x+offset,spawn.y},40,1))
+  local pod=assert(fixture.hub.create_cargo_pod())
+  assert(pod.get_inventory(defines.inventory.cargo_unit).insert{name=name,count=count}==count,"Transfer fixture pod is too small")
+  pod.cargo_pod_destination={type=defines.cargo_destination.surface,surface=ground,position=position,land_at_exact_position=true}
+end
+
+local function start_transfer_fixture()
+  local ground, force=game.surfaces.nauvis, game.forces.player
+  local platform=assert(force.create_space_platform{
+    name="Fixture Freighter",planet="nauvis",starter_pack="space-platform-starter-pack"})
+  local hub=assert(platform.apply_starter_pack(true))
+  platform.space_location="nauvis"
+  local fixture={hub=hub}
+  send_fixture_cargo(fixture,"copper-plate",50,20)
+  return fixture
+end
+
+local function exercise_transfers(UI, player, root, us)
+  local hub=transfer_fixture.hub
+  local from,to
+  local amounts={}
+  for _,entry in ipairs(Transfers.query(player.force,game.tick,us.period).rows) do
+    if entry.from.surface==hub.surface and entry.to.surface==game.surfaces.nauvis then
+      from,to=entry.from.id,entry.to.id
+      amounts[entry.material]=entry.count
+    end
+  end
+  assert(from and to and amounts["copper-plate"]==50 and amounts["steel-plate"]==41,
+    "Native cargo arrivals did not produce exact transfer totals")
+  local panel=root.ssk_inner.ssk_tabs.content_transfers
+  assert(not root.ssk_window_bar.ssk_surface_picker.visible,"Transfers needs its own origin and destination scope")
+  local function select(name,key)
+    local picker=assert(find_named(panel,name),"Transfer filter is missing")
+    local index=1
+    if key then
+      index=nil
+      for i,choice in pairs(picker.tags.keys) do
+        if choice==key then index=i; break end
+      end
+      assert(index,"Transfer filter does not contain its recorded cargo")
+    end
+    picker.selected_index=index
+    assert(UI.on_selection{player_index=player.index,element=picker},"Transfer selection was not handled")
+  end
+  select("ssk_transfer_from",from)
+  select("ssk_transfer_to",to)
+  select("ssk_transfer_material","copper-plate")
+  assert(us.transfers.from==from and us.transfers.to==to and us.transfers.material=="copper-plate",
+    "Transfer filters lost their selection")
+  local query=Transfers.query(player.force,game.tick,us.period,us.transfers)
+  assert(#query.rows==1 and query.items==50 and query.arrivals==1,"Transfer filters selected the wrong cargo")
+  local filter=assert(find_named(panel,"ssk_transfer_from"))
+  UI.refresh(player,true)
+  assert(filter.valid,"Live Transfers refresh replaced the filter")
+  select("ssk_transfer_material")
+  log("TRANSFERS NATIVE PASS two delivered pods, exact counts and all filters")
+end
+
 local function verify_usage(element, root, result)
   local key=element.tags and element.tags.ssk_rate
   if key and key:match("#use$") then
@@ -213,6 +372,95 @@ local function verify_usage(element, root, result)
     result[key]=element.caption
   end
   for _,child in pairs(element.children) do verify_usage(child,root,result) end
+end
+
+local function exercise_diagnostics(UI, player, root, us, case)
+  local function click(element)
+    assert(UI.on_click{player_index=player.index,element=assert(element)}, "Diagnostic click was not handled")
+  end
+  if case.watch then
+    local watch=find_ui(root,"watch")
+    assert(watch and not watch.enabled, "Watch should require an individual favourite")
+    us.bal_favs={items={[case.focus]=true},groups={}}
+    UI.refresh(player)
+    watch=find_ui(root,"watch")
+    assert(watch.enabled and watch.style.name=="tool_button", "Watch must use an enabled vanilla icon control")
+    click(watch)
+    local dialog=assert(player.gui.screen.ssk_watch,"Watch dialog did not open")
+    UI.refresh(player,true)
+    assert(dialog.valid,"Live update closed the watch dialog")
+    local function set_minimum(element)
+      if element.name=="ssk_watch_made" then element.text="99999"; return true end
+      for _,child in pairs(element.children) do if set_minimum(child) then return true end end
+    end
+    assert(set_minimum(dialog),"Missing minimum output field")
+    after_capture=function()
+      click(find_ui(dialog,"watch_apply"))
+      assert(not dialog.valid and root.valid,"Applying a watch must close only the dialog")
+      assert(find_ui(root,"watch").toggled,"Watch was not saved")
+      log("BALANCE DIAGNOSTICS PASS watch configuration")
+    end
+  elseif case.sort then
+    local sort=assert(find_ui(root,"bal_sort"),"Missing Balance sort selector")
+    sort.selected_index=case.sort
+    assert(UI.on_selection{player_index=player.index,element=sort}, "Urgency sort selection was not handled")
+    assert(us.bal_sort==({[3]="deficit",[4]="empty"})[case.sort],"Urgency sort did not save")
+    local list=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root
+    UI.refresh(player,true)
+    assert(list.valid and find_ui(root,"bal_sort").selected_index==case.sort,"Urgency sort changed on live refresh")
+    log("BALANCE DIAGNOSTICS PASS sort "..us.bal_sort)
+  elseif case.watch_warning then
+    local function warning_caption(caption)
+      if caption=="[img=utility/warning_icon] " then return true end
+      if type(caption)=="table" then
+        for _,part in ipairs(caption) do if warning_caption(part) then return true end end
+      end
+    end
+    local function has_warning(element)
+      if element.type=="label" and warning_caption(element.caption) then return true end
+      for _,child in pairs(element.children) do if has_warning(child) then return true end end
+    end
+    assert(has_warning(root),"A sustained watch breach must show on the favourite row")
+    log("BALANCE DIAGNOSTICS PASS sustained warning")
+  elseif case.machine then
+    local machine_action="ssk_machine_status"
+    click(find_ui(root,"machine_status"))
+    local status=assert(player.gui.screen.ssk_machine_status,"Machine status did not open")
+    local target=assert(find_ui(status,"preview",machine_action),"No action for the sampled fixture machine")
+    assert(target.enabled and target.parent.ssk_machine_count.caption=="1" and target.tags.recipe=="iron-gear-wheel",
+      "Wrong stalled recipe or count")
+    local age=assert(find_ui(status,"iron-gear-wheel","ssk_machine_age"),"Sample age is missing")
+    assert(age.tags.sample_tick<=game.tick and age.tags.sample_tick>=game.tick-600,"Fixture sample is stale")
+    if case.machine=="preview" then
+      click(target)
+      local preview=assert(player.gui.screen.ssk_machine_preview,"Map preview did not open")
+      local slider=assert(find_ui(preview,"zoom",machine_action),"Map preview is missing its zoom slider")
+      local function find_camera(element)
+        if element.name=="ssk_machine_camera" then return element end
+        for _,child in pairs(element.children) do local result=find_camera(child); if result then return result end end
+      end
+      local camera=assert(find_camera(preview),"Map preview is missing its camera")
+      assert(camera.surface_index==diagnostic_machine.surface.index,"Preview has the wrong surface")
+      local zoom=camera.zoom
+      slider.slider_value=slider.get_slider_minimum()
+      if slider.slider_value==zoom then slider.slider_value=slider.get_slider_maximum() end
+      assert(UI.on_value_changed{player_index=player.index,element=slider},"Preview zoom change was not handled")
+      assert(camera.zoom~=zoom,"Zoom slider did not change the map preview")
+      assert(UI.on_closed{player_index=player.index,element=root},"Preview Esc was not handled")
+      assert(not preview.valid and status.valid and root.valid,"Esc did not return to machine status")
+      click(target)
+      preview=assert(player.gui.screen.ssk_machine_preview)
+      after_capture=function()
+        click(find_ui(preview,"jump",machine_action))
+        assert(not preview.valid and not status.valid and not root.valid,"Map jump must close the Production Flow windows")
+        assert(player.centered_on==diagnostic_machine and player.controller_type==defines.controllers.remote,
+          "Map jump did not center remote view on the fixture machine")
+        log("BALANCE DIAGNOSTICS PASS preview zoom, Esc and map jump")
+      end
+    else
+      log("BALANCE DIAGNOSTICS PASS sampled stalled recipe")
+    end
+  end
 end
 
 function T.tick(UI, Sampler)
@@ -242,16 +490,47 @@ function T.tick(UI, Sampler)
     end
     return
   end
+  if after_capture and not capture then
+    local callback=after_capture
+    after_capture=nil
+    callback()
+  end
   if elapsed == 0 then
     if mode=="audit" then audit_stock(Sampler) end
-    game.speed = 1
+    if mode=="diagnostics" then
+      local surface=game.create_surface("ssk-diagnostics-fixture",{width=96,height=96,seed=471})
+      surface.request_to_generate_chunks({0,0},1)
+      surface.force_generate_chunk_requests()
+      surface.set_tiles{{name="stone-path",position={0,0}}}
+      game.forces.player.chart(surface,{{-32,-32},{32,32}})
+      diagnostic_machine=assert(surface.create_entity{name="assembling-machine-2",position={0,0},force="player",raise_built=true})
+      diagnostic_machine.set_recipe("iron-gear-wheel")
+    end
+    if mode=="transfer-view" then transfer_fixture=start_transfer_fixture() end
+    game.speed = mode=="transfer-view" and 8 or 1
     local _, seconds = Sampler.rates(game.surfaces.nauvis.index, 600)
     if mode~="warmup" then assert(seconds == 600, "Ten-minute history did not survive save/reload")
     else assert(seconds<600,"Warm-up case must use a fresh installation's history") end
     Sampler.on_stock(game.tick)
     log("SANKEY SAVE RELOAD HISTORY OK")
   end
+  if mode=="transfer-view" then
+    if elapsed==520 then send_fixture_cargo(transfer_fixture,"steel-plate",41,40) end
+    if elapsed<1800 then return end
+    game.speed=1
+  end
   if not Sampler.stock_known(game.surfaces.nauvis.index) then return end
+  if mode=="history-view" and not stock_fixture then
+    -- The warmed fixture supplies real rates. Two controlled historical scan
+    -- results let this native view exercise interpolation without waiting for scans.
+    local scope=game.surfaces.nauvis.index
+    local latest=storage.stock[#storage.stock]
+    local count=(latest.s[scope] or {})["item/iron-plate"] or 0
+    table.insert(storage.stock,1,{tick=game.tick-530*60,s={[scope]={["item/iron-plate"]=count+1600}}})
+    table.insert(storage.stock,2,{tick=game.tick-210*60,s={[scope]={["item/iron-plate"]=count+750}}})
+    stock_fixture=true
+    log("BALANCE HISTORY fixture uses real production rates and two controlled older stock samples")
+  end
   if mode=="audit" and not Sampler.stock_known(audit_fixture.surface) then return end
   if selection and selection.click_tick and game.tick>=selection.click_tick then
     -- Wait until the before screenshot and native scroll layout have rendered.
@@ -280,6 +559,9 @@ function T.tick(UI, Sampler)
     assert(player.gui.screen.ssk_main, "Missing native GUI")
     if player.gui.screen.ssk_help then player.gui.screen.ssk_help.bring_to_front()
     elseif player.gui.screen.ssk_material_picker then player.gui.screen.ssk_material_picker.bring_to_front()
+    elseif player.gui.screen.ssk_watch then player.gui.screen.ssk_watch.bring_to_front()
+    elseif player.gui.screen.ssk_machine_preview then player.gui.screen.ssk_machine_preview.bring_to_front()
+    elseif player.gui.screen.ssk_machine_status then player.gui.screen.ssk_machine_status.bring_to_front()
     else player.gui.screen.ssk_main.bring_to_front() end
     if mode=="scroll" and cases[step].bottom then
       -- Live sampling can reorder rows between setup and capture. Exercise the
@@ -319,6 +601,7 @@ function T.tick(UI, Sampler)
     end
     return
   end
+  if mode=="diagnostics" and cases[step+1] and cases[step+1].watch_warning and elapsed<900 then return end
   step = step+1
   local c = cases[step]
   if not c then
@@ -337,7 +620,8 @@ function T.tick(UI, Sampler)
   UI.open(player)
   assert(not commands.commands["sankey-export"] and not commands.commands["sankey-probe"] and not commands.commands["sankey-test"],"Release has development commands")
   assert(not settings.global["ssk-auto-export-minutes"] and not player.mod_settings["ssk-debug-tabs"],"Release has development settings")
-  assert(#player.gui.screen.ssk_main.ssk_inner.ssk_tabs.tabs==3,"Release must have only Balance, Focus and Full Sankey")
+  local tabs=player.gui.screen.ssk_main.ssk_inner.ssk_tabs
+  assert(#tabs.tabs==4 and tabs.content_transfers,"Release needs Balance, Focus, Full Sankey and Transfers")
   local us = storage.ui[player.index]
   assert(us.period == 600, "10m is not the initial default")
   us.surface, us.tab_id, us.view = c.surface, c.tab, c.view or "overview"
@@ -346,6 +630,14 @@ function T.tick(UI, Sampler)
   if mode=="scroll" or mode=="selection" or mode=="picker" or mode=="ux" or mode=="warmup" then
     us.bal_filter="all"; us.bal_details=c.details or false; us.bal_sort=c.groups and "groups" or "priority"; us.bal_group=nil
     us.bal_favs=c.favs or nil
+  end
+  if mode=="diagnostics" then
+    us.bal_filter="all"
+    if c.watch then us.bal_favs,us.bal_watches=nil,nil end
+  end
+  if mode=="history-view" then
+    us.bal_filter,us.bal_group="all",nil
+    us.bal_favs={items={[c.focus]=true},groups={}}
   end
   if (mode=="full" or mode=="names") then
     us.preset=c.preset or "all"; us.sel=nil; us.layout_snapshot=nil; us.auto_rank=nil
@@ -368,7 +660,12 @@ function T.tick(UI, Sampler)
     if (mode=="full" or mode=="names") then fx.show_labels=true; fx.focus_steps=2; fx.layout_snapshot=nil; fx.auto_rank=nil end
   end
   UI.open(player)
-  assert(us.sidx==game.surfaces[c.surface].index,"Wrong rendered surface")
+  if c.tab~="transfers" then assert(us.sidx==game.surfaces[c.surface].index,"Wrong rendered surface") end
+  if mode=="transfer-view" then
+    exercise_transfers(UI,player,player.gui.screen.ssk_main,us)
+    capture=c.name
+    return
+  end
   if c.advanced then
     UI.on_click{player_index=player.index,element=find_action(player.gui.screen.ssk_main,"chart_settings")}
     assert(us.settings_open and player.gui.screen.ssk_main.ssk_inner.ssk_tabs["content_"..c.tab].ssk_chart.ssk_settings,"Chart settings did not open")
@@ -633,6 +930,11 @@ function T.tick(UI, Sampler)
       assert(root.ssk_window_bar.ssk_history.visible,"Fresh-install history indicator missing")
       assert(not settings.global["ssk-auto-export-minutes"],"Release must not declare development export settings")
     end
+  end
+  if mode=="diagnostics" then
+    exercise_diagnostics(UI,player,player.gui.screen.ssk_main,us,c)
+  elseif mode=="history-view" then
+    exercise_history(UI,player,player.gui.screen.ssk_main,us,c)
   end
   capture = c.name
 end

@@ -110,6 +110,25 @@ function C.begin(player, W, H)
       left_top = wp(x, y), right_bottom = wp(x + w, y + h), color = color })
   end
 
+  function P.line(x1, y1, x2, y2, color, width, dashed, offset)
+    return keep(rendering.draw_line { surface = s, players = players, color = color, width = width,
+      from = wp(x1, y1), to = wp(x2, y2), gap_length = dashed and 3 * PX or 0,
+      dash_length = dashed and 5 * PX or 0, dash_offset = dashed and (offset or 0) * PX or 0 })
+  end
+
+  function P.text(x, y, caption, color, alignment)
+    return keep(rendering.draw_text { surface = s, players = players, color = color,
+      text = caption, target = wp(x, y), font = "default-small",
+      alignment = alignment, vertical_alignment = "middle" })
+  end
+
+  function P.polygon(points, color)
+    if #points < 3 then return nil end
+    local vertices = {}
+    for i, point in ipairs(points) do vertices[i] = wp(point[1], point[2]) end
+    return keep(rendering.draw_polygon { surface = s, players = players, vertices = vertices, color = color })
+  end
+
   -- S-curve ribbon from (xa, ya) to (xb, yb), constant vertical thickness t.
   -- Triangle strip: top/bottom edge points interleaved.
   function P.curve(xa, xb, ya, yb, t, color, t1)
@@ -130,10 +149,7 @@ function C.begin(player, W, H)
 
   function P.objects() return st.objs end
   function P.ribbon(pieces, color)
-    local vertices = {}
-    for _, point in ipairs(Geometry.mesh(pieces)) do vertices[#vertices + 1] = wp(point[1], point[2]) end
-    if #vertices < 3 then return nil end
-    return keep(rendering.draw_polygon { surface = s, players = players, vertices = vertices, color = color })
+    return P.polygon(Geometry.mesh(pieces), color)
   end
   function P.primitive(p, color)
     if p.kind == "bar" then return P.rect(p.x, p.y, p.w, p.h, color) end
@@ -148,10 +164,10 @@ function C.begin(player, W, H)
 end
 
 -- camera element sized to the drawing, top-left at layout (0, 0)
-function C.camera_spec(player, P)
+function C.camera_spec(player, P, top, height)
   return {
     type = "camera",
-    position = { P.ox + P.W * PX / 2, P.oy + P.H * PX / 2 },
+    position = { P.ox + P.W * PX / 2, P.oy + ((top or 0) + (height or P.H) / 2) * PX },
     surface_index = P.surface.index,
     zoom = player.display_scale,
   }

@@ -10,6 +10,7 @@ local Gr = require("scripts.groups")
 local Canvas = require("scripts.canvas")
 local Geometry = require("scripts.ribbon_geometry")
 local MaterialPicker = require("scripts.material_picker")
+local Watch = require("scripts.watch")
 
 local SK = {}
 local hovered_nodes = {}
@@ -185,8 +186,8 @@ end
 -- later rows are tool-button height.
 local STRIP_PAD_X, STRIP_PAD_Y, ROW_GAP, FIRST_ROW_H, ROW_H = 12, 8, 8, 40, 28
 
-local function option_row(bar)
-  local row = bar.add { type = "flow", direction = "horizontal" }
+local function option_row(bar, name)
+  local row = bar.add { type = "flow", name = name, direction = "horizontal" }
   row.style.vertical_align = "center"
   row.style.horizontal_spacing = 8
   row.style.height = ROW_H
@@ -199,7 +200,7 @@ local function right_group(row, us)
   spacer.style.horizontally_stretchable = true
   spacer.style.minimal_width = 16
   spacer.style.height = 1
-  local right = option_row(row)
+  local right = option_row(row, "ssk_toolbar_actions")
   right.tags = { ssk_toolbar_side = "right" }
   return right
 end
@@ -401,14 +402,15 @@ end
 -- as vanilla panels put their controls.
 local function toolbar_strip(bar, us)
   bar.clear()
-  local strip = bar.add { type = "frame", style = "subheader_frame", direction = "vertical", tags = { ssk_primary_controls = true } }
+  local strip = bar.add { type = "frame", name = "ssk_toolbar_strip", style = "subheader_frame",
+    direction = "vertical", tags = { ssk_primary_controls = true } }
   strip.style.height = SK.toolbar_height(us)
   strip.style.horizontally_stretchable = true
   strip.style.left_padding, strip.style.right_padding = STRIP_PAD_X, STRIP_PAD_X
   strip.style.top_padding, strip.style.bottom_padding = STRIP_PAD_Y, STRIP_PAD_Y
-  local rows = strip.add { type = "flow", direction = "vertical" }
+  local rows = strip.add { type = "flow", name = "ssk_toolbar_rows", direction = "vertical" }
   rows.style.vertical_spacing = ROW_GAP
-  local first = option_row(rows)
+  local first = option_row(rows, "ssk_toolbar_main")
   first.style.height = FIRST_ROW_H
   return rows, first
 end
@@ -419,9 +421,28 @@ local function focus_toolbar(bar, us, player)
   -- Balance picks its material from the list beside the chart, so only Focus keeps history.
   if not us.neighborhood then history_controls(main, us) end
   local actions = right_group(main, us)
+  if us.neighborhood then
+    actions.add { type = "sprite-button", name = "ssk_watch_action", style = "tool_button", sprite = "utility/warning",
+      tags = { ssk_ui = "watch" }, tooltip = "Configure this material's watch" }
+    actions.add { type = "sprite-button", name = "ssk_machine_action", style = "tool_button", sprite = "utility/map",
+      tags = { ssk_ui = "machine_status" }, tooltip = "Inspect machines that make or use this material" }
+  end
   zoom_buttons(actions, true)
   label_toggle(actions, us)
   settings_button(actions, us)
+end
+
+function SK.update_balance_actions(panel, us, key)
+  local bar = panel.ssk_bar
+  local strip = bar and bar.ssk_toolbar_strip
+  local actions = strip and strip.ssk_toolbar_rows.ssk_toolbar_main.ssk_toolbar_actions
+  if not actions then return end
+  local watch, machines = actions.ssk_watch_action, actions.ssk_machine_action
+  watch.enabled = Watch.available(us, key)
+  watch.toggled = watch.enabled and Watch.get(us, us.sidx, key) ~= nil
+  watch.tooltip = watch.enabled and "Configure this material's watch on the selected surface"
+    or "Star this material to configure a watch"
+  machines.enabled = key ~= nil
 end
 
 local function build_toolbar(bar, us, L, player)

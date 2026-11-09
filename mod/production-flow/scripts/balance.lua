@@ -111,7 +111,7 @@ local function status_for(reference, net_fraction, producer_utilisation, consume
 end
 
 ---@return number|nil seconds Prefer a measured stock drain, then a negative net rate.
-local function time_to_empty(stock, net)
+function B.time_to_empty(stock, net)
   if stock and stock.count > 0 then
     local drain = (stock.per_min and stock.per_min < 0) and (-stock.per_min / 60)
       or ((net < 0) and -net or 0)
@@ -138,7 +138,7 @@ local function material_row(key, residual, graph, model, capacity, used, stock, 
       key = key, prod = produced, cons = consumed, net = net, netp = net_fraction,
       pu = producer_utilisation, cu = consumer_utilisation,
       stock = entry and entry.count, trend = entry and entry.per_min,
-      eta = time_to_empty(entry, net),
+      eta = B.time_to_empty(entry, net),
       status = status_for(reference, net_fraction, producer_utilisation, consumer_utilisation, entry),
     }
   end
@@ -152,10 +152,31 @@ local function row_before(a, b)
   return a.key < b.key
 end
 
+local SORT_VALUES = {
+  deficit = function(row) return row.net < 0 and row.net or math.huge end,
+  empty = function(row) return row.eta or math.huge end,
+}
+
+-- Order an existing section by measurement, preserving its priority order for ties.
+function B.sort(rows, order)
+  local value = SORT_VALUES[order]
+  if not value or #rows < 2 then return end
+  local position = {}
+  for i, row in ipairs(rows) do position[row] = i end
+  table.sort(rows, function(a, b)
+    local va, vb = value(a), value(b)
+    if va ~= vb then return va < vb end
+    return position[a] < position[b]
+  end)
+end
+
 ---@param sidx number|nil Surface index, passed through to the model and samplers.
 ---@param period number|nil Model sampling period, passed through unchanged.
 ---@return table[] rows Sorted by status, descending absolute netp, then material key.
 ---@return number seconds Model's measured window length.
+---@return table<string, ProductionFlowStockEntry> stock Physical stock measurements.
+---@return boolean known Whether items missing from stock can be treated as empty.
+---@return table<string, table> totals Measured production and consumption rates per second.
 function B.rows(sidx, period)
   local graph = Graph.get()
   local model = Model.build(sidx, period)
@@ -170,7 +191,7 @@ function B.rows(sidx, period)
     if row then rows[#rows + 1] = row end
   end
   table.sort(rows, row_before)
-  return rows, model.seconds
+  return rows, model.seconds, stock, known, model.rates and model.rates.nodes or model.residuals
 end
 
 return B

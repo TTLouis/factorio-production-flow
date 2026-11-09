@@ -4,6 +4,7 @@ local Graph = require("scripts.graph")
 local Sampler = require("scripts.sampler")
 local UI = require("scripts.ui")
 local Canvas = require("scripts.canvas")
+local Transfers = require("scripts.transfers")
 
 local STATS_EVERY = 60
 local UI_REFRESH_EVERY = 300
@@ -57,6 +58,14 @@ end
 script.on_event(defines.events.on_entity_cloned, function(e) Sampler.add(e.destination) end, build_filter)
 -- removals are handled lazily by the sampler (invalid entities are dropped on visit)
 
+local track_cargo = Transfers.available()
+if track_cargo then
+  script.on_event(defines.events.on_cargo_pod_finished_ascending, Transfers.on_departed)
+  script.on_event(defines.events.on_cargo_pod_finished_descending, Transfers.on_landed)
+  script.on_event(defines.events.on_cargo_pod_delivered_cargo, Transfers.on_delivered)
+  script.on_event(defines.events.on_pre_surface_deleted, Transfers.on_surface_deleted)
+end
+
 ---------------------------------------------------------------------------
 -- ticking
 ---------------------------------------------------------------------------
@@ -66,7 +75,10 @@ end)
 
 script.on_nth_tick(STATS_EVERY, function(e) Sampler.on_stats(e.tick) end)
 script.on_nth_tick(UI_REFRESH_EVERY, function() UI.auto_refresh() end)
-script.on_nth_tick(600, function(e) Sampler.on_stock(e.tick) end)
+script.on_nth_tick(600, function(e)
+  Sampler.on_stock(e.tick)
+  if track_cargo then Transfers.on_housekeeping(e.tick) end
+end)
 
 ---------------------------------------------------------------------------
 -- GUI events
@@ -82,6 +94,7 @@ script.on_event(defines.events.on_gui_text_changed, function(e) UI.on_text_chang
 script.on_event(defines.events.on_string_translated, function(e) UI.on_string_translated(e) end)
 script.on_event(defines.events.on_gui_selected_tab_changed, function(e) UI.on_tab_changed(e) end)
 script.on_event(defines.events.on_gui_selection_state_changed, function(e) UI.on_selection(e) end)
+script.on_event(defines.events.on_gui_value_changed, function(e) UI.on_value_changed(e) end)
 script.on_event(defines.events.on_gui_hover, function(e)
   if UI.on_hover(e, true) then return end
 end)
@@ -99,6 +112,7 @@ local function display_changed(e)
 end
 script.on_event(defines.events.on_player_display_resolution_changed, display_changed)
 script.on_event(defines.events.on_player_display_scale_changed, display_changed)
+script.on_event(defines.events.on_player_changed_surface, function(e) UI.on_surface_changed(game.get_player(e.player_index)) end)
 
 ---------------------------------------------------------------------------
 -- commands

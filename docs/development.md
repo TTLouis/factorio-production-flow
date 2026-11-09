@@ -2,6 +2,9 @@
 
 Install `requirements-dev.txt`, then run `python tests/run_lua.py`.
 The offline suite uses synthetic data and does not need a Factorio installation.
+The focused suites run separately with `python tests/run_lua.py` followed by
+`tests/history_data_test.lua`, `tests/transfers_test.lua` or
+`tests/machine_status_test.lua`.
 
 Optional native checks (Windows, a local licensed Factorio installation required):
 
@@ -18,10 +21,15 @@ phases are `ux` (controls and help), `audit` (network reservations versus physic
 stored items), `focus` (active and empty Focus flows, both renderers and Back),
 `selection` (scrolled Balance row selection before/after captures), `picker` (combined material search, Back/Forward, trail and Clear
 history, compact/expanded Balance and Focus controls, framed list headers and
-grouped activity counts), and `warmup` (fresh-install defaults and incomplete history).
+grouped activity counts), `warmup` (fresh-install defaults and incomplete history),
+`diagnostics` (Balance sort controls, watches, sampled machine status, preview
+zoom and remote view), `history-view` (Balance's Flow and History selector,
+material and metric changes, shared time axes, and measured and estimated stock),
+and `transfer-view` (native cargo arrivals and route and material filters).
 Phase-specific evidence records native image hashes and the clean archive hash.
-Release packages contain only the Balance, Focus and Full Sankey views. Local
-diagnostic and render fixtures live under `tests/development/`; the native harness
+Release packages contain Balance with Flow and History, Focus, Full Sankey and
+Transfers. Local diagnostic and render fixtures live under `tests/development/`.
+The native harness
 injects its diagnostic helper into an isolated test copy after creating the clean
 candidate archive. These helpers and test hooks are excluded from release ZIPs.
 

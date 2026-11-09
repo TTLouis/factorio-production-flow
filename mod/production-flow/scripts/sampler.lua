@@ -11,6 +11,26 @@ local ChestStock = require("scripts.chest_stock")
 local TYPES = { "assembling-machine", "furnace", "rocket-silo" }
 local TYPESET = { ["assembling-machine"] = true, furnace = true, ["rocket-silo"] = true }
 local BIN_TICKS = 60
+local STATUS_TICKS = 300
+local PREVIEW_CHECKS = 32
+
+local entity_status = defines and defines.entity_status
+local status_categories = {}
+if entity_status then
+  local categories = {
+    input = { "item_ingredient_shortage", "fluid_ingredient_shortage", "no_ingredients",
+              "input_fluid_too_cold", "input_fluid_too_hot" },
+    output = { "full_output", "full_burnt_result_output", "waiting_for_space_in_destination",
+               "waiting_for_space_in_platform_hub" },
+    power = { "no_power", "low_power", "no_fuel", "low_temperature", "no_input_fluid" },
+  }
+  for category, names in pairs(categories) do
+    for _, name in ipairs(names) do
+      local status = entity_status[name]
+      if status ~= nil then status_categories[status] = category end
+    end
+  end
+end
 
 -- Saved-state keys remain compact for compatibility with existing saves.
 -- Material keys use "item/<name>" or "fluid/<name>"; recipe keys are bare names.
@@ -24,6 +44,11 @@ local BIN_TICKS = 60
 ---@field silo boolean? Whether rocket-part accounting applies.
 ---@field rp number? Previous rocket_parts counter.
 ---@field req number? Rocket parts required per rocket.
+---@field status_due integer? Earliest tick to observe status again unless the recipe changes.
+---@field status_row table? Shared recipe status aggregate for this machine's last observation.
+---@field status_surface integer? Last observed surface for status.
+---@field status_force integer? Last observed force for status.
+---@field issue string? Last observed category of production issue.
 
 ---@class ProductionFlowRecipeSample
 ---@field c number Completed crafts, including productivity bonus crafts.
@@ -70,11 +95,19 @@ local function nbins()
   return math.max(600, settings.global["ssk-window-seconds"].value) + 1
 end
 
+local function init_machine_status()
+  if not storage.machine_status then
+    storage.machine_status = {} -- surface -> force -> recipe
+    storage.machine_status_partial_pass = storage.mcursor > 1 or nil
+  end
+end
+
 function Sm.init()
   ChestStock.init()
   storage.machines = storage.machines or {} -- unit_number -> {e, u, s, r, pf}
   storage.mlist = storage.mlist or {}       -- array of unit_numbers (round-robin order)
   storage.mcursor = storage.mcursor or 1
+  init_machine_status()
   storage.stat_last = storage.stat_last or {} -- [surface][key] = cumulative {i, o}
   storage.cycle = storage.cycle or { start = game.tick, last = 0 }
   if storage.nbins ~= nbins() or not storage.bins then
@@ -193,11 +226,73 @@ end
 function Sm.rescan()
   ChestStock.rescan()
   storage.machines, storage.mlist, storage.mcursor = {}, {}, 1
+  storage.machine_status, storage.machine_status_ready, storage.machine_status_partial_pass = {}, nil, nil
   for _, s in pairs(game.surfaces) do
     for _, e in pairs(s.find_entities_filtered { type = TYPES }) do Sm.add(e) end
   end
   storage.cycle = { start = game.tick, last = 0 }
   return #storage.mlist
+end
+
+local function remove_issue(row, category, unit)
+  if not category then return end
+  local issue = row.issues[category]
+  issue.count = issue.count - 1
+  issue.units[unit] = nil
+  if issue.latest_unit == unit then issue.latest_unit = nil end
+  if issue.count == 0 then row.issues[category] = nil end
+end
+
+local function remove_observation(rec)
+  local row = rec.status_row
+  if not row then return end
+  remove_issue(row, rec.issue, rec.u)
+  row.observed = row.observed - 1
+  if row.observed == 0 then
+    local surfaces = storage.machine_status
+    local forces = surfaces[rec.status_surface]
+    local recipes = forces[rec.status_force]
+    recipes[rec.r] = nil
+    if not next(recipes) then forces[rec.status_force] = nil end
+    if not next(forces) then surfaces[rec.status_surface] = nil end
+  end
+  rec.status_row, rec.status_surface, rec.status_force, rec.issue = nil, nil, nil, nil
+end
+
+local function observe_status(rec, e, recipe, tick)
+  rec.status_due = tick + STATUS_TICKS
+  if not recipe then
+    remove_observation(rec)
+    return
+  end
+  local surface, force = e.surface_index, e.force_index
+  if rec.r ~= recipe or rec.status_surface ~= surface or rec.status_force ~= force then
+    remove_observation(rec)
+  end
+  local row = rec.status_row
+  if not row then
+    local forces = storage.machine_status[surface]
+    if not forces then forces = {}; storage.machine_status[surface] = forces end
+    local recipes = forces[force]
+    if not recipes then recipes = {}; forces[force] = recipes end
+    row = recipes[recipe]
+    if not row then row = { observed = 0, issues = {} }; recipes[recipe] = row end
+    row.observed = row.observed + 1
+    rec.status_row, rec.status_surface, rec.status_force = row, surface, force
+  end
+  row.sample_tick = tick
+  local category = status_categories[e.status]
+  if category ~= rec.issue then
+    remove_issue(row, rec.issue, rec.u)
+    if category then
+      local issue = row.issues[category]
+      if not issue then issue = { count = 0, units = {} }; row.issues[category] = issue end
+      issue.count = issue.count + 1
+      issue.units[rec.u] = true
+    end
+    rec.issue = category
+  end
+  if category then row.issues[category].latest_unit = rec.u end
 end
 
 ---------------------------------------------------------------------------
@@ -207,6 +302,7 @@ function Sm.on_tick(tick)
   ChestStock.tick(tick)
   local list = storage.mlist
   if #list == 0 then return end
+  init_machine_status() -- Also supports loading a save made before status sampling was added.
   local per = settings.global["ssk-entities-per-tick"].value
   local bin = cur_bin(tick)
   local cur = storage.mcursor
@@ -219,11 +315,17 @@ function Sm.on_tick(tick)
       cur = 1
       storage.cycle.last = tick - storage.cycle.start
       storage.cycle.start = tick
+      if storage.machine_status_partial_pass then
+        storage.machine_status_partial_pass = nil
+      elseif not storage.machine_status_ready then
+        storage.machine_status_ready = true
+      end
     end
     local u = list[cur]
     local rec = machines[u]
     local e = rec and rec.e
     if not (e and e.valid) then
+      if rec then remove_observation(rec) end
       machines[u] = nil
       list[cur] = list[n]
       list[n] = nil
@@ -244,6 +346,9 @@ function Sm.on_tick(tick)
           a.c = a.c + d
           a.p = a.p + d * (e.productivity_bonus or 0)
         end
+      end
+      if entity_status and (r ~= rec.r or not rec.status_due or tick >= rec.status_due) then
+        observe_status(rec, e, r, tick)
       end
       rec.r, rec.pf = r, pf
       rec.spd = e.crafting_speed
@@ -370,6 +475,44 @@ function Sm.machine_counts(sidx)
     if rec.r and (not sidx or rec.s == sidx) then m[rec.r] = (m[rec.r] or 0) + 1 end
   end
   return m
+end
+
+-- Read-only view of the latest staggered observations, with first-pass state.
+function Sm.machine_status(sidx, force)
+  local surfaces = storage.machine_status
+  local forces = surfaces and surfaces[sidx]
+  local warming = not storage.machine_status_ready and storage.mlist and #storage.mlist > 0
+  return forces and forces[force], warming
+end
+
+function Sm.status_machine(unit, sidx, force, recipe, category)
+  local rec = storage.machines[unit]
+  local e = rec and rec.e
+  if e and e.valid and e.surface_index == sidx and e.force_index == force
+     and status_categories[e.status] == category and Sm.current_recipe(e) == recipe then
+    return e
+  end
+end
+
+function Sm.find_status_machine(sidx, force, recipe, category)
+  local recipes = Sm.machine_status(sidx, force)
+  local row = recipes and recipes[recipe]
+  local issue = row and row.issues[category]
+  if not issue then return end
+  local latest = issue.latest_unit
+  if latest then
+    local e = Sm.status_machine(latest, sidx, force, recipe, category)
+    if e then return e end
+  end
+  local checked = 0
+  for unit in pairs(issue.units) do
+    if unit ~= latest then
+      local e = Sm.status_machine(unit, sidx, force, recipe, category)
+      if e then return e end
+      checked = checked + 1
+      if checked == PREVIEW_CHECKS then return end
+    end
+  end
 end
 
 -- capacity in NORMAL crafts/s per recipe if every machine ran at 100 % (Balance tab)

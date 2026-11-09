@@ -2,7 +2,9 @@ local UI, SK, View = TREQ("scripts.ui"), TREQ("scripts.sankey_ui"), TREQ("script
 local Model = TREQ("scripts.model")
 local player, us = game.players[1], storage.ui[1]
 local resolution, scale = player.display_resolution, player.display_scale
+local group = us.bal_group
 us.tab_id, us.bal_filter, us.bal_details = "balance", "all", false
+us.bal_group = "plates"
 for _, size in ipairs({ { 1920, 1080 }, { 1366, 768 }, { 1280, 720 } }) do
   for _, gui_scale in ipairs({ 1, 1.25, 1.5 }) do
     player.display_resolution, player.display_scale = { width = size[1], height = size[2] }, gui_scale
@@ -14,6 +16,16 @@ for _, size in ipairs({ { 1920, 1080 }, { 1366, 768 }, { 1280, 720 } }) do
     assert(split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items.type == "scroll-pane", "items need independent scrolling")
     assert(split.ssk_balance_table.style.width + split.ssk_balance_focus.style.width + 12 == us.canvas_w, "panes exceed content width")
     local table_root = split.ssk_balance_table.ssk_bal_root
+    local controls = table_root.ssk_bal_controls
+    local pickers, width = {}, (#controls.children - 1) * controls.style.horizontal_spacing
+    for _, child in ipairs(controls.children) do
+      local action = child.tags.ssk_ui
+      if child.type == "drop-down" then pickers[#pickers + 1] = action end
+      width = width + (child.style.width or child.style.minimal_width
+        or (action == "bal_update" and 28) or (action == "bal_details" and 76) or 0)
+    end
+    assert(table.concat(pickers, ",") == "bal_filter,bal_group,bal_sort", "Show, Group and Order must share one row")
+    assert(width <= controls.style.width, "Balance controls must fit with a group selected")
     assert(table_root.ssk_bal_list.ssk_bal_items.horizontal_scroll_policy=="never", "item list must not scroll sideways")
     local t=table_root.ssk_bal_list.ssk_bal_items.ssk_bal_section_1.ssk_bal_table
     local used=(t.column_count-1)*t.style.horizontal_spacing+t.column_count*((t.style.left_cell_padding or 0)+(t.style.right_cell_padding or 0))
@@ -52,6 +64,7 @@ local cyclic = View.build(player, fx, 700, 600)
 assert(cyclic.nodes["item/test-a#input"].ci == 1 and cyclic.nodes["item/test-a#use"].ci == 3, "cycle must keep input and use copies separate")
 Model.build = original_build
 player.display_resolution, player.display_scale = resolution, scale
+us.bal_group = group
 us.bal_fx.focus = "item/electronic-circuit"
 UI.open(player)
 -- The paused inspector stays paused while Balance values continue refreshing.

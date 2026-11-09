@@ -73,6 +73,32 @@ Time to empty divides stock by the drain rate. A negative recent stock trend is
 preferred; otherwise a production deficit supplies the drain estimate. This
 assumes the current drain continues. The UI prefixes estimated times with ≈.
 
+## Balance History
+
+History uses the same measured production counters for the selected material
+and surface. It groups rates into time buckets at the resolution available for
+the selected period. The usage bands estimate the selected material consumed
+to make the three largest identifiable outputs over that period. Each recipe
+contributes once. Ambiguous outputs, smaller consumers and consumption outside
+tracked crafting go into Other uses. The bands add up to measured Used.
+
+Solid stock bars show the counts from completed chest scans. Between adjacent
+scans, estimated bars follow the accumulated Made minus Used rate on that
+surface. The estimate distributes the difference needed to reach the next
+measured count across the interval. Estimates require rate history for the
+interval and stop at the latest completed scan.
+
+## Transfers
+
+Transfers totals confirmed cargo pod deliveries for the player's force by
+origin, destination and item. Each arrival is recorded once and combines item
+qualities. Loading a platform and unloading it later are separate deliveries.
+The view counts items delivered to the destination surface, including overflow
+spilled there by a successful delivery. A station delivery whose manifest could
+have changed through spoilage is skipped. The ledger starts collecting when
+tracking is installed and retains up to ten game hours or 32,768 confirmed
+arrivals, whichever limit it reaches first.
+
 ## Widths, names and grouping
 
 Proportional ribbons use rate-based widths. Compressed ribbons use the square
