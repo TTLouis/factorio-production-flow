@@ -505,27 +505,25 @@ end
 local function exercise_transfers(UI, player, root, us, case)
   local hub=transfer_fixture.hub
   local panel=root.ssk_inner.ssk_tabs.content_transfers
-  assert(not root.ssk_window_bar.ssk_surface_picker.visible,"Transfers needs its own origin and destination scope")
-  local function select(name,key)
-    local picker=assert(find_named(panel,name),"Transfer filter is missing")
-    local index=1
-    if key then
-      index=nil
-      for i,choice in pairs(picker.tags.keys) do
-        if choice==key then index=i; break end
-      end
-      assert(index,"Transfer filter does not contain its recorded cargo")
-    end
-    picker.selected_index=index
-    assert(UI.on_selection{player_index=player.index,element=picker},"Transfer selection was not handled")
+  assert(not root.ssk_window_bar.ssk_surface_picker.visible,"Transfers uses its platform list")
+  local platform_list=assert(find_named(panel,"ssk_transfer_platforms"))
+  local platform_index
+  for i,choice in ipairs(platform_list.tags.keys) do
+    if choice==hub.surface.platform.index then platform_index=i; break end
   end
   local pane=assert(find_named(panel,"ssk_transfer_tabs"),"Missing native Transfers tabbed pane")
   assert(pane.type=="tabbed-pane" and #pane.tabs==2,"Transfers must have native Flow and History tabs")
-  select("ssk_transfer_platforms",hub.surface.platform.index)
+  platform_list.selected_index=assert(platform_index,"Missing fixture platform")
+  assert(UI.on_selection{player_index=player.index,element=platform_list},"Platform selection was not handled")
   pane.selected_tab_index=case.history and 2 or 1
   assert(UI.on_tab_changed{player_index=player.index,element=pane},"Transfers tab change was not handled")
   assert(us.transfers.platform==hub.surface.platform.index and pane.selected_tab_index==(case.history and 2 or 1),
     "Transfers lost the chosen platform or tab")
+  assert(not find_named(panel,"ssk_transfer_from") and not find_named(panel,"ssk_transfer_to")
+    and not find_named(panel,"ssk_transfer_material"),"Obsolete Transfers filter controls are visible")
+  local flow,history=pane.ssk_transfer_flow,pane.ssk_transfer_history
+  assert(flow.style.left_margin==history.style.left_margin and flow.style.right_margin==history.style.right_margin
+    and flow.style.bottom_margin==history.style.bottom_margin,"Transfers tabs must share the same content insets")
   if case.history then
     local result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
     local index,bucket
@@ -568,38 +566,24 @@ local function exercise_transfers(UI, player, root, us, case)
     log("TRANSFERS HISTORY NATIVE PASS direction-specific hover manifests, bucket filtering and pod expansion")
   else
     local result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
-    local function id_of(choices,surface)
-      for id,choice in pairs(choices) do if choice.surface==surface then return id end end
-    end
-    local from=assert(id_of(result.sources,game.surfaces.nauvis))
-    local to=assert(id_of(result.destinations,game.surfaces.fulgora))
-    select("ssk_transfer_from",from)
-    select("ssk_transfer_to",to)
-    assert(us.transfers.from==from and us.transfers.to==to,"Transfers lost directional filters")
-    result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
-    assert(#result.loading==1 and #result.unloading==1 and #result.made.items==0,
-      "Export-only production must respect the unload destination filter")
+    assert(#result.loading>=2 and #result.unloading>=2 and #result.made.items>0,
+      "Default Flow must show the routes and exported onboard materials")
+    local unload_count=result.unloaded.pods
     local production=assert(find_named(panel,"ssk_transfer_show_all_production"),"Missing onboard production toggle")
     local controls=production.parent.parent
     assert(production.type=="checkbox" and not production.state and controls.visible
-      and controls.parent==pane.parent and controls.note.caption:find("unloaded"),
-      "Export-only production must be the default and have a note below the checkbox")
+      and controls.parent==pane.parent and not controls.note and production.tooltip:find("unloaded"),
+      "Export-only production must be the default and explain the rule on hover")
     production.state=true
     assert(UI.on_checked{player_index=player.index,element=production},"Production checkbox was not handled")
     result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
-    assert(us.transfers.show_all_production and result.made.weight>0 and #result.unloading==1,
+    assert(us.transfers.show_all_production and result.made.weight>0 and result.unloaded.pods==unload_count,
       "All production mode must show onboard output without changing deliveries")
-    select("ssk_transfer_from")
-    select("ssk_transfer_to")
-    assert(production.state,"Changing route filters reset the production checkbox")
     production.state=false
     assert(UI.on_checked{player_index=player.index,element=production})
     result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
     assert(#result.made.items>0 and not us.transfers.show_all_production,
       "Export-only production must still show materials unloaded to a matching destination")
-    select("ssk_transfer_material","copper-plate")
-    assert(us.transfers.material=="copper-plate","Transfers lost the chosen material")
-    select("ssk_transfer_material")
     local card=assert(find_named(panel,"ssk_transfer_surface_card"),"Flow is missing ranked surface cards")
     assert(card.tags.transfer_rank_count==5 and card.rank_5 and not card.rank_6 and card.tooltip,
       "Flow must show the first five items with a full manifest on hover")
@@ -609,11 +593,10 @@ local function exercise_transfers(UI, player, root, us, case)
     local tip=serpent.line(arrow.tooltip)
     assert(not arrow.ignored_by_interaction and tip:find("items/s",1,true) and tip:find("electronic-circuit",1,true),
       "Transfer ribbon must list the cargo and rates")
-    local filter=assert(find_named(panel,"ssk_transfer_from"))
     UI.refresh(player,true)
-    assert(filter.valid and pane.valid and production.valid and not production.state,
+    assert(platform_list.valid and pane.valid and production.valid and not production.state,
       "Live Transfers refresh rebuilt or reset the controls")
-    log("TRANSFERS FLOW NATIVE PASS native tabs, platform, production, filters and ribbon tooltips")
+    log("TRANSFERS FLOW NATIVE PASS native tabs, platform, production and ribbon tooltips")
   end
 end
 

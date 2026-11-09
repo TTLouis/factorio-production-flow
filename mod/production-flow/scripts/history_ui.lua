@@ -18,11 +18,13 @@ local ESTIMATED = { 67, 106, 126 }
 local GRID = { 0.25, 0.25, 0.26, 1 }
 local BASELINE = { 0.56, 0.54, 0.52, 1 }
 local TICK_TEXT = { 0.78, 0.75, 0.71, 1 }
+local HOVER_BAND = { 0.15, 0.12, 0.06, 0.24 }
 local PLOT_GAP = 64
 local PLOT_LEFT, PLOT_RIGHT = 52, 24
 local PLOT_TOP, PLOT_BOTTOM = 12, 21
 local STOCK_MARKER_HALF = 3
-local PANEL_INSET, SCROLLBAR_WIDTH, BODY_MARGIN_Y = 8, 12, 4
+local SCROLLBAR_WIDTH, BODY_MARGIN_Y = 12, 4
+local hover_views = {}
 
 local function color(rgb)
   return { rgb[1] / 255, rgb[2] / 255, rgb[3] / 255, 1 }
@@ -97,7 +99,6 @@ local function spacer(parent, name)
 end
 
 local function build(panel, width, chart_width, toolbar_height, scroll_height)
-  panel.style.padding = PANEL_INSET
   local toolbar = panel.add { type = "frame", name = "ssk_history_toolbar", style = "subheader_frame", direction = "vertical" }
   toolbar.style.height = toolbar_height
   toolbar.style.left_padding, toolbar.style.right_padding = 12, 12
@@ -110,20 +111,18 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   header.style.height = 40
   MaterialPicker.add_heading(header, width)
   spacer(header)
-  if width >= 720 then
-    small(header, "ssk_history_summary", "").style.horizontal_align = "right"
-  else
-    small(controls, "ssk_history_summary", "", chart_width)
-  end
+  header.add { type = "checkbox", name = "ssk_history_from_zero", state = false, caption = "Start from 0",
+    tooltip = "Fix the bottom of the Made and Used rate chart at zero. Uncheck to fit the axis to the recorded rates.",
+    tags = { ssk_ui = "history_zero" } }
   header.add { type = "checkbox", name = "ssk_history_usage", state = true, caption = "Usage breakdown",
     tooltip = "Show estimated consumption by product alongside the total Used rate.", tags = { ssk_ui = "history_usage" } }
 
   local scroll = panel.add { type = "scroll-pane", name = "ssk_history_scroll", style = "naked_scroll_pane",
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
-  scroll.style.width = width - 2 * PANEL_INSET
+  scroll.style.width = width
   scroll.style.height = scroll_height
   local body = scroll.add { type = "flow", name = "ssk_history_body", direction = "vertical",
-    tags = { ssk_history_layout = "rate_net_stock_usage" } }
+    tags = { ssk_history_layout = "aligned_header" } }
   body.style.width = chart_width
   -- Match the reserved scrollbar width on the left so plot gutters stay even.
   body.style.left_margin = SCROLLBAR_WIDTH
@@ -137,7 +136,10 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   body.add { type = "flow", name = "ssk_history_rate_plot", direction = "vertical" }
   local rate_state = small(body, "ssk_history_rate_state", "", chart_width)
   rate_state.style.single_line = false
-  small(body, "ssk_history_coverage", "", chart_width)
+  local readout = row(body, "ssk_history_readout")
+  small(readout, "ssk_history_coverage", "")
+  spacer(readout)
+  small(readout, "ssk_history_summary", "").style.horizontal_align = "right"
 
   local uses = body.add { type = "flow", name = "ssk_history_uses", direction = "vertical" }
   uses.style.vertical_spacing = 2
@@ -341,7 +343,7 @@ local function trace(painter, path, y, field, line_color, dashed, zero)
   if previous_x > start_x then line(start_x, previous_y, previous_x, previous_y) end
 end
 
-local function rate_bounds(h, mode, intervals)
+local function rate_bounds(h, mode, intervals, from_zero)
   local net = mode == "net"
   local lowest, highest = math.huge, 0
   for _, p in ipairs(h.rolling_points or h.points) do
@@ -368,16 +370,16 @@ local function rate_bounds(h, mode, intervals)
   if lowest == math.huge then lowest = 0 end
   -- Give flat and tightly clustered rates a visible range as well.
   local margin = math.max((highest - lowest) * 0.05, highest * 0.02)
-  local low, high = math.max(0, lowest - margin), highest + margin
+  local low, high = from_zero and 0 or math.max(0, lowest - margin), highest + margin
   local step = nice_step(high - low, intervals)
   low = math.floor(low / step) * step
   return low, math.max(low + step, math.ceil(high / step) * step), step
 end
 
-local function draw_rates(painter, h, width, height, mode, top, paths)
+local function draw_rates(painter, h, width, height, mode, top, paths, from_zero)
   local net = mode == "net"
   local intervals = height < 100 and 2 or height < 140 and 3 or 4
-  local min_value, max_value, step = rate_bounds(h, mode, intervals)
+  local min_value, max_value, step = rate_bounds(h, mode, intervals, from_zero)
   local x, y = axes(painter, h, width, height, top, min_value, max_value, step)
 
   paths = paths or rate_paths(h.rolling_points or h.points, x)
@@ -471,6 +473,7 @@ local function plot_tooltips(parent, height, regions)
       local target = children[index] or layer.add { type = "empty-widget" }
       target.style.width, target.style.height = region.right - left, hover_height
       target.style.left_margin = left - last
+      target.tags = { ssk_history_bucket = true, left = left, right = region.right }
       target.tooltip, target.visible = region.tooltip, true
       last = region.right
     end
@@ -478,7 +481,7 @@ local function plot_tooltips(parent, height, regions)
   for i = index + 1, #children do children[i].visible = false end
 end
 
-local function camera(player, parent, name, painter, width, height, top, regions)
+local function camera(player, parent, name, painter, width, height, top, regions, bands)
   local view = parent[name]
   parent.visible = not not painter
   if not painter then return end
@@ -492,15 +495,48 @@ local function camera(player, parent, name, painter, width, height, top, regions
   end
   view.style.height = height
   plot_tooltips(parent, height, regions)
+  local y, h = top + PLOT_TOP, height - PLOT_TOP - PLOT_BOTTOM
+  local band = painter.rect(PLOT_LEFT, y, 1, h, HOVER_BAND)
+  band.visible = false
+  bands[#bands + 1] = { rect = band, top = y, height = h }
 end
 
-function H.fill(player, panel, us, key, width, panel_height)
-  local chart_width = width - 2 * (PANEL_INSET + SCROLLBAR_WIDTH)
-  local toolbar_height = width < 720 and 80 or 56
-  local scroll_height = math.max(1, panel_height - toolbar_height - 2 * PANEL_INSET)
+local function highlight(view, target)
+  view.target = target
+  local region = target and target.tags
+  for _, band in ipairs(view.bands) do
+    local rect = band.rect
+    if rect.valid then
+      if region then
+        view.painter.rect(region.left, band.top, region.right - region.left, band.height, HOVER_BAND, rect)
+      end
+      rect.visible = region ~= nil
+    end
+  end
+end
+
+function H.on_hover(e, entering)
+  local target = e.element
+  if not (target.valid and target.tags.ssk_history_bucket) then return false end
+  local view = hover_views[e.player_index]
+  if view then
+    if entering then highlight(view, target)
+    elseif target == view.target then highlight(view) end
+  end
+  return true
+end
+
+function H.clear_hover(index)
+  local view = hover_views[index]
+  if view then highlight(view); hover_views[index] = nil end
+end
+
+function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
+  local chart_width = width - 2 * SCROLLBAR_WIDTH
+  local scroll_height = math.max(1, panel_height - toolbar_height)
   local scroll = panel.ssk_history_scroll
   local body = scroll and scroll.ssk_history_body
-  if not body or body.tags.ssk_history_layout ~= "rate_net_stock_usage" then
+  if not body or body.tags.ssk_history_layout ~= "aligned_header" then
     panel.clear()
     build(panel, width, chart_width, toolbar_height, scroll_height)
     body = panel.ssk_history_scroll.ssk_history_body
@@ -508,9 +544,12 @@ function H.fill(player, panel, us, key, width, panel_height)
   local controls = panel.ssk_history_toolbar.ssk_history_controls
   local header = controls.ssk_history_header
   local breakdown = us.bal_usage_breakdown ~= false
+  local from_zero = us.bal_history_from_zero == true
   header.ssk_history_usage.state = breakdown
+  header.ssk_history_from_zero.state = from_zero
   MaterialPicker.update_heading(header.ssk_material_heading, key)
-  local summary = header.ssk_history_summary or controls.ssk_history_summary
+  local readout = body.ssk_history_readout
+  local summary = readout.ssk_history_summary
   local h = key and History.build(us.sidx, us.period, key)
   local rates = h and h.seconds > 0
   local made, used, uses, partial
@@ -536,7 +575,7 @@ function H.fill(player, panel, us, key, width, panel_height)
   rate_state.caption = not key and "Select a material above or from the Balance list."
     or not rates and "Collecting production history. Rates appear once sampling has recorded this surface."
     or "No recorded production or consumption for this material in the selected period."
-  local coverage = body.ssk_history_coverage
+  local coverage = readout.ssk_history_coverage
   local duration = h and (h.end_tick - h.start_tick) / 60
   local missing = rates and duration - h.seconds or 0
   coverage.visible = missing >= 1 or partial == true
@@ -545,6 +584,7 @@ function H.fill(player, panel, us, key, width, panel_height)
       or "Some buckets have missing samples."
     coverage.tooltip = "The chart leaves gaps where a time bucket has missing samples. Period averages still use the recorded portions."
   end
+  readout.visible = summary.visible or coverage.visible
 
   local usage = body.ssk_history_uses
   usage.visible = active and breakdown and #h.usage_keys > 0 or false
@@ -607,7 +647,7 @@ function H.fill(player, panel, us, key, width, panel_height)
   -- Keep space for the fixed captions, dividers, and insets. Only budget
   -- space for the coverage and usage rows when they are shown.
   local chart_space = scroll_height - 132
-  if coverage.visible then chart_space = chart_space - 24 end
+  if readout.visible then chart_space = chart_space - 24 end
   if usage.visible then chart_space = chart_space - 46 end
   local rate_height = 0
   if active then
@@ -624,16 +664,27 @@ function H.fill(player, panel, us, key, width, panel_height)
   if rates or stock then
     painter = Canvas.begin(player, chart_width, stock and stock_top + stock_height or net_top + net_height)
     local paths
-    if active then paths = draw_rates(painter, h, chart_width, rate_height, breakdown and "breakdown" or "total", 0) end
+    if active then
+      paths = draw_rates(painter, h, chart_width, rate_height, breakdown and "breakdown" or "total", 0, nil, from_zero)
+    end
     if rates then draw_rates(painter, h, chart_width, net_height, "net", net_top, paths) end
     if stock then stock_regions = draw_stock(painter, h, chart_width, stock_height, stock_top) end
   else
     Canvas.clear(player.index)
   end
   local buckets = rates and rate_regions(h, chart_width, units)
-  camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0, buckets)
-  camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top, buckets)
-  camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top, stock_regions)
+  local bands = {}
+  camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0, buckets, bands)
+  camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top, buckets, bands)
+  camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top, stock_regions, bands)
+  local previous = hover_views[player.index]
+  local target = previous and previous.target
+  local view = painter and { painter = painter, bands = bands, key = key, period = us.period, surface = us.sidx }
+  hover_views[player.index] = view
+  if view and target and target.valid and target.visible and target.parent.parent.visible
+    and previous.key == key and previous.period == us.period and previous.surface == us.sidx then
+    highlight(view, target)
+  end
 end
 
 return H

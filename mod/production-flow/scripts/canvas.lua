@@ -103,11 +103,16 @@ function C.begin(player, W, H)
   keep(rendering.draw_rectangle { surface = s, players = players, filled = true,
     left_top = wp(-64, -64), right_bottom = wp(W + 64, H + 64), color = { r = 0.16, g = 0.16, b = 0.17, a = 1 } })
 
-  function P.rect(x, y, w, h, color)
+  function P.rect(x, y, w, h, color, existing)
     x, y, w, h = Geometry.box(x, y, w, h)
     if w <= 0 or h <= 0 then return nil end
+    local left_top, right_bottom = wp(x, y), wp(x + w, y + h)
+    if existing then
+      existing.left_top, existing.right_bottom = left_top, right_bottom
+      return existing
+    end
     return keep(rendering.draw_rectangle { surface = s, players = players, filled = true,
-      left_top = wp(x, y), right_bottom = wp(x + w, y + h), color = color })
+      left_top = left_top, right_bottom = right_bottom, color = color })
   end
 
   function P.line(x1, y1, x2, y2, color, width, dashed, offset)

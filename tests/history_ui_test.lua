@@ -3,6 +3,7 @@ local SK = TREQ("scripts.sankey_ui")
 local History = TREQ("scripts.history")
 local player, us = game.players[1], storage.ui[1]
 local saved_mode, saved_breakdown, saved_period, saved_filter = us.bal_mode, us.bal_usage_breakdown, us.period, us.bal_filter
+local saved_zero = us.bal_history_from_zero
 local previous_build = History.build
 local function find(element, predicate)
   if predicate(element) then return element end
@@ -28,6 +29,7 @@ local function objects()
 end
 
 us.tab_id, us.bal_mode, us.bal_usage_breakdown, us.bal_filter, us.period = "balance", "flow", nil, "all", 600
+us.bal_history_from_zero = nil
 local fx = SK.balance_state(us)
 local saved_focus = fx.focus
 fx.focus = "item/iron-plate"
@@ -97,8 +99,10 @@ local camera, stock_camera = named(root, "ssk_history_camera"), named(root, "ssk
 local net_camera = named(root, "ssk_history_net_camera")
 local history_panel = inspector_tabs.ssk_history_panel
 local history_scroll = history_panel.ssk_history_scroll
-assert(history_panel.style.height == inspector_tabs.ssk_balance_flow_panel.style.height,
-  "both inspector tabs must have the same panel height")
+local flow_panel = inspector_tabs.ssk_balance_flow_panel
+assert(history_panel.style.height == flow_panel.style.height and history_panel.style.padding == flow_panel.style.padding
+  and history_panel.ssk_history_toolbar.style.height == flow_panel.ssk_bar.style.height,
+  "both inspector tabs must have the same panel insets and header height")
 assert(history_scroll.style.width + 2 * history_panel.style.padding == history_panel.style.width
   and history_scroll.style.height + history_panel.ssk_history_toolbar.style.height + 2 * history_panel.style.padding
     == history_panel.style.height, "History must inset its content equally on every side")
@@ -128,6 +132,20 @@ assert(other_tooltip:find("iron-gear-wheel", 1, true) and other_tooltip:find("0.
   and not other_tooltip:find("steel-plate", 1, true), "Other must list hidden product uses and rates")
 assert(stock_targets[1].tooltip == "50s ago\nMeasured stock  30 items"
   and stock_targets[2].tooltip == "35s ago\nEstimated stock  20 items")
+local function hover_bands()
+  local bands = {}
+  for _, object in ipairs(objects()) do
+    if object.k == "rect" and object.a.color[4] == 0.24 and object.visible then bands[#bands + 1] = object end
+  end
+  return bands
+end
+assert(#hover_bands() == 0 and UI.on_hover(event(rate_targets[1]), true))
+local highlighted = hover_bands()
+assert(#highlighted == 3 and highlighted[1].left_top[1] == highlighted[2].left_top[1]
+  and highlighted[1].left_top[1] == highlighted[3].left_top[1], "hover must align all three charts")
+UI.refresh(player, true)
+assert(#hover_bands() == 3, "live refresh must preserve the current hover")
+assert(UI.on_hover(event(rate_targets[1]), false) and #hover_bands() == 0)
 local polygons, rising_or_falling, positive, negative = 0, 0, 0, 0
 local zero = net_camera.position[2] - 4.5 / 32
 local stock = {}
@@ -182,14 +200,23 @@ assert(named(root, "ssk_history_controls") == controls and named(root, "ssk_bal_
 
 data_state = "flat"
 UI.refresh(player, true)
-local y_bounds = {}
-for _, o in ipairs(objects()) do
-  if o.k == "text" and o.a.font == "heading-2" and o.a.target[2] < camera.position[2] + camera.style.height / 64 then
-    y_bounds[#y_bounds + 1] = tonumber(o.a.text)
+local function rate_limits()
+  local bounds = {}
+  for _, o in ipairs(objects()) do
+    if o.k == "text" and o.a.font == "heading-2" and o.a.target[2] < camera.position[2] + camera.style.height / 64 then
+      bounds[#bounds + 1] = tonumber(o.a.text)
+    end
   end
+  return bounds
 end
+local y_bounds = rate_limits()
 assert(#y_bounds == 2 and y_bounds[1] > 0 and y_bounds[1] < 40 and y_bounds[2] > 40,
   "flat nonzero rates need a fitted Y axis and prominent labels on both bounds")
+local start_zero = named(root, "ssk_history_from_zero")
+assert(not start_zero.state)
+start_zero.state = true
+assert(UI.on_checked(event(start_zero)) and us.bal_history_from_zero and rate_limits()[1] == 0)
+assert(named(root, "ssk_bal_items") == items and start_zero.valid)
 
 data_state = "warmup"
 UI.refresh(player, true)
@@ -206,7 +233,7 @@ select_inspector(1)
 assert(us.bal_mode == "flow" and named(inspector_tabs, "ssk_balance_flow_panel").ssk_sp)
 assert(fx.focus == "fluid/water" and named(root, "ssk_bal_items") == items)
 select_inspector(2)
-assert(named(root, "ssk_history_controls") == controls and not checkbox.state)
+assert(named(root, "ssk_history_controls") == controls and not checkbox.state and start_zero.state)
 old = objects()
 local tabs = root.ssk_inner.ssk_tabs
 tabs.selected_tab_index = 4
@@ -223,5 +250,6 @@ assert(not old[1].valid and #objects() == 0, "closing History clears its render 
 History.build = previous_build
 us.bal_mode, us.bal_usage_breakdown, us.period, us.bal_filter, fx.focus =
   saved_mode, saved_breakdown, saved_period, saved_filter, saved_focus
+us.bal_history_from_zero = saved_zero
 UI.open(player)
 print("BALANCE HISTORY UI OK: retained list, controls, aligned axes, measured and estimated rendering, and cleanup")
