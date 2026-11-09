@@ -16,7 +16,7 @@ local TICK = { r = 0.75, g = 0.74, b = 0.71, a = 1 }
 local HIGHLIGHT = { r = 0.28, g = 0.24, b = 0.18, a = 1 }
 local CARD_ROW, CARD_HEADER, CARD_GAP = 25, 34, 12
 local DIRECTIONS = { "loaded", "unloaded" }
-local LAYOUT_VERSION = 2
+local LAYOUT_VERSION = 3
 
 local function label(parent, name, caption, style, width)
   local el = parent.add { type = "label", name = name, caption = caption, style = style }
@@ -462,10 +462,22 @@ local function flow_graph(player, parent, result, width, viewport)
   end
 end
 
-local function render_flow(player, body, result, note)
+local function render_flow(player, body, result, note, show_all_production)
   local width, height = body.tags.transfer_width, body.tags.transfer_height
+  local graph_height = height - 90
   if not body.graph then
-    local pane = scroll(body, "graph", width, height - 30)
+    local controls = strip(body, "production", 56)
+    controls.style.left_padding, controls.style.right_padding = 12, 12
+    local options = controls.add { type = "flow", name = "options", direction = "vertical" }
+    options.style.vertical_spacing = 4
+    options.add { type = "checkbox", name = "ssk_transfer_show_all_production", caption = "Show all onboard production",
+      state = false, tags = { transfer_show_all_production = true } }
+    local hint = label(options, "note",
+      "By default, Made aboard shows only materials made and unloaded by this platform in the selected period.",
+      "grey_label")
+    hint.style.maximal_width, hint.style.single_line = width - 24, false
+    hint.tooltip = "Made aboard counts how much the platform produced. Unloaded counts how much it delivered."
+    local pane = scroll(body, "graph", width, graph_height)
     pane.add { type = "flow", name = "canvas", direction = "vertical" }.style.vertical_spacing = 0
     local legend = row(body, "legend")
     legend.style.width, legend.style.height = width, 26
@@ -477,9 +489,10 @@ local function render_flow(player, body, result, note)
     spacer(legend)
     label(legend, "note", "", "grey_label", math.max(40, width - 300)).style.horizontal_align = "right"
   end
+  body.production.options.ssk_transfer_show_all_production.state = show_all_production == true
   body.legend.note.caption = note or "Ribbon width shows known cargo mass."
   body.legend.note.tooltip = note or "Mass uses each item's Space Age rocket weight. Made aboard is sampled platform production."
-  flow_graph(player, body.graph.canvas, result, width - 24, height - 30)
+  flow_graph(player, body.graph.canvas, result, width - 24, graph_height)
 end
 
 local function bucket_value(data, material)
@@ -775,7 +788,7 @@ function UI.render(content, player, period, state, width, height)
     state.bucket, state.page = result.bucket, result.page
     render_history(player, body, result, state, note)
   else
-    render_flow(player, body, result, note)
+    render_flow(player, body, result, note, state.show_all_production)
   end
   return result.covered_seconds
 end
@@ -799,6 +812,13 @@ function UI.on_selection(event, state)
   state[field] = key ~= 0 and key or nil
   state[field .. "_label"] = key ~= 0 and tags.names[el.selected_index] or nil
   reset_log(state)
+  return true
+end
+
+function UI.on_checked(event, state)
+  local el = event.element
+  if not (state and el and el.valid and el.tags.transfer_show_all_production) then return false end
+  state.show_all_production = el.state
   return true
 end
 

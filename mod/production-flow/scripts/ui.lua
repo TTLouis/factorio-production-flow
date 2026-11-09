@@ -505,6 +505,10 @@ end
 
 function UI.on_checked(e)
   local u0 = ustate(e.player_index)
+  if u0.tab_id == "transfers" and TransfersUI.on_checked(e, u0.transfers) then
+    UI.refresh(game.get_player(e.player_index))
+    return true
+  end
   local tags = e.element.tags
   if u0.tab_id == "balance" and u0.bal_mode == "history" and tags and tags.ssk_ui == "history_usage" then
     u0.bal_usage_breakdown = e.element.state

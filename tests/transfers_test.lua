@@ -119,8 +119,9 @@ prototypes = { item = { ["iron-plate"] = { weight = 1000 }, ["copper-plate"] = {
 local sampler = require("scripts.sampler")
 local original_rates = sampler.rates
 sampler.rates = function(index, period)
-  assert(index == freighter.index and period == 10)
-  return { nodes = { ["item/carbon"] = { prod = 1.5 }, ["fluid/water"] = { prod = 20 } } }, 6
+  assert(index == freighter.index)
+  return { nodes = { ["item/iron-plate"] = { prod = 2 }, ["item/copper-plate"] = { prod = 1 },
+    ["item/carbon"] = { prod = 1.5 }, ["fluid/water"] = { prod = 20 } } }, math.min(6, period)
 end
 storage.bins, game = {}, { forces = { player = player } }
 local view = Transfers.platform_view(player, 601, 10, { platform = 23 })
@@ -129,16 +130,26 @@ assert(view.loaded.pods == 1 and view.loaded.weight == 24500 and not view.loaded
 assert(view.unloaded.pods == 2 and view.unloaded.weight == 8000 and view.unloaded.unknown_weight)
 assert(view.loading[1].endpoint.id == source and view.loading[1].items[1].name == "iron-plate")
 assert(view.loading[1].items[1].count == 20 and view.loading[1].items[2].count == 9)
-assert(view.materials.carbon and not view.materials.water and view.made.items[1].count == 9)
-assert(view.made.weight == 900 and view.made.seconds == 6)
+assert(not view.materials.carbon and not view.materials.water)
+assert(#view.made.items == 1 and view.made.items[1].name == "iron-plate" and view.made.items[1].count == 12)
+assert(view.made.weight == 12000 and view.made.seconds == 6)
 assert(view.arrival_count == 3 and view.arrivals[1].tick == 440 and view.arrivals[1].unknown_weight)
 assert(view.arrivals[3].endpoint.id == source and view.arrivals[3].weight == 24500)
+
+local all = Transfers.platform_view(player, 601, 10, { platform = 23, show_all_production = true })
+assert(#all.made.items == 3 and all.made.weight == 15900 and all.materials.carbon)
+assert(all.loaded.weight == view.loaded.weight and all.unloaded.weight == view.unloaded.weight)
+assert(all.arrival_count == view.arrival_count and all.arrivals[1].id == view.arrivals[1].id)
+local recent = Transfers.platform_view(player, 601, 3, { platform = 23, view = "flow" })
+assert(recent.unloaded.pods == 1 and #recent.made.items == 0)
+local copper = Transfers.platform_view(player, 601, 10, { platform = 23, material = "copper-plate", view = "flow" })
+assert(copper.loaded.count == 9 and copper.unloaded.pods == 0 and #copper.made.items == 0)
 
 local no_load = Transfers.platform_view(player, 601, 10, { platform = 23, from = destination, view = "flow" })
 assert(no_load.loaded.pods == 0 and no_load.unloaded.pods == 2 and #no_load.buckets == 0)
 assert(no_load.sources[source] and no_load.destinations[source] and no_load.materials["copper-plate"])
 local no_unload = Transfers.platform_view(player, 601, 10, { platform = 23, to = destination, view = "flow" })
-assert(no_unload.loaded.pods == 1 and no_unload.unloaded.pods == 0)
+assert(no_unload.loaded.pods == 1 and no_unload.unloaded.pods == 0 and #no_unload.made.items == 0)
 
 local iron = Transfers.platform_view(player, 601, 10, { platform = 23, material = "iron-plate", view = "history" })
 assert(iron.loaded.count == 20 and iron.unloaded.count == 8 and iron.unloaded.weight == 8000)

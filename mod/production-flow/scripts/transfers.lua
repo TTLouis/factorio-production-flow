@@ -321,7 +321,7 @@ local function sum_weights(total, detail)
   total.unknown_weight = total.unknown_weight or detail.unknown_weight
 end
 
-local function made_aboard(force, surface, seconds, material, materials, weights)
+local function made_aboard(force, surface, seconds, material, materials, weights, exported)
   local made, items = measurement(), {}
   made.seconds = 0
   -- The sampler records production for the player force only.
@@ -332,7 +332,7 @@ local function made_aboard(force, surface, seconds, material, materials, weights
       if key:sub(1, 5) == "item/" then
         local name = key:sub(6)
         local count = math.floor(rate.prod * duration + 0.5)
-        if count > 0 then
+        if count > 0 and (not exported or exported[name]) then
           materials[name] = true
           if not material or material == name then
             items[name] = count
@@ -471,7 +471,14 @@ function T.platform_view(force, tick, seconds, filters)
   if flow then
     finish_routes(result.loading, loading, result.loaded, weights)
     finish_routes(result.unloading, unloading, result.unloaded, weights)
-    result.made = made_aboard(force, surface, seconds, filters.material, result.materials, weights)
+    local exported
+    if not filters.show_all_production then
+      exported = {}
+      for _, route in ipairs(result.unloading) do
+        for _, item in ipairs(route.items) do exported[item.name] = true end
+      end
+    end
+    result.made = made_aboard(force, surface, seconds, filters.material, result.materials, weights, exported)
   end
   if history then
     for _, bucket in ipairs(result.buckets) do

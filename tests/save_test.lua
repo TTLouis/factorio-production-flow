@@ -577,10 +577,24 @@ local function exercise_transfers(UI, player, root, us, case)
     select("ssk_transfer_to",to)
     assert(us.transfers.from==from and us.transfers.to==to,"Transfers lost directional filters")
     result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
-    assert(#result.loading==1 and #result.unloading==1 and result.made.weight>0,
-      "Transfers should filter both directions independently and show production aboard")
+    assert(#result.loading==1 and #result.unloading==1 and #result.made.items==0,
+      "Export-only production must respect the unload destination filter")
+    local production=assert(find_named(panel,"ssk_transfer_show_all_production"),"Missing onboard production toggle")
+    assert(production.type=="checkbox" and not production.state and production.parent.note.caption:find("unloaded"),
+      "Export-only production must be the default and have a note below the checkbox")
+    production.state=true
+    assert(UI.on_checked{player_index=player.index,element=production},"Production checkbox was not handled")
+    result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
+    assert(us.transfers.show_all_production and result.made.weight>0 and #result.unloading==1,
+      "All production mode must show onboard output without changing deliveries")
     select("ssk_transfer_from")
     select("ssk_transfer_to")
+    assert(production.state,"Changing route filters reset the production checkbox")
+    production.state=false
+    assert(UI.on_checked{player_index=player.index,element=production})
+    result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
+    assert(#result.made.items>0 and not us.transfers.show_all_production,
+      "Export-only production must still show materials unloaded to a matching destination")
     select("ssk_transfer_material","copper-plate")
     assert(us.transfers.material=="copper-plate","Transfers lost the chosen material")
     select("ssk_transfer_material")
@@ -595,7 +609,8 @@ local function exercise_transfers(UI, player, root, us, case)
       "Transfer ribbon must list the cargo and rates")
     local filter=assert(find_named(panel,"ssk_transfer_from"))
     UI.refresh(player,true)
-    assert(filter.valid and pane.valid,"Live Transfers refresh rebuilt the controls")
+    assert(filter.valid and pane.valid and production.valid and not production.state,
+      "Live Transfers refresh rebuilt or reset the controls")
     log("TRANSFERS FLOW NATIVE PASS native tabs, platform, production, filters and ribbon tooltips")
   end
 end
