@@ -147,6 +147,40 @@ for _, point in ipairs(h.points) do
   end
 end
 
+-- Rolling windows are trailing, duration-weighted, and independent of the
+-- raw buckets used for totals. An incomplete newest bucket only adds its own time.
+reset(2700 * 60)
+storage.graph = { nodes = { [material] = { consumers = { "a" } } }, recipes = { a = recipe(single, input(a, 1)) } }
+storage.rings[1] = { secs = 600, bins = {} }
+for id = 0, 3 do
+  local made_rate, used_rate = 10 * (id + 1), 8 * (id + 1)
+  storage.rings[1].bins[id] = { id = id, secs = 600, stat = { stats(made_rate * 600, used_rate * 600) },
+    rec = { { a = crafts(used_rate * 300) } } }
+end
+for sec = 2400, 2699 do fine(sec, stats(50, 40), nil, { { a = crafts(20) } }) end
+h = H.build(1, 36000, material)
+near(h.rolling_seconds, 1800)
+local newest = h.rolling_points[#h.rolling_points]
+near(newest.average_start_tick, 900 * 60)
+near(newest.end_tick, 2700 * 60)
+near(newest.made, 35); near(newest.used, 28); near(newest.net, 7)
+near(newest.usage_detail[a], 14); near(newest.uses[a], 14); near(newest.uses[other], 14)
+near(h.points[#h.points].made, 50); near(h.seconds, 2700)
+local raw_made, raw_used = totals(h)
+near(raw_made, 75000); near(raw_used, 60000); near(h.usage_totals[a], 30000)
+assert(H.build(1, 600, material).rolling_points == nil)
+for _, window in ipairs({ {3600, 180}, {180000, 9000}, {900000, 45000}, {3600000, 180000} }) do
+  near(H.build(1, window[1], material).rolling_seconds, window[2])
+end
+storage.rings[1].bins[2] = nil
+h = H.build(1, 36000, material)
+newest = h.rolling_points[#h.rolling_points]
+near(newest.average_start_tick, 1800 * 60)
+near(newest.made, (600 * 40 + 300 * 50) / 900)
+storage.bins[2600] = nil
+h = H.build(1, 36000, material)
+assert(h.rolling_points[#h.rolling_points].partial, "A gap within a bucket stays a gap in the rolling chart")
+
 reset(12 * 60 + 20)
 for sec = 0, 11 do
   fine(sec, stats(sec < 5 and 20 or 0, sec >= 5 and sec < 10 and 10 or 0), stats(500, 0))

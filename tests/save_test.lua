@@ -207,6 +207,7 @@ elseif mode=="ribbon-view" then
   cases={
     {name="electronic-circuit-flow",surface="nauvis",tab="balance",focus="item/electronic-circuit",usage_history=true,flow_only=true},
     {name="electronic-circuit-history",surface="nauvis",tab="balance",focus="item/electronic-circuit",usage_history=true},
+    {name="history-rolling-1h",surface="nauvis",tab="balance",focus="item/electronic-circuit",usage_history=true,rolling_period=true},
     {name="full-nauvis",surface="nauvis",tab="sankey",view="overview"},
     {name="full-nauvis-sprites",surface="nauvis",tab="sankey",view="overview",renderer="sprites"},
     {name="focus-circuit",surface="nauvis",tab="focus",focus="item/electronic-circuit"},
@@ -334,6 +335,7 @@ local function exercise_history(UI, player, root, us, case)
   if case.name=="electronic-circuit-history" then
     assert(rate_tip:find("Estimated usage by product",1,true) and rate_tip:find("advanced-circuit",1,true),
       "History bucket tooltip must list the products consuming electronic circuits")
+    assert(not rate_tip:find("Rolling average",1,true),"10m should show unsmoothed bucket averages")
     local average=assert(find_named(panel,"ssk_history_usage_average"))
     assert(serpent.line(average.tooltip):find("advanced-circuit",1,true),"History must expose period usage details")
   end
@@ -358,6 +360,17 @@ local function exercise_history(UI, player, root, us, case)
     assert(us.period==3600000,"History must use the selected 1000-hour period")
     local coverage=root.ssk_window_bar.ssk_history
     assert(coverage.visible and coverage.caption:find("1000 h",1,true),"History must show incomplete long-window coverage")
+    items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
+  elseif case.rolling_period then
+    choose_period(3)
+    assert(us.period==3600,"Rolling average must start at the one-hour selection")
+    local legend=assert(find_named(panel,"ssk_history_rate_legend"))
+    assert(legend.caption:find("Rolling avg",1,true) and legend.tooltip:find("3 min",1,true),
+      "Rolling legend must show the configured averaging window")
+    local rolling_tip=serpent.line(rate_plot.ssk_history_tooltips.children[1].tooltip)
+    assert(rolling_tip:find("Rolling average over",1,true) and rolling_tip:find("Estimated usage by product",1,true)
+      and rolling_tip==serpent.line(net_plot.ssk_history_tooltips.children[1].tooltip),
+      "The rate and net charts must expose the same trailing usage average")
     items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
   end
   UI.refresh(player,true)
@@ -392,7 +405,7 @@ local function exercise_history(UI, player, root, us, case)
       assert(note.caption:find("Latest estimate",1,true),"Live stock estimate was not shown after refresh")
       log("BALANCE LIVE STOCK PASS latest estimate advanced without waiting for another scan")
     end
-    if case.long_period then
+    if case.long_period or case.rolling_period then
       choose_period(2)
       items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
     end

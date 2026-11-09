@@ -4,6 +4,8 @@ local Sampler = require("scripts.sampler")
 local H = { OTHER = "other" }
 local TICKS_PER_SECOND = 60
 local MAX_BUCKETS = 60
+local ROLLING_MIN_PERIOD = 3600
+local ROLLING_BUCKETS = 3
 
 local function candidate_recipes(key)
   local graph = storage.graph
@@ -145,6 +147,40 @@ local function group_uses(result, totals)
   if has_other then result.usage_keys[#result.usage_keys + 1] = H.OTHER end
 end
 
+local function add_weighted_rates(target, rates, weight)
+  for key, rate in pairs(rates) do target[key] = (target[key] or 0) + rate * weight end
+end
+
+-- Keep the non-overlapping buckets for period totals and stock. Only the
+-- plotted rates use overlapping trailing windows, bounded by recorded runs.
+local function rolling_points(points, window_ticks)
+  local rolling, first = {}, 1
+  for i, point in ipairs(points) do
+    if point.made == nil or point.partial then
+      rolling[i], first = point, i + 1
+    else
+      if i > 1 and points[i - 1].end_tick ~= point.start_tick then first = i end
+      local end_tick = point.end_tick
+      local start_tick = math.max(points[first].start_tick, end_tick - window_ticks)
+      while points[first].end_tick <= start_tick do first = first + 1 end
+      local duration = end_tick - start_tick
+      local average = { start_tick = point.start_tick, end_tick = end_tick,
+        average_start_tick = start_tick, made = 0, used = 0, uses = {}, usage_detail = {} }
+      for j = first, i do
+        local sample = points[j]
+        local weight = (sample.end_tick - math.max(start_tick, sample.start_tick)) / duration
+        average.made = average.made + sample.made * weight
+        average.used = average.used + sample.used * weight
+        add_weighted_rates(average.uses, sample.uses, weight)
+        add_weighted_rates(average.usage_detail, sample.usage_detail, weight)
+      end
+      average.net = average.made - average.used
+      rolling[i] = average
+    end
+  end
+  return rolling
+end
+
 local function stock_count(snap, sidx, key)
   if sidx then
     local surface = snap.s[sidx]
@@ -268,6 +304,10 @@ function H.build(sidx, period, key)
     end
   end
   group_uses(result, rate_points(result, sources))
+  if requested >= ROLLING_MIN_PERIOD then
+    result.rolling_seconds = result.bucket_seconds * ROLLING_BUCKETS
+    result.rolling_points = rolling_points(result.points, result.rolling_seconds * TICKS_PER_SECOND)
+  end
   stock_points(result, sources, scans, sidx, key)
   return result
 end

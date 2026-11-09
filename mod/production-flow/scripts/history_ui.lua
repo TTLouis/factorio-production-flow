@@ -161,8 +161,7 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   local net_title = row(net, "ssk_history_net_title")
   label(net_title, nil, "Net rate", "caption_label")
   spacer(net_title)
-  local legend = small(net_title, "ssk_history_net_legend", "")
-  legend.tooltip = "Made minus Used per second. Green shows a surplus. Red shows a deficit. Zero means production matches consumption."
+  small(net_title, "ssk_history_net_legend", "")
   net.add { type = "flow", name = "ssk_history_net_plot", direction = "vertical" }
 
   body.add { type = "line", direction = "horizontal" }
@@ -250,13 +249,18 @@ end
 
 local function rate_regions(h, width, units)
   local regions = {}
-  for _, p in ipairs(h.points) do
+  for _, p in ipairs(h.rolling_points or h.points) do
     if p.made ~= nil and not p.partial then
       local left = Geometry.round(time_x(h, width, p.start_tick))
       local right = Geometry.round(time_x(h, width, p.end_tick))
       if right > left then
+        local start_tick = p.average_start_tick or p.start_tick
         local tooltip = string.format("%s to %s\nMade  %.5g %s\nUsed  %.5g %s\nNet  %.5g %s",
-          elapsed(h, p.start_tick), elapsed(h, p.end_tick), p.made, units, p.used, units, p.net, units)
+          elapsed(h, start_tick), elapsed(h, p.end_tick), p.made, units, p.used, units, p.net, units)
+        if p.average_start_tick then
+          local duration = Sampler.duration((p.end_tick - start_tick) / 60)
+          tooltip = "Rolling average over " .. duration .. "\n" .. tooltip
+        end
         tooltip = usage_tooltip(tooltip, p.usage_detail or {}, 1, units)
         regions[#regions + 1] = { left = left, right = right, tooltip = tooltip }
       end
@@ -265,34 +269,37 @@ local function rate_regions(h, width, units)
   return regions
 end
 
--- The bucket midpoint holds the sampled rate. A shared easing curve keeps the
--- Used outline on top of its product bands without overshoot between samples.
+-- Plot bucket averages at the midpoint and trailing averages at the end.
+-- A shared easing curve keeps the Used outline on its product bands.
 local function rate_paths(points, x)
   local paths, path, previous = {}, nil, nil
   local function add(tick, a, b, mix)
     path[#path + 1] = { x = x(tick), a = a, b = b, mix = mix }
   end
+  local function sample_tick(point)
+    return point.average_start_tick and point.end_tick or (point.start_tick + point.end_tick) / 2
+  end
   for _, point in ipairs(points) do
     if point.made ~= nil and not point.partial then
-      local middle = (point.start_tick + point.end_tick) / 2
+      local at = sample_tick(point)
       if previous and previous.end_tick == point.start_tick then
-        local from = (previous.start_tick + previous.end_tick) / 2
-        local steps = math.max(4, math.min(8, math.ceil((x(middle) - x(from)) / 4)))
+        local from = sample_tick(previous)
+        local steps = math.max(4, math.min(8, math.ceil((x(at) - x(from)) / 4)))
         for i = 1, steps - 1 do
           local t = i / steps
-          add(from + (middle - from) * t, previous, point, t * t * (3 - 2 * t))
+          add(from + (at - from) * t, previous, point, t * t * (3 - 2 * t))
         end
       else
-        if previous then add(previous.end_tick, previous, previous, 0) end
+        if previous and not previous.average_start_tick then add(previous.end_tick, previous, previous, 0) end
         path = {}
         paths[#paths + 1] = path
         add(point.start_tick, point, point, 0)
       end
-      add(middle, point, point, 0)
+      add(at, point, point, 0)
       previous = point
     end
   end
-  if previous then add(previous.end_tick, previous, previous, 0) end
+  if previous and not previous.average_start_tick then add(previous.end_tick, previous, previous, 0) end
   return paths
 end
 
@@ -337,7 +344,7 @@ end
 local function rate_bounds(h, mode, intervals)
   local net = mode == "net"
   local lowest, highest = math.huge, 0
-  for _, p in ipairs(h.points) do
+  for _, p in ipairs(h.rolling_points or h.points) do
     if p.made ~= nil and not p.partial then
       if net then
         highest = math.max(highest, math.abs(p.net))
@@ -373,7 +380,7 @@ local function draw_rates(painter, h, width, height, mode, top, paths)
   local min_value, max_value, step = rate_bounds(h, mode, intervals)
   local x, y = axes(painter, h, width, height, top, min_value, max_value, step)
 
-  paths = paths or rate_paths(h.points, x)
+  paths = paths or rate_paths(h.rolling_points or h.points, x)
   if mode == "breakdown" then
     for _, path in ipairs(paths) do
       local base = {}
@@ -518,7 +525,12 @@ function H.fill(player, panel, us, key, width, panel_height)
   local period_tip = usage_tooltip("Average over recorded time in the selected period.",
     rates and (h.usage_totals or {}) or {}, rates and h.seconds or 1, units)
   summary.tooltip = period_tip
-  legend.caption = swatch(MADE) .. " Made   " .. swatch(USED) .. " Used   " .. units
+  local rolling = h and h.rolling_seconds
+  local rate_prefix = rolling and "Rolling avg   " or ""
+  local rolling_tip = rolling and ("Trailing average over up to " .. Sampler.duration(rolling)
+    .. ". The window starts again after a gap. Hover a point to see the recorded time it uses.")
+  legend.caption = rate_prefix .. swatch(MADE) .. " Made   " .. swatch(USED) .. " Used   " .. units
+  legend.tooltip = rolling_tip or "Rates per recorded chart bucket."
   local rate_state = body.ssk_history_rate_state
   rate_state.visible = not active
   rate_state.caption = not key and "Select a material above or from the Balance list."
@@ -581,8 +593,10 @@ function H.fill(player, panel, us, key, width, panel_height)
 
   local net = body.ssk_history_net_section
   net.visible = rates == true
-  net.ssk_history_net_title.ssk_history_net_legend.caption =
-    swatch(NET_POSITIVE) .. " Surplus   " .. swatch(USED) .. " Deficit   " .. units
+  local net_legend = net.ssk_history_net_title.ssk_history_net_legend
+  net_legend.caption = rate_prefix .. swatch(NET_POSITIVE) .. " Surplus   " .. swatch(USED) .. " Deficit   " .. units
+  net_legend.tooltip = (rolling_tip and rolling_tip .. "\n" or "")
+    .. "Made minus Used per second. Green shows a surplus. Red shows a deficit. Zero means production matches consumption."
   -- Allow a third of the inspector for the stock and net sections together,
   -- including their headings, note, and divider.
   local stock_heading_height, net_heading_height = 48, 36
