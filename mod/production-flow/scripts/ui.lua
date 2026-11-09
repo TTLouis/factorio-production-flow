@@ -113,14 +113,13 @@ end
 ---------------------------------------------------------------------------
 local fill = {}
 local BALANCE_TAB_HEADER_HEIGHT = 48 -- Vanilla tab strip and its top content padding.
-local BALANCE_PANEL_INSET = 8
 
 function fill.balance(player, c, us, only_auto, keep_balance_rows)
   local pane_height = us.canvas_h + 100
   local inspector_height = pane_height - BALANCE_TAB_HEADER_HEIGHT
   local split = c.ssk_balance_split
   local modes = split and split.ssk_balance_focus.ssk_balance_inspector_tabs
-  if not modes or modes.tags.ssk_balance_material_header ~= "aligned" then
+  if not modes or modes.tags.ssk_balance_material_header ~= "flush" then
     c.clear()
     split = c.add { type = "flow", name = "ssk_balance_split", direction = "horizontal" }
     split.style.horizontal_spacing = 12
@@ -135,7 +134,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     us.bal_chart_w = right_w - 8
     right.style.width, right.style.height = right_w, pane_height
     modes = right.add { type = "tabbed-pane", name = "ssk_balance_inspector_tabs",
-      style = "tabbed_pane_with_no_side_padding", tags = { ssk_balance_material_header = "aligned" } }
+      style = "tabbed_pane_with_no_side_padding", tags = { ssk_balance_material_header = "flush" } }
     modes.style.top_margin = 0
     modes.style.horizontally_stretchable = true
     local flow = modes.add { type = "tab", caption = "Flow", tooltip = "Show the selected material's inputs and uses" }
@@ -147,7 +146,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     for _, panel in ipairs({ flow_panel, history_panel }) do
       panel.style.width, panel.style.height = us.bal_chart_w, inspector_height
       panel.style.left_margin, panel.style.right_margin = 4, 4
-      panel.style.padding = BALANCE_PANEL_INSET
+      panel.style.padding = 0
     end
     modes.selected_tab_index = us.bal_mode == "history" and 2 or 1
   end
@@ -155,18 +154,16 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
   local fx = SK.balance_state(us)
   if not fx.focus then fx.focus = first end
   fx.sel = fx.focus
-  local inner_width = us.bal_chart_w - 2 * BALANCE_PANEL_INSET
-  local inner_height = inspector_height - 2 * BALANCE_PANEL_INSET
   if us.bal_mode == "history" then
-    HistoryUI.fill(player, modes.ssk_history_panel, us, fx.focus, inner_width, inner_height, SK.toolbar_height(fx))
+    HistoryUI.fill(player, modes.ssk_history_panel, us, fx.focus, us.bal_chart_w, inspector_height, SK.toolbar_height(fx))
     return
   end
   local flow = modes.ssk_balance_flow_panel
-  fx.canvas_w, fx.canvas_h = inner_width, inner_height - SK.toolbar_height(fx)
+  fx.canvas_w, fx.canvas_h = us.bal_chart_w, inspector_height - SK.toolbar_height(fx)
   if not only_auto or fx.live ~= false then
     SK.fill(player, flow, fx, fx.canvas_w, fx.canvas_h, false, only_auto)
   end
-  SK.update_balance_actions(flow, us, fx.focus)
+  SK.update_balance_actions(flow, us, fx.focus, player.index)
 end
 
 function fill.transfers(player, c, us)
@@ -349,7 +346,7 @@ local function chart_state(us)
 end
 
 local function refresh_material(player, state, previous, full)
-  if state.neighborhood and state.focus ~= previous then close_inspectors(player) end
+  if state.view == "focus" and state.focus ~= previous then close_inspectors(player) end
   UI.refresh(player, false, full, true)
 end
 
@@ -401,7 +398,8 @@ function UI.on_click(e)
   elseif a == "help" then close_inspectors(player); Help.open(player)
   elseif a == "help_close" then Help.close(player);player.opened=player.gui.screen[WIN]
   elseif a == "watch" or a == "machine_status" then
-    if us.tab_id ~= "balance" or not chart.focus then return true end
+    local focus_inspection = us.tab_id == "focus" and a == "machine_status"
+    if (us.tab_id ~= "balance" and not focus_inspection) or not chart.focus then return true end
     local surface = sidx_for(player, us)
     MaterialPicker.close(player)
     Help.close(player)
@@ -430,9 +428,9 @@ function UI.on_click(e)
     local favs = BalanceUI.favourites(us)
     local set, id = a == "bal_fav" and favs.items or favs.groups, el.tags.key or el.tags.gid
     set[id] = not set[id] or nil
-    if a == "bal_fav" and not set[id] then
-      Watch.reset_pending(us, id)
-      if chart.focus == id then Watch.close(player) end
+    if not set[id] then
+      Watch.pause_unstarred(player.index, us)
+      if chart.focus and not Watch.available(player.index, us, chart.focus) then Watch.close(player) end
     end
     UI.refresh(player)
   elseif a == "focus_item" or a == "bal_material" then

@@ -37,7 +37,9 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
     local icon, bar = elements.icons[k], elements.bars[k]
     assert(icon.raise_hover_events and bar.raise_hover_events, "both hit areas must highlight")
     assert(type(icon.tooltip) == "table" and icon.tooltip == bar.tooltip, "one native hover card on either target")
-    assert(#icon.tooltip == 6 and icon.tooltip[5] == "\n", "compact name and rate on separate lines")
+    assert(icon.tooltip[5] == "\n" and (#icon.tooltip == 6
+      or (#icon.tooltip == 7 and icon.tooltip[7]:find("Labs (estimated)", 1, true))),
+      "compact name and rate on separate lines with a lab estimate for science packs")
     if renderer == "poly" then assert(bar.sprite == "ssk-node-hit", "polygon hit area must be transparent") end
   end
   -- Hover does not rebuild the chart or change selection/positions.

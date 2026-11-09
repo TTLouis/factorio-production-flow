@@ -1,6 +1,9 @@
 local H = require("scripts.history")
 local material = "item/iron-plate"
 local other = H.OTHER
+prototypes = { get_entity_filtered = function() return {
+  lab = { lab_inputs = { "modded-science", { name = "automation-science-pack" } } },
+} end }
 
 local function near(actual, expected)
   assert(actual and math.abs(actual - expected) < 1e-8, tostring(actual) .. " ~= " .. expected)
@@ -146,6 +149,24 @@ for _, point in ipairs(h.points) do
     near(detailed, point.used)
   end
 end
+
+-- Science consumption left after recipes is estimated lab use. Keep ambiguous
+-- recipe outputs separate, and recognise modded lab inputs from prototypes.
+reset(60)
+local science = "item/modded-science"
+local science_input = { input(science, 1) }
+storage.graph = { nodes = { [science] = { consumers = { "a", "multi" } } }, recipes = {
+  a = recipe(science_input, input(a, 1)), multi = recipe(science_input, input(a, 1), input(b, 1)),
+} }
+fine(0, { [science] = { i = 3, o = 9 } }, { [science] = { i = 0, o = 5 } }, { { a = crafts(2), multi = crafts(1) } })
+h = H.build(1, 1, science)
+near(h.points[1].used, 9)
+near(h.usage_totals[H.LABS], 6)
+near(h.usage_totals[a], 2)
+near(h.usage_totals[other], 1)
+local labs_only = H.build(2, 3600, science)
+assert(#labs_only.usage_keys == 1 and labs_only.usage_keys[1] == H.LABS)
+near(labs_only.rolling_points[#labs_only.rolling_points].uses[H.LABS], 5)
 
 -- Rolling windows are trailing, duration-weighted, and independent of the
 -- raw buckets used for totals. An incomplete newest bucket only adds its own time.

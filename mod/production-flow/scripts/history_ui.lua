@@ -23,8 +23,9 @@ local PLOT_GAP = 64
 local PLOT_LEFT, PLOT_RIGHT = 52, 24
 local PLOT_TOP, PLOT_BOTTOM = 12, 21
 local STOCK_MARKER_HALF = 3
-local SCROLLBAR_WIDTH, BODY_MARGIN_Y = 12, 4
+local SCROLL_INSET, SCROLLBAR_WIDTH, BODY_MARGIN_Y = 8, 12, 4
 local hover_views = {}
+local LAB_NOTE = "Lab use is estimated from measured science-pack consumption after recipe use. It may include spoilage or other untracked consumption."
 
 local function color(rgb)
   return { rgb[1] / 255, rgb[2] / 255, rgb[3] / 255, 1 }
@@ -45,6 +46,7 @@ end
 
 local function material(key)
   if not key then return "No material selected" end
+  if key == History.LABS then return "Labs (estimated)" end
   local kind, name = key:match("^([^/]+)/(.+)$")
   local proto = kind and prototypes[kind] and prototypes[kind][name]
   return proto and { "", Graph.rt(key), " ", proto.localised_name } or name or key
@@ -62,11 +64,13 @@ local function usage_tooltip(header, totals, seconds, units, skip)
     if totals[a] == totals[b] then return a < b end
     return totals[a] > totals[b]
   end)
-  parts[#parts + 1] = "\n\nEstimated usage by product"
+  local show_labs = totals[History.LABS] and totals[History.LABS] > 0 and not (skip and skip[History.LABS])
+  parts[#parts + 1] = show_labs and "\n\nEstimated usage breakdown" or "\n\nEstimated usage by product"
   for _, key in ipairs(keys) do
     parts[#parts + 1] = { "", "\n", key == History.OTHER and "Unattributed use" or material(key),
       string.format("  %.5g %s", totals[key] / seconds, units) }
   end
+  if show_labs then parts[#parts + 1] = "\n\n" .. LAB_NOTE end
   return Tooltip.lines(parts)
 end
 
@@ -100,7 +104,7 @@ end
 
 local function build(panel, width, chart_width, toolbar_height, scroll_height)
   local toolbar = panel.add { type = "frame", name = "ssk_history_toolbar", style = "subheader_frame", direction = "vertical" }
-  toolbar.style.height = toolbar_height
+  toolbar.style.width, toolbar.style.height = width, toolbar_height
   toolbar.style.left_padding, toolbar.style.right_padding = 12, 12
   toolbar.style.top_padding, toolbar.style.bottom_padding = 8, 8
   toolbar.style.horizontally_stretchable = true
@@ -115,14 +119,15 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
     tooltip = "Fix the bottom of the Made and Used rate chart at zero. Uncheck to fit the axis to the recorded rates.",
     tags = { ssk_ui = "history_zero" } }
   header.add { type = "checkbox", name = "ssk_history_usage", state = true, caption = "Usage breakdown",
-    tooltip = "Show estimated consumption by product alongside the total Used rate.", tags = { ssk_ui = "history_usage" } }
+    tooltip = "Show estimated uses alongside the total Used rate.", tags = { ssk_ui = "history_usage" } }
 
   local scroll = panel.add { type = "scroll-pane", name = "ssk_history_scroll", style = "naked_scroll_pane",
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
-  scroll.style.width = width
+  scroll.style.width = width - 2 * SCROLL_INSET
   scroll.style.height = scroll_height
+  scroll.style.margin = SCROLL_INSET
   local body = scroll.add { type = "flow", name = "ssk_history_body", direction = "vertical",
-    tags = { ssk_history_layout = "aligned_header" } }
+    tags = { ssk_history_layout = "flush_header" } }
   body.style.width = chart_width
   -- Match the reserved scrollbar width on the left so plot gutters stay even.
   body.style.left_margin = SCROLLBAR_WIDTH
@@ -474,6 +479,7 @@ local function plot_tooltips(parent, height, regions)
       target.style.width, target.style.height = region.right - left, hover_height
       target.style.left_margin = left - last
       target.tags = { ssk_history_bucket = true, left = left, right = region.right }
+      target.raise_hover_events = true
       target.tooltip, target.visible = region.tooltip, true
       last = region.right
     end
@@ -532,11 +538,11 @@ function H.clear_hover(index)
 end
 
 function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
-  local chart_width = width - 2 * SCROLLBAR_WIDTH
-  local scroll_height = math.max(1, panel_height - toolbar_height)
+  local chart_width = width - 2 * (SCROLL_INSET + SCROLLBAR_WIDTH)
+  local scroll_height = math.max(1, panel_height - toolbar_height - 2 * SCROLL_INSET)
   local scroll = panel.ssk_history_scroll
   local body = scroll and scroll.ssk_history_body
-  if not body or body.tags.ssk_history_layout ~= "aligned_header" then
+  if not body or body.tags.ssk_history_layout ~= "flush_header" then
     panel.clear()
     build(panel, width, chart_width, toolbar_height, scroll_height)
     body = panel.ssk_history_scroll.ssk_history_body
@@ -606,6 +612,7 @@ function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
         entry.rate.caption = number((uses[product] or 0) / h.seconds) .. "/s"
         local tip = other and other_tip or { "", caption, string.format("\nEstimated usage  %.5g %s",
           (uses[product] or 0) / h.seconds, units) }
+        if product == History.LABS then tip[#tip + 1] = "\n" .. LAB_NOTE end
         entry.material_name.tooltip, entry.rate.tooltip = tip, tip
       end
     end

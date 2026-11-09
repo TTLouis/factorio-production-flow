@@ -100,12 +100,14 @@ local net_camera = named(root, "ssk_history_net_camera")
 local history_panel = inspector_tabs.ssk_history_panel
 local history_scroll = history_panel.ssk_history_scroll
 local flow_panel = inspector_tabs.ssk_balance_flow_panel
-assert(history_panel.style.height == flow_panel.style.height and history_panel.style.padding == flow_panel.style.padding
-  and history_panel.ssk_history_toolbar.style.height == flow_panel.ssk_bar.style.height,
-  "both inspector tabs must have the same panel insets and header height")
-assert(history_scroll.style.width + 2 * history_panel.style.padding == history_panel.style.width
-  and history_scroll.style.height + history_panel.ssk_history_toolbar.style.height + 2 * history_panel.style.padding
-    == history_panel.style.height, "History must inset its content equally on every side")
+local flow_header, history_header = flow_panel.ssk_bar, history_panel.ssk_history_toolbar
+assert(history_panel.style.height == flow_panel.style.height and flow_panel.style.padding == 0
+  and history_panel.style.padding == 0 and history_header.style.width == flow_header.style.width
+  and history_header.style.height == flow_header.style.height,
+  "both headers must use the original full-width Flow position and height")
+assert(history_scroll.style.width + 2 * history_scroll.style.margin == history_panel.style.width
+  and history_scroll.style.height + history_header.style.height + 2 * history_scroll.style.margin
+    == history_panel.style.height, "History must inset the charts below its full-width header")
 assert(camera.style.width + 2 * history_scroll.ssk_history_body.style.left_margin == history_scroll.style.width,
   "History plots must leave equal gutters on both sides")
 assert(camera.style.width == stock_camera.style.width and camera.style.width == net_camera.style.width
@@ -122,6 +124,8 @@ local rate_targets = camera.parent.ssk_history_tooltips.children
 local net_targets = net_camera.parent.ssk_history_tooltips.children
 local stock_targets = stock_camera.parent.ssk_history_tooltips.children
 assert(#rate_targets == 3 and #net_targets == 3, "partial or unrecorded rates have no tooltip")
+assert(rate_targets[1].raise_hover_events and net_targets[1].raise_hover_events and stock_targets[1].raise_hover_events,
+  "time targets must request Factorio hover events")
 local first_tooltip = tooltip_text(rate_targets[1].tooltip)
 assert(first_tooltip:find("50s ago to 35s ago\nMade  10 items/s\nUsed  8 items/s\nNet  2 items/s", 1, true))
 assert(first_tooltip:find("iron-gear-wheel", 1, true) and first_tooltip:find("Unattributed use  1 items/s", 1, true))

@@ -1,7 +1,8 @@
 -- History reads completed sampler bins and chest scans without changing them.
 local Sampler = require("scripts.sampler")
+local Graph = require("scripts.graph")
 
-local H = { OTHER = "other" }
+local H = { OTHER = "other", LABS = "labs" }
 local TICKS_PER_SECOND = 60
 local MAX_BUCKETS = 60
 local ROLLING_MIN_PERIOD = 3600
@@ -68,7 +69,7 @@ local function material_totals(source, sidx, key, recipes)
   source.made, source.used, source.estimates = made, used, estimates
 end
 
-local function rate_points(result, sources)
+local function rate_points(result, sources, lab_input)
   local width = result.bucket_seconds * TICKS_PER_SECOND
   local first, index = result.start_tick, 1
   local totals = {}
@@ -98,6 +99,9 @@ local function rate_points(result, sources)
       local estimated_total = 0
       for _, amount in pairs(estimates) do estimated_total = estimated_total + amount end
       local scale = estimated_total > used and used / estimated_total or 1
+      if lab_input and used - estimated_total > 1e-9 then
+        estimates[H.LABS] = used - estimated_total
+      end
       point.made, point.used, point.net = made / seconds, used / seconds, (made - used) / seconds
       point.uses = {}
       for key, amount in pairs(estimates) do
@@ -119,6 +123,7 @@ local function group_uses(result, totals)
   local keys = {}
   for key in pairs(totals) do keys[#keys + 1] = key end
   table.sort(keys, function(a, b)
+    if a == H.LABS or b == H.LABS then return a == H.LABS and b ~= H.LABS end
     if totals[a] == totals[b] then return a < b end
     return totals[a] > totals[b]
   end)
@@ -138,7 +143,7 @@ local function group_uses(result, totals)
         local rate = math.min(left, point.uses[key] or 0)
         bands[key], left = rate, left - rate
       end
-      if left > 0 then has_other = true end
+      if left > 1e-9 then has_other = true end
       bands[H.OTHER] = left
       point.uses = bands
     end
@@ -303,7 +308,8 @@ function H.build(sidx, period, key)
       material_totals(source, sidx, key, source.last > result.start_tick and recipes or nil)
     end
   end
-  group_uses(result, rate_points(result, sources))
+  local lab_inputs = result.stock_supported and Graph.lab_inputs()
+  group_uses(result, rate_points(result, sources, lab_inputs and lab_inputs[key]))
   if requested >= ROLLING_MIN_PERIOD then
     result.rolling_seconds = result.bucket_seconds * ROLLING_BUCKETS
     result.rolling_points = rolling_points(result.points, result.rolling_seconds * TICKS_PER_SECOND)

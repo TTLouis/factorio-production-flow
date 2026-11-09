@@ -1,5 +1,6 @@
 -- Personal Balance thresholds. Evaluation uses the current Balance data only.
 local Balance = require("scripts.balance")
+local Groups = require("scripts.groups")
 local Sampler = require("scripts.sampler")
 local Surfaces = require("scripts.surfaces")
 
@@ -13,11 +14,14 @@ local function material(key)
   return kind, name, proto
 end
 
-function Watch.available(us, key)
-  local items = us.bal_favs and us.bal_favs.items
-  if not (items and items[key]) then return false end
+function Watch.available(player_index, us, key)
+  local favourites = us.bal_favs
+  if not (favourites and key) then return false end
   local _, _, proto = material(key)
-  return proto ~= nil and proto ~= false
+  if not proto then return false end
+  if favourites.items and favourites.items[key] then return true end
+  local groups = favourites.groups
+  return groups ~= nil and next(groups) ~= nil and groups[Groups.of(player_index, key)] == true
 end
 
 local function on_surface(us, surface)
@@ -44,6 +48,14 @@ end
 
 local function reset_pending(watch)
   watch.made_since, watch.empty_since = nil, nil
+end
+
+function Watch.pause_unstarred(player_index, us)
+  for _, watches in pairs(us.bal_watches or {}) do
+    for key, watch in pairs(watches) do
+      if not Watch.available(player_index, us, key) then reset_pending(watch) end
+    end
+  end
 end
 
 function Watch.reset_pending(us, key)
@@ -84,7 +96,7 @@ local function empty_minutes(stock, net)
   return seconds and seconds / 60 or math.huge
 end
 
-function Watch.evaluate(_, us, seconds, stock, stock_known, nodes)
+function Watch.evaluate(player, us, seconds, stock, stock_known, nodes)
   local watches = on_surface(us, us.sidx)
   if not watches then return end
 
@@ -94,7 +106,7 @@ function Watch.evaluate(_, us, seconds, stock, stock_known, nodes)
   local tick = game.tick
   local warnings = {}
   for key, watch in pairs(watches) do
-    if Watch.available(us, key) then
+    if Watch.available(player.index, us, key) then
       local last = watch.last_observed
       if watch.window ~= window or not last or tick < last or tick - last > MAX_GAP_TICKS then
         reset_pending(watch)
@@ -123,6 +135,8 @@ function Watch.evaluate(_, us, seconds, stock, stock_known, nodes)
         end
         warnings[key] = warning
       end
+    else
+      reset_pending(watch)
     end
   end
   return warnings
@@ -145,7 +159,7 @@ local function number_field(fields, name, caption, value, enabled)
 end
 
 function Watch.open(player, us, surface, key)
-  if not Watch.available(us, key) then return end
+  if not Watch.available(player.index, us, key) then return end
   Watch.close(player)
   local kind, name, proto = material(key)
   local watch = Watch.get(us, surface, key) or {}
@@ -202,7 +216,7 @@ end
 function Watch.apply(player, us, surface, key, remove)
   local f = player.gui.screen[Watch.NAME]
   if not f then return false end
-  if f.tags.surface ~= surface or f.tags.key ~= key or not Watch.available(us, key) then
+  if f.tags.surface ~= surface or f.tags.key ~= key or not Watch.available(player.index, us, key) then
     Watch.close(player)
     return false
   end

@@ -56,21 +56,8 @@ end
 ---------------------------------------------------------------------------
 -- presets (D19)
 ---------------------------------------------------------------------------
-local function lab_inputs()
-  local set, list = {}, {}
-  for _, e in pairs(prototypes.get_entity_filtered({ { filter = "type", type = "lab" } })) do
-    for _, n in pairs(e.lab_inputs or {}) do
-      if type(n) == "table" then n = n.name end
-      local k = "item/" .. n
-      if not set[k] then set[k] = true; list[#list + 1] = n end
-    end
-  end
-  table.sort(list)
-  return set, list
-end
-
 function V.presets()
-  local _, packs = lab_inputs()
+  local _, packs = Graph.lab_inputs()
   local out = {
     { id = "all", name = "Everything" },
     { id = "science", name = "Sciences only" },
@@ -90,7 +77,7 @@ local function preset_roots(pi, preset, nodes)
   if preset == "all" or not preset then return nil end
   local roots = {}
   if preset == "science" then
-    roots = lab_inputs()
+    roots = Graph.lab_inputs()
   elseif string.sub(preset, 1, 5) == "pack:" then
     roots["item/" .. string.sub(preset, 6)] = true
   elseif string.sub(preset, 1, 6) == "roots:" then
@@ -684,6 +671,7 @@ function V.build(player, us, W, viewH)
     local f = (l.a.kind == "recipe") and factor_of(l.b) or factor_of(l.a)
     l.w = sq(l.rate * f)
   end
+  local lab_inputs = Graph.lab_inputs()
   for _, n in pairs(nodes) do
     local f = factor_of(n)
     local cat = n.catalyst or 0
@@ -700,6 +688,9 @@ function V.build(player, us, W, viewH)
     end
     n.stub_in = (n.kind == "item" or n.kind == "fluid") and math.max(0, n.prod - shown - cat) or 0
     if n.stub_out < EPS then n.stub_out = 0 end
+    local key = n.group_key or n.key
+    local measured = lab_inputs[key] and m.residuals[key]
+    if measured and measured.other_sink >= EPS then n.lab_use = math.min(n.stub_out, measured.other_sink) end
     if n.stub_in < EPS then n.stub_in = 0 end
     n.w_stub_out, n.w_stub_in = sq(n.stub_out * f), sq(n.stub_in * f)
     local win, wout = n.w_stub_in, n.w_stub_out
@@ -885,6 +876,7 @@ function V.split_raw(nodes, links, pi)
           prod = n.prod * share, cons = g.rate + ((i == 1) and n.stub_out or 0),
           total_prod = n.prod, total_cons = n.cons, copies = copies, share = share,
           stub_in = n.stub_in * share, stub_out = (i == 1) and n.stub_out or 0,
+          lab_use = i == 1 and n.lab_use or nil,
           w_stub_in = n.w_stub_in * share, w_stub_out = (i == 1) and n.w_stub_out or 0,
           ins = (i == 1) and n.ins or {}, outs = g.links, sin = (i == 1) and n.sin or 0, sout = g.rate,
           tier = n.tier, era = n.era, shown_in = n.shown_in,

@@ -452,24 +452,25 @@ local function focus_toolbar(bar, us, player)
   if us.neighborhood then
     actions.add { type = "sprite-button", name = "ssk_watch_action", style = "tool_button", sprite = "utility/warning",
       tags = { ssk_ui = "watch" }, tooltip = "Configure this material's watch" }
-    actions.add { type = "sprite-button", name = "ssk_machine_action", style = "tool_button", sprite = "utility/map",
-      tags = { ssk_ui = "machine_status" }, tooltip = "Inspect machines that make or use this material" }
   end
+  local machines = actions.add { type = "sprite-button", name = "ssk_machine_action", style = "tool_button", sprite = "utility/map",
+    tags = { ssk_ui = "machine_status" }, tooltip = "Inspect machines that make or use this material" }
+  machines.enabled = us.focus ~= nil
   zoom_buttons(actions, true)
   label_toggle(actions, us)
   settings_button(actions, us)
 end
 
-function SK.update_balance_actions(panel, us, key)
+function SK.update_balance_actions(panel, us, key, player_index)
   local bar = panel.ssk_bar
   local strip = bar and bar.ssk_toolbar_strip
   local actions = strip and strip.ssk_toolbar_rows.ssk_toolbar_main.ssk_toolbar_actions
   if not actions then return end
   local watch, machines = actions.ssk_watch_action, actions.ssk_machine_action
-  watch.enabled = Watch.available(us, key)
+  watch.enabled = Watch.available(player_index, us, key)
   watch.toggled = watch.enabled and Watch.get(us, us.sidx, key) ~= nil
   watch.tooltip = watch.enabled and "Configure this material's watch on the selected surface"
-    or "Star this material to configure a watch"
+    or "Star this material or its group to configure a watch"
   machines.enabled = key ~= nil
 end
 
@@ -710,8 +711,19 @@ local function draw(canvas, L, us, st, player, W, H)
         local e = add_sprite(canvas, S.bar(palette.GREY), tip)
         place(e, x, y, View.STUB, h)
       end
+      local lab_use = n.lab_use or 0
+      local other_use = n.stub_out - lab_use
+      local lab_tip = lab_use > 0 and ("Labs (estimated): " .. fmt(lab_use) .. "/s")
       if n.stub_out > 0 then
-        stub(n.x + View.NODE_W, n.stub_out_y, n.t_stub_out, string.format("Other uses of %s: %s/s\n(not shown: outside this view, labs, fuel, building, launches…)", display_name(n), fmt(n.stub_out)))
+        local use_tip = lab_tip and (lab_tip .. "\nEstimated from consumption outside recorded recipes.")
+          or string.format("Other uses of %s: %s/s\n(not shown: outside this view, labs, fuel, building, launches…)", display_name(n), fmt(n.stub_out))
+        if lab_tip and other_use > 1e-4 then use_tip = use_tip .. "\nOther uses: " .. fmt(other_use) .. "/s" end
+        local stub_x = n.x + View.NODE_W
+        stub(stub_x, n.stub_out_y, n.t_stub_out, use_tip)
+        if POLY and lab_tip then
+          local hit = add_sprite(canvas, "ssk-node-hit", use_tip)
+          place(hit, stub_x, n.stub_out_y, View.STUB, n.t_stub_out)
+        end
         count = count + 1
       end
       if n.stub_in > 0 then
@@ -731,7 +743,8 @@ local function draw(canvas, L, us, st, player, W, H)
           n.ginfo.super_name, fmt(n.sout), (n.share or 0) * 100, fmt(n.total_prod or n.prod), n.copies)
       end
       if n.stub_in > 0 then tip[#tip + 1] = "Other sources: " .. fmt(n.stub_in) .. "/s" end
-      if n.stub_out > 0 then tip[#tip + 1] = "Other uses: " .. fmt(n.stub_out) .. "/s" end
+      if lab_tip then tip[#tip + 1] = lab_tip end
+      if other_use > 1e-4 then tip[#tip + 1] = "Other uses: " .. fmt(other_use) .. "/s" end
       if (n.catalyst or 0) > 0 then tip[#tip + 1] = "Catalyst (consumed and returned, netted out): " .. fmt(n.catalyst) .. "/s" end
       for _, lp in ipairs(n.loops) do
         local what = rt(base_key(lp.what))
@@ -766,6 +779,7 @@ local function draw(canvas, L, us, st, player, W, H)
         tooltip[#tooltip+1]=" consumed"
         if n.kind~="recipe" then tooltip[#tooltip+1]="\nConsumer production: "..fmt(n.prod).." "..units(n) end
       end
+      if lab_tip then tooltip[#tooltip + 1] = "\n" .. lab_tip end
       local bar
       if POLY then
         POLY.rect(n.x, n.y, View.NODE_W, n.h, Canvas.col(n.color or n.ginfo.color, 1))

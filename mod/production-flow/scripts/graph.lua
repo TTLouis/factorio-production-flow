@@ -6,6 +6,22 @@ local G = {}
 
 function G.key(t, n) return t .. "/" .. n end
 
+function G.lab_inputs()
+  local set, names = {}, {}
+  for _, lab in pairs(prototypes.get_entity_filtered({ { filter = "type", type = "lab" } })) do
+    for _, input in pairs(lab.lab_inputs or {}) do
+      local name = type(input) == "table" and input.name or input
+      local key = G.key("item", name)
+      if not set[key] then
+        set[key] = true
+        names[#names + 1] = name
+      end
+    end
+  end
+  table.sort(names)
+  return set, names
+end
+
 -- expected output per craft, and the part of it that productivity applies to
 local function expected(p)
   local amt = p.amount
