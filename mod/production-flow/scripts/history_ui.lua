@@ -3,6 +3,7 @@
 local Canvas = require("scripts.canvas")
 local Graph = require("scripts.graph")
 local History = require("scripts.history")
+local Geometry = require("scripts.ribbon_geometry")
 
 local H = {}
 local VIEWS = {
@@ -23,7 +24,7 @@ local BASELINE = { 0.56, 0.54, 0.52, 1 }
 local TICK_TEXT = { 0.78, 0.75, 0.71, 1 }
 local PLOT_GAP = 64
 local PLOT_LEFT, PLOT_RIGHT = 52, 24
-local STOCK_SLOTS = 12
+local STOCK_MARKER_HALF = 3
 
 local function color(rgb)
   return { rgb[1] / 255, rgb[2] / 255, rgb[3] / 255, 1 }
@@ -77,27 +78,25 @@ local function spacer(parent, name)
   return element
 end
 
-function H.add_header(header, width)
-  label(header, "ssk_history_material", "", "caption_label", math.max(80, math.min(240, width - 156)))
-  spacer(header, "ssk_history_spacer")
-  if width >= 620 then
-    small(header, "ssk_history_summary", "", width - 410).style.horizontal_align = "right"
-  end
-end
-
-function H.show_header(header, visible)
-  header.ssk_history_material.visible = visible
-  header.ssk_history_spacer.visible = visible
-  if header.ssk_history_summary then header.ssk_history_summary.visible = visible end
-end
-
-local function build(panel, width, height, chart_width)
+local function build(panel, width, chart_width, toolbar_height, scroll_height)
   panel.style.width = width
-  local controls = panel.add { type = "frame", name = "ssk_history_controls", style = "subheader_frame", direction = "vertical" }
-  controls.style.left_padding, controls.style.right_padding = 8, 8
-  controls.style.top_padding, controls.style.bottom_padding = 0, 4
+  local toolbar = panel.add { type = "frame", name = "ssk_history_toolbar", style = "subheader_frame", direction = "vertical" }
+  toolbar.style.height = toolbar_height
+  toolbar.style.left_padding, toolbar.style.right_padding = 12, 12
+  toolbar.style.top_padding, toolbar.style.bottom_padding = 8, 8
+  toolbar.style.horizontally_stretchable = true
+  local controls = toolbar.add { type = "flow", name = "ssk_history_controls", direction = "vertical" }
   controls.style.horizontally_stretchable = true
-  if width < 620 then small(controls, "ssk_history_summary", "", chart_width) end
+  controls.style.vertical_spacing = 8
+  local header = row(controls, "ssk_history_header")
+  header.style.height = 40
+  label(header, "ssk_history_material", "", "caption_label", math.min(280, chart_width))
+  if width >= 620 then
+    spacer(header)
+    small(header, "ssk_history_summary", "").style.horizontal_align = "right"
+  else
+    small(controls, "ssk_history_summary", "", chart_width)
+  end
   local filters = row(controls, "ssk_history_views")
   filters.style.height = 28
   label(filters, nil, "View", "caption_label")
@@ -109,7 +108,7 @@ local function build(panel, width, height, chart_width)
   local scroll = panel.add { type = "scroll-pane", name = "ssk_history_scroll", style = "naked_scroll_pane",
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
   scroll.style.width = width - 4
-  scroll.style.height = math.max(72, height - (width < 620 and 56 or 40))
+  scroll.style.height = scroll_height
   local body = scroll.add { type = "flow", name = "ssk_history_body", direction = "vertical" }
   body.style.width = chart_width
   body.style.left_margin, body.style.top_margin = 8, 4
@@ -211,6 +210,63 @@ local function axes(painter, h, width, height, top, minimum, maximum, step)
   return x, y, left, right, plot_top
 end
 
+-- The bucket midpoint holds the sampled rate. A shared easing curve keeps the
+-- Used outline on top of its product bands without overshoot between samples.
+local function rate_paths(points, x)
+  local paths, path, previous = {}, nil, nil
+  local function add(tick, a, b, mix)
+    path[#path + 1] = { x = x(tick), a = a, b = b, mix = mix }
+  end
+  for _, point in ipairs(points) do
+    if point.made ~= nil and not point.partial then
+      local middle = (point.start_tick + point.end_tick) / 2
+      if previous and previous.end_tick == point.start_tick then
+        local from = (previous.start_tick + previous.end_tick) / 2
+        local steps = math.max(4, math.min(8, math.ceil((x(middle) - x(from)) / 4)))
+        for i = 1, steps - 1 do
+          local t = i / steps
+          add(from + (middle - from) * t, previous, point, t * t * (3 - 2 * t))
+        end
+      else
+        if previous then add(previous.end_tick, previous, previous, 0) end
+        path = {}
+        paths[#paths + 1] = path
+        add(point.start_tick, point, point, 0)
+      end
+      add(middle, point, point, 0)
+      previous = point
+    end
+  end
+  if previous then add(previous.end_tick, previous, previous, 0) end
+  return paths
+end
+
+local function blend(a, b, fraction)
+  return a + (b - a) * fraction
+end
+
+local function trace(painter, path, y, field, line_color, dashed)
+  local first = path[1]
+  local start_x, previous_x = first.x, first.x
+  local previous_y = y(first.a[field])
+  local offset = 0
+  local function line(x1, y1, x2, y2)
+    painter.line(x1, y1, x2, y2, line_color, 2, dashed, offset)
+    offset = (offset + math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)) % 8
+  end
+  for i = 2, #path do
+    local sample = path[i]
+    local pos = y(blend(sample.a[field], sample.b[field], sample.mix))
+    if pos ~= previous_y then
+      if previous_x > start_x then line(start_x, previous_y, previous_x, previous_y) end
+      line(previous_x, previous_y, sample.x, pos)
+      start_x, previous_y = sample.x, pos
+    end
+    previous_x = sample.x
+  end
+  if previous_x > start_x then line(start_x, previous_y, previous_x, previous_y) end
+end
+
 local function draw_rates(painter, h, width, height, view)
   local show_made = view == "all" or view == "made"
   local show_used = view == "all" or view == "used"
@@ -228,122 +284,66 @@ local function draw_rates(painter, h, width, height, view)
   local min_value = view == "net" and -max_value or 0
   local x, y = axes(painter, h, width, height, 0, min_value, max_value, step)
 
+  local paths = rate_paths(h.points, x)
   if show_used then
-    -- Independent quads in a triangle strip. Degenerate vertices keep adjacent
-    -- buckets separate even if there is unrecorded time between them.
-    local layers = {}
-    for i in ipairs(h.usage_keys) do layers[i] = {} end
-    for _, p in ipairs(h.points) do
-      if p.used and p.used > 0 and not p.partial then
-        local start, finish = x(p.start_tick), x(p.end_tick)
-        local base = 0
-        for i, key in ipairs(h.usage_keys) do
-          local used = p.uses[key] or 0
-          if used > 0 then
-            local upper, lower = y(base + used), y(base)
-            local points = layers[i]
-            if #points > 0 then
-              points[#points + 1] = points[#points]
-              points[#points + 1] = { start, upper }
-            end
-            points[#points + 1] = { start, upper }
-            points[#points + 1] = { start, lower }
-            points[#points + 1] = { finish, upper }
-            points[#points + 1] = { finish, lower }
-            base = base + used
-          end
+    for _, path in ipairs(paths) do
+      local base = {}
+      for i, key in ipairs(h.usage_keys) do
+        local vertices, visible = {}, false
+        for j, sample in ipairs(path) do
+          local lower = base[j] or 0
+          local amount = blend(sample.a.uses[key] or 0, sample.b.uses[key] or 0, sample.mix)
+          local upper = lower + amount
+          vertices[#vertices + 1] = { sample.x, y(upper) }
+          vertices[#vertices + 1] = { sample.x, y(lower) }
+          visible = visible or amount > 0
+          base[j] = upper
         end
-      end
-    end
-    for i, key in ipairs(h.usage_keys) do
-      painter.polygon(layers[i], color(USES[key == History.OTHER and 4 or i]))
-    end
-  end
-  local function trace(field, rgb, dashed)
-    local previous, offset = nil, 0
-    local line_color = color(rgb)
-    for _, p in ipairs(h.points) do
-      if p[field] ~= nil and not p.partial then
-        local start, finish, value = x(p.start_tick), x(p.end_tick), y(p[field])
-        if previous and previous.end_tick == p.start_tick then
-          local last = y(previous[field])
-          if last ~= value then
-            painter.line(start, last, start, value, line_color, 2, dashed, offset)
-            offset = (offset + math.abs(last - value)) % 8
-          end
-        else
-          offset = 0
-        end
-        painter.line(start, value, finish, value, line_color, 2, dashed, offset)
-        offset = (offset + finish - start) % 8
-        previous = p
+        if visible then painter.polygon(vertices, color(USES[key == History.OTHER and 4 or i])) end
       end
     end
   end
-  if show_made then trace("made", MADE, false) end
-  if show_used then trace("used", USED, true) end
-  if view == "net" then trace("net", NET, false) end
-end
-
--- Keep every completed scan and at most one estimate per visual slot. Bars
--- retain their exact scan or estimate times on the rate chart's time axis.
-local function stock_bars(h, clearance)
-  local samples, occupied, measurements = {}, {}, {}
-  local stride = (h.end_tick - h.start_tick) / STOCK_SLOTS
-  local function slot(sample) return math.floor((sample.tick - h.start_tick) / stride) end
-  local function near_scan(tick)
-    for _, measured_tick in ipairs(measurements) do
-      if math.abs(tick - measured_tick) < clearance then return true end
-    end
-    return false
+  for _, path in ipairs(paths) do
+    if show_made then trace(painter, path, y, "made", color(MADE), false) end
+    if show_used then trace(painter, path, y, "used", color(USED), true) end
+    if view == "net" then trace(painter, path, y, "net", color(NET), false) end
   end
-  for _, sample in ipairs(h.stock) do
-    if sample.measured then
-      occupied[slot(sample)] = true
-      measurements[#measurements + 1] = sample.tick
-    end
-  end
-  for _, sample in ipairs(h.stock) do
-    local position = slot(sample)
-    if sample.measured or (not occupied[position] and not near_scan(sample.tick)) then
-      samples[#samples + 1] = sample
-      occupied[position] = true
-    end
-  end
-  return samples
 end
 
 local function draw_stock(painter, h, width, height, top)
-  local plot_width = width - PLOT_LEFT - PLOT_RIGHT
-  local bar_width = math.min(42, plot_width / STOCK_SLOTS * 0.72)
-  local clearance = (bar_width + 4) / plot_width * (h.end_tick - h.start_tick)
-  local samples = stock_bars(h, clearance)
   local highest = 0
-  for _, sample in ipairs(samples) do highest = math.max(highest, sample.count) end
+  for _, sample in ipairs(h.stock) do highest = math.max(highest, sample.count) end
   local step = nice_step(highest, height < 100 and 2 or height < 140 and 3 or 4)
   local max_value = math.max(step, math.ceil(highest / step) * step)
   local x, y, left, right, plot_top = axes(painter, h, width, height, top, 0, max_value, step)
   local bottom, last_label = y(0), left - 56
-  for index, sample in ipairs(samples) do
+  local function edge(a, b)
+    return Geometry.round(x((a.tick + b.tick) / 2))
+  end
+  for i, sample in ipairs(h.stock) do
     local center = x(sample.tick)
-    local previous, next_sample = samples[index - 1], samples[index + 1]
-    local spacing = math.min(previous and center - x(previous.tick) or math.huge,
-      next_sample and x(next_sample.tick) - center or math.huge)
-    -- Leave a gap between neighboring scans, even when the visible period
-    -- greatly exceeds the retained scan history. Keep an edge bar one pixel wide.
-    local half = math.max(0.5, math.min(bar_width, spacing * 0.8, spacing - 2) / 2)
-    local x1 = math.max(left, math.min(right - 1, center - half))
-    local x2 = math.min(right, math.max(x1 + 1, center + half))
-    local y1 = math.min(bottom - 2, y(sample.count))
+    local previous, following = h.stock[i - 1], h.stock[i + 1]
+    local x1 = sample.joined and previous and edge(previous, sample)
+      or math.max(left, Geometry.round(center - STOCK_MARKER_HALF))
+    local x2 = following and following.joined and edge(sample, following)
+      or math.min(right, Geometry.round(center + STOCK_MARKER_HALF))
+    -- Very close scans can share a pixel on long windows. Keep measurements
+    -- visible and use the same rounded edge for both bars in a joined pair.
+    if x1 == x2 and sample.measured then
+      x1 = math.min(x1, right - 1)
+      x2 = x1 + 1
+    end
+    local y1 = math.min(bottom - 1, y(sample.count))
     painter.rect(x1, y1, x2 - x1, bottom - y1, color(sample.measured and MEASURED or ESTIMATED))
-    if not sample.measured then
-      for i = 1, 3 do
-        local stripe = y1 + (bottom - y1) * i / 4
-        local rise = math.min(4, (bottom - y1) / 4)
-        painter.line(x1, stripe + rise, x2, stripe, color(STRIPE), 1)
+    if not sample.measured and x2 > x1 and bottom - y1 >= 6 then
+      local rise = math.min(3, (x2 - x1) / 4)
+      for stripe = 1, 3 do
+        local line_y = y1 + (bottom - y1) * stripe / 4
+        painter.line(x1, line_y + rise, x2, line_y, color(STRIPE), 1)
       end
-    elseif center - last_label >= 56 then
-      painter.text(center, math.max(plot_top - 4, y1 - 8), number(sample.count), TICK_TEXT, "center")
+    elseif sample.measured and center - last_label >= 56 then
+      local label_x = math.min(right - 12, math.max(left + 12, center))
+      painter.text(label_x, math.max(plot_top - 4, y1 - 8), number(sample.count), TICK_TEXT, "center")
       last_label = center
     end
   end
@@ -363,11 +363,15 @@ local function camera(player, parent, name, painter, width, height, top)
   end
 end
 
-function H.fill(player, panel, header, us, key, width, height)
+function H.fill(player, panel, us, key, width, height)
   local chart_width = width - 30
-  if not panel.ssk_history_scroll then build(panel, width, height, chart_width) end
-  local controls = panel.ssk_history_controls
-  local body = panel.ssk_history_scroll.ssk_history_body
+  local toolbar_height = width < 620 and 116 or 92
+  local scroll_height = math.max(72, height - toolbar_height - 56)
+  if not panel.ssk_history_scroll then build(panel, width, chart_width, toolbar_height, scroll_height) end
+  local controls = panel.ssk_history_toolbar.ssk_history_controls
+  local header = controls.ssk_history_header
+  local scroll = panel.ssk_history_scroll
+  local body = scroll.ssk_history_body
   local view = us.bal_history_view or "all"
   for _, spec in ipairs(VIEWS) do
     controls.ssk_history_views["ssk_history_" .. spec[1]].state = spec[1] == view
@@ -434,9 +438,11 @@ function H.fill(player, panel, header, us, key, width, height)
   body.ssk_history_stock_title.ssk_history_stock_legend.visible = stock == true
   body.ssk_history_stock_note.visible = stock == true
 
-  local plot_height = height - (width < 620 and 236 or 216)
-  local rate_height = math.max(72, math.floor(plot_height * 0.53))
-  local stock_height = math.max(68, math.floor(plot_height * 0.47))
+  -- Stock's heading and note take about 48 px of its third of the inspector.
+  local stock_height = math.max(68, math.floor(height / 3) - 48)
+  -- Leave room for the coverage message so the plot cameras keep their size.
+  local plot_height = scroll_height - 184
+  local rate_height = math.max(72, plot_height - stock_height)
   local stock_top = rate_height + PLOT_GAP
   local painter
   if active or stock then

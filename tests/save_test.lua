@@ -241,10 +241,17 @@ local function exercise_history(UI, player, root, us, case)
   local function click(element)
     assert(UI.on_click{player_index=player.index,element=assert(element)},"History action was not handled")
   end
-  click(find_named(split.ssk_balance_focus,"ssk_bal_flow"))
-  assert(find_node(split.ssk_balance_focus),"Flow did not render for the same material")
-  click(find_named(split.ssk_balance_focus,"ssk_bal_history"))
-  local panel=assert(find_named(split.ssk_balance_focus,"ssk_history_panel"),"History did not open in Balance")
+  local tabs=split.ssk_balance_focus.ssk_balance_inspector_tabs
+  assert(tabs.type=="tabbed-pane" and #tabs.tabs==2,"Balance inspector must use native tabs")
+  local function select_tab(index, expected)
+    tabs.selected_tab_index=index
+    assert(UI.on_tab_changed{player_index=player.index,element=tabs},"Inspector tab change was not handled")
+    assert(us.bal_mode==expected and tabs.selected_tab_index==index,"Inspector tab selection did not persist")
+  end
+  select_tab(1,"flow")
+  assert(find_node(tabs.ssk_balance_flow_panel),"Flow did not render for the same material")
+  select_tab(2,"history")
+  local panel=tabs.ssk_history_panel
   assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera")
   assert(SK.balance_state(us).focus==case.focus and items.valid,"History lost the Balance selection or scroller")
   if case.name=="history-rates-and-stock" then
@@ -258,12 +265,11 @@ local function exercise_history(UI, player, root, us, case)
     click(row_for(items,"item/copper-plate"))
     assert(SK.balance_state(us).focus=="item/copper-plate" and items.valid,"Selecting a material lost History or the Balance list")
     click(row_for(items,case.focus))
-    panel=assert(find_named(split.ssk_balance_focus,"ssk_history_panel"))
+    assert(tabs.ssk_history_panel==panel and tabs.selected_tab_index==2,"Selecting a material rebuilt History")
   end
   local metric=assert(find_ui(panel,case.metric or "all","view"),"History metric control is missing")
   metric.state=true
   assert(UI.on_checked{player_index=player.index,element=metric},"History metric change was not handled")
-  panel=assert(find_named(split.ssk_balance_focus,"ssk_history_panel"))
   local mode_control=assert(find_ui(panel,case.metric or "all","view"))
   assert(mode_control.state,"Wrong History metric selected")
   local function choose_period(index)
@@ -285,6 +291,9 @@ local function exercise_history(UI, player, root, us, case)
   end
   if case.focus=="item/iron-plate" then
     assert(measured>=2 and (case.long_period or estimated>0),"History must render measured and estimated stock")
+    if case.name=="history-rates-and-stock" then
+      assert(history.stock[#history.stock].joined,"The first capture needs rates through the latest completed scan")
+    end
     assert(#history.usage_keys>0,"Active iron plate must have usage history")
     assert(find_named(panel,"ssk_history_stock_camera"),"Item History needs a native stock plot")
   else
@@ -295,9 +304,8 @@ local function exercise_history(UI, player, root, us, case)
       choose_period(2)
       items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
     end
-    click(find_named(split.ssk_balance_focus,"ssk_bal_flow"))
-    assert(items.valid and find_node(split.ssk_balance_focus),"Returning to Flow lost the selection or list")
-    assert(not panel.visible,"Flow left History visible")
+    select_tab(1,"flow")
+    assert(items.valid and find_node(tabs.ssk_balance_flow_panel),"Returning to Flow lost the selection or list")
   end
   log("BALANCE HISTORY PASS "..case.name.." measured="..measured.." estimated="..estimated)
 end
@@ -525,6 +533,7 @@ function T.tick(UI, Sampler)
     -- results let this native view exercise interpolation without waiting for scans.
     local scope=game.surfaces.nauvis.index
     local latest=storage.stock[#storage.stock]
+    if game.tick<latest.tick+120 then return end -- Let the rate sampler close the bucket containing the latest scan.
     local count=(latest.s[scope] or {})["item/iron-plate"] or 0
     table.insert(storage.stock,1,{tick=game.tick-530*60,s={[scope]={["item/iron-plate"]=count+1600}}})
     table.insert(storage.stock,2,{tick=game.tick-210*60,s={[scope]={["item/iron-plate"]=count+750}}})

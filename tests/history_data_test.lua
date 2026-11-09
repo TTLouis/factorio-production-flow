@@ -151,6 +151,7 @@ scan(690, 0, 1000)
 storage.chest_stock = { batch = { s = { { [material] = 1e6 } } } }
 h = H.build(1, 12, material)
 assert(stock_at(h, 30).measured and stock_at(h, 630).measured and stock_at(h, 690).measured)
+assert(not stock_at(h, 30).joined and stock_at(h, 630).joined and stock_at(h, 690).joined)
 near(stock_at(h, 30).count, 100); near(stock_at(h, 630).count, 130); near(stock_at(h, 690).count, 0)
 assert(not stock_at(h, 300).measured)
 near(stock_at(h, 300).count, 185.5)
@@ -163,10 +164,13 @@ assert(#H.build(999, 12, material).stock == 0)
 
 local clipped = H.build(1, 10, material)
 assert(not stock_at(clipped, 30) and stock_at(clipped, 300))
+assert(clipped.stock[1].tick == clipped.start_tick and not clipped.stock[1].measured,
+  "a complete scan interval should fill the visible time axis from its left edge")
 near(stock_at(clipped, 300).count, 185.5)
 storage.bins[4] = nil
 h = H.build(1, 12, material)
 assert(stock_at(h, 30) and stock_at(h, 630) and not stock_at(h, 300), "no estimates over a rate gap")
+assert(not stock_at(h, 630).joined, "a measured scan following a gap must start a new run")
 assert(stock_at(h, 660) and stock_at(h, 660).count >= 0, "later interval can still be estimated")
 fine(4, stats(20, 0), stats(500, 0))
 table.insert(storage.stock, 2, { tick = 390, s = { [2] = { [material] = 800 } } })

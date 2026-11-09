@@ -113,7 +113,7 @@ end
 local fill = {}
 
 function fill.balance(player, c, us, only_auto, keep_balance_rows)
-  if not c.ssk_balance_split then
+  if not c.ssk_balance_split or not c.ssk_balance_split.ssk_balance_focus.ssk_balance_inspector_tabs then
     c.clear()
     local split = c.add { type = "flow", name = "ssk_balance_split", direction = "horizontal" }
     split.style.horizontal_spacing = 12
@@ -123,40 +123,32 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     left.style.width, left.style.height = left_w, us.canvas_h + 100
     us.bal_width = left_w - 24
     us.bal_height = us.canvas_h + 100
-    -- One mode strip above the active inspector's vanilla inset.
     local right = split.add { type = "flow", name = "ssk_balance_focus", direction = "vertical" }
-    us.bal_chart_w = us.canvas_w - left_w - 12
-    right.style.width, right.style.height = us.bal_chart_w, us.canvas_h + 100
-    right.style.vertical_spacing = 0
-    local modes = right.add { type = "frame", name = "ssk_balance_modes", style = "subheader_frame", direction = "horizontal" }
-    modes.style.height = 44
-    modes.style.padding = 8
+    local right_w = us.canvas_w - left_w - 12
+    us.bal_chart_w = right_w - 8 -- Vanilla tab content has 4 px of padding on each side.
+    right.style.width, right.style.height = right_w, us.canvas_h + 100
+    local modes = right.add { type = "tabbed-pane", name = "ssk_balance_inspector_tabs" }
+    modes.style.top_margin = 0
     modes.style.horizontally_stretchable = true
-    modes.style.vertical_align = "center"
-    modes.add { type = "sprite-button", name = "ssk_bal_flow", style = "tool_button", caption = "Flow",
-      tags = { ssk_ui = "balance_mode", mode = "flow" }, tooltip = "Show the selected material's inputs and uses" }
-    modes.add { type = "sprite-button", name = "ssk_bal_history", style = "tool_button", caption = "History",
-      tags = { ssk_ui = "balance_mode", mode = "history" }, tooltip = "Show the selected material's rates and chest stock over time" }
-    HistoryUI.add_header(modes, us.bal_chart_w)
-    right.add { type = "frame", name = "ssk_balance_flow_panel", style = "inside_deep_frame", direction = "vertical" }
-    right.add { type = "frame", name = "ssk_history_panel", style = "inside_deep_frame", direction = "vertical" }
+    local flow = modes.add { type = "tab", caption = "Flow", tooltip = "Show the selected material's inputs and uses" }
+    local flow_panel = modes.add { type = "frame", name = "ssk_balance_flow_panel", style = "inside_deep_frame", direction = "vertical" }
+    modes.add_tab(flow, flow_panel)
+    local history = modes.add { type = "tab", caption = "History", tooltip = "Show the selected material's rates and chest stock over time" }
+    local history_panel = modes.add { type = "frame", name = "ssk_history_panel", style = "inside_deep_frame", direction = "vertical" }
+    modes.add_tab(history, history_panel)
+    modes.selected_tab_index = us.bal_mode == "history" and 2 or 1
   end
   local split = c.ssk_balance_split
   local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto or keep_balance_rows)
   local fx = SK.balance_state(us)
   if not fx.focus then fx.focus = first end
   fx.sel = fx.focus
-  local right = split.ssk_balance_focus
-  local mode = right.ssk_balance_modes
-  local history = us.bal_mode == "history"
-  mode.ssk_bal_flow.toggled, mode.ssk_bal_history.toggled = not history, history
-  HistoryUI.show_header(mode, history)
-  local flow = right.ssk_balance_flow_panel
-  flow.visible, right.ssk_history_panel.visible = not history, history
-  if history then
-    HistoryUI.fill(player, right.ssk_history_panel, mode, us, fx.focus, us.bal_chart_w, us.canvas_h + 56)
+  local modes = split.ssk_balance_focus.ssk_balance_inspector_tabs
+  if us.bal_mode == "history" then
+    HistoryUI.fill(player, modes.ssk_history_panel, us, fx.focus, us.bal_chart_w, us.canvas_h + 100)
     return
   end
+  local flow = modes.ssk_balance_flow_panel
   fx.canvas_w, fx.canvas_h = us.bal_chart_w, math.max(100,us.canvas_h+28-SK.toolbar_height(fx))
   if not only_auto or fx.live ~= false then
     SK.fill(player, flow, fx, fx.canvas_w, fx.canvas_h, false, only_auto)
@@ -426,13 +418,6 @@ function UI.on_click(e)
       if chart.focus == id then Watch.close(player) end
     end
     UI.refresh(player)
-  elseif a == "balance_mode" then
-    if us.tab_id == "balance" and (us.bal_mode or "flow") ~= el.tags.mode then
-      us.bal_mode = el.tags.mode
-      close_inspectors(player)
-      close_chart_settings(us)
-      UI.refresh(player, false, false, true)
-    end
   elseif a == "focus_item" or a == "bal_material" then
     local fx = us.tab_id == "balance" and SK.balance_state(us) or SK.focus_state(us)
     local previous = fx.focus
@@ -542,11 +527,21 @@ end
 
 function UI.on_tab_changed(e)
   local f = e.element
-  if not (f.valid and f.name == "ssk_tabs" and f.parent and f.parent.parent and f.parent.parent.name == WIN) then return false end
-  local list = TABS
+  if not f.valid then return false end
   local us = ustate(e.player_index)
-  us.tab_id = list[f.selected_tab_index] or "balance"
   local player = game.get_player(e.player_index)
+  if f.name == "ssk_balance_inspector_tabs" then
+    local c = content(player, "balance")
+    local split = c and c.ssk_balance_split
+    if us.tab_id ~= "balance" or not split or f ~= split.ssk_balance_focus.ssk_balance_inspector_tabs then return false end
+    us.bal_mode = f.selected_tab_index == 2 and "history" or "flow"
+    close_inspectors(player)
+    close_chart_settings(us)
+    UI.refresh(player, false, false, true)
+    return true
+  end
+  if not (f.name == "ssk_tabs" and f.parent and f.parent.parent and f.parent.parent.name == WIN) then return false end
+  us.tab_id = TABS[f.selected_tab_index] or "balance"
   Canvas.clear(player.index)
   close_inspectors(player)
   close_chart_settings(us)

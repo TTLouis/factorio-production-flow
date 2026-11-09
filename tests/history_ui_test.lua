@@ -35,18 +35,21 @@ History.build = function(surface, period, key)
       bucket_seconds = 15, points = {}, usage_keys = {}, stock = {}, stock_supported = not fluid }
   end
   return {
-    start_tick = 0, end_tick = 6000, seconds = 35, bucket_seconds = 15,
+    start_tick = 0, end_tick = 6000, seconds = 50, bucket_seconds = 15,
     points = {
       { start_tick = 3000, end_tick = 3900, seconds = 15, made = 10, used = 8, net = 2, uses = uses },
-      { start_tick = 3900, end_tick = 4800, seconds = 5, made = 10, used = 8, net = 2, uses = uses, partial = true },
-      { start_tick = 4800, end_tick = 5700, seconds = 15, made = 2, used = 8, net = -6, uses = uses },
+      { start_tick = 3900, end_tick = 4800, seconds = 15, made = 2, used = 4, net = -2,
+        uses = { ["item/steel-plate"] = 3, other = 1 } },
+      { start_tick = 4800, end_tick = 5100, seconds = 5, made = 10, used = 8, net = 2, uses = uses, partial = true },
+      { start_tick = 5100, end_tick = 6000, seconds = 15, made = 2, used = 8, net = -6, uses = uses },
     },
     usage_keys = { "item/steel-plate", History.OTHER },
     stock_supported = not fluid,
     stock = not fluid and {
       { tick = 3000, count = 30, measured = true },
-      { tick = 3900, count = 20, measured = false },
-      { tick = 5700, count = 17, measured = true },
+      { tick = 3900, count = 20, measured = false, joined = true },
+      { tick = 4800, count = 17, measured = true, joined = true },
+      { tick = 5700, count = 15, measured = true },
     } or {},
   }
 end
@@ -55,20 +58,37 @@ UI.open(player)
 local root = player.gui.screen.ssk_main
 local table_root = named(root, "ssk_bal_root")
 local items = named(table_root, "ssk_bal_items")
-assert(UI.on_click(event(named(root, "ssk_bal_history"))))
+local inspector_tabs = named(root, "ssk_balance_inspector_tabs")
+assert(inspector_tabs.type == "tabbed-pane")
+local function select_inspector(index)
+  inspector_tabs.selected_tab_index = index
+  assert(UI.on_tab_changed(event(inspector_tabs)))
+end
+select_inspector(2)
 assert(us.bal_mode == "history" and request[1] == us.sidx and request[2] == 600 and request[3] == fx.focus)
 assert(named(root, "ssk_bal_root") == table_root and named(root, "ssk_bal_items") == items)
 local controls = named(root, "ssk_history_controls")
 local camera, stock_camera = named(root, "ssk_history_camera"), named(root, "ssk_history_stock_camera")
 assert(camera.style.width == stock_camera.style.width and camera.position[1] == stock_camera.position[1],
   "rate and stock charts must align")
-local polygons, dashed = 0, 0
+local stock_fraction = (stock_camera.style.height + 48) / (us.canvas_h + 100)
+assert(math.abs(stock_fraction - 1 / 3) < 0.02, "stock section should occupy about one third of the inspector")
+local polygons, rising_or_falling = 0, 0
+local stock = {}
 for _, o in ipairs(objects()) do
   if o.k == "poly" then polygons = polygons + 1 end
-  if o.k == "line" and o.a.gap_length > 0 then dashed = dashed + 1 end
+  if o.k == "line" and o.a.gap_length > 0 then
+    local dx = o.a.to[1] - o.a.from[1]
+    assert(dx > 0, "rate traces must not use vertical steps")
+    if o.a.to[2] ~= o.a.from[2] then rising_or_falling = rising_or_falling + 1 end
+  end
+  if o.k == "rect" and (o.a.color[1] == 181 / 255 or o.a.color[1] == 67 / 255) then stock[#stock + 1] = o.a end
 end
-assert(polygons == 2 and dashed == 2, "Used bands and dashed total must leave a gap in unrecorded time")
-assert(named(root, "ssk_history_use_1").rate.caption == "6/s" and named(root, "ssk_history_use_2").rate.caption == "2/s")
+assert(polygons == 4 and rising_or_falling >= 4, "Used needs separate filled paths across gaps and smoothed transitions")
+assert(#stock == 4 and stock[1].right_bottom[1] == stock[2].left_top[1]
+  and stock[2].right_bottom[1] == stock[3].left_top[1]
+  and stock[3].right_bottom[1] < stock[4].left_top[1], "stock bars share edges only where a rate estimate is available")
+assert(named(root, "ssk_history_use_1").rate.caption == "5.1/s" and named(root, "ssk_history_use_2").rate.caption == "1.7/s")
 local old = objects()
 UI.refresh(player, true)
 assert(named(root, "ssk_history_controls") == controls and named(root, "ssk_history_camera") == camera)
@@ -98,10 +118,10 @@ data_state = nil
 
 assert(UI.on_click(event({ tags = { ssk_ui = "focus_item", key = "fluid/water" } })))
 assert(not stock_camera.parent.visible and named(root, "ssk_history_stock_state").caption:find("Fluid tanks", 1, true))
-assert(UI.on_click(event(named(root, "ssk_bal_flow"))))
-assert(not named(root, "ssk_history_panel").visible and named(root, "ssk_balance_flow_panel").visible)
+select_inspector(1)
+assert(us.bal_mode == "flow" and named(inspector_tabs, "ssk_balance_flow_panel").ssk_sp)
 assert(fx.focus == "fluid/water" and named(root, "ssk_bal_items") == items)
-assert(UI.on_click(event(named(root, "ssk_bal_history"))))
+select_inspector(2)
 assert(named(root, "ssk_history_controls") == controls and us.bal_history_view == "net")
 old = objects()
 local tabs = root.ssk_inner.ssk_tabs

@@ -206,6 +206,10 @@ local function add_stock_estimates(result, sources, left, right, old, new)
       if not source.known or source.first > tick then return end
       local stop = math.min(source.last, to)
       local net_per_tick = (source.made - source.used) / (source.last - source.first)
+      local start = result.start_tick
+      if start > from and start > tick and start <= stop and start < to then
+        estimates[#estimates + 1] = { tick = start, net = net + (start - tick) * net_per_tick }
+      end
       while result.points[point_index] and result.points[point_index].end_tick <= stop do
         local at = result.points[point_index].end_tick
         if at > from and at < to then
@@ -222,9 +226,10 @@ local function add_stock_estimates(result, sources, left, right, old, new)
   local residual = new - old - net
   for _, point in ipairs(estimates) do
     local fraction = (point.tick - from) / (to - from)
-    result.stock[#result.stock + 1] = { tick = point.tick, measured = false,
+    result.stock[#result.stock + 1] = { tick = point.tick, measured = false, joined = true,
       count = math.max(0, old + point.net + residual * fraction) }
   end
+  return true
 end
 
 local function stock_points(result, sources, scans, sidx, key)
@@ -233,11 +238,12 @@ local function stock_points(result, sources, scans, sidx, key)
     if scan.tick > result.end_tick then break end
     local count = stock_count(scan, sidx, key)
     if scan.tick >= result.start_tick then
+      local joined
       if count ~= nil and old ~= nil and scan.tick > previous.tick and (sidx or same_stock_scope(previous, scan)) then
-        add_stock_estimates(result, sources, previous, scan, old, count)
+        joined = add_stock_estimates(result, sources, previous, scan, old, count)
       end
       if count ~= nil then
-        result.stock[#result.stock + 1] = { tick = scan.tick, count = count, measured = true }
+        result.stock[#result.stock + 1] = { tick = scan.tick, count = count, measured = true, joined = joined }
       end
     end
     previous, old = scan, count
