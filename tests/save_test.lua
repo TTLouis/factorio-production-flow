@@ -253,11 +253,15 @@ local function exercise_history(UI, player, root, us, case)
   select_tab(2,"history")
   local panel=tabs.ssk_history_panel
   local rate_plot=assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera").parent
+  local net_plot=assert(find_named(panel,"ssk_history_net_camera"),"History needs a separate net rate plot").parent
+  local sections=rate_plot.parent.children
+  assert(sections[1]==net_plot.parent and sections[#sections].name=="ssk_history_stock_note",
+    "History must show Net rate, Rate history, then Chest stock")
   local rate_hover=assert(rate_plot.ssk_history_tooltips.children[1],"The rate plot needs hover targets")
-  assert(not find_named(panel,"ssk_history_net_section"),"Chest stock replaces the separate net rate chart")
-  assert(not rate_hover.ignored_by_interaction and rate_hover.tooltip:find("Made",1,true)
-    and rate_hover.tooltip:find("Used",1,true) and rate_hover.tooltip:find("Net",1,true),
-    "The rate plot must show interactive bucket values")
+  local net_hover=assert(net_plot.ssk_history_tooltips.children[1],"The net plot needs hover targets")
+  assert(not rate_hover.ignored_by_interaction and rate_hover.tooltip==net_hover.tooltip
+    and rate_hover.tooltip:find("Made",1,true) and rate_hover.tooltip:find("Used",1,true)
+    and rate_hover.tooltip:find("Net",1,true),"Rate and net plots must share interactive bucket values")
   assert(SK.balance_state(us).focus==case.focus and items.valid,"History lost the Balance selection or scroller")
   if case.name=="history-rates-and-stock" then
     local function row_for(element,key)
