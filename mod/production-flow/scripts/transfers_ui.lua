@@ -16,6 +16,7 @@ local TICK = { r = 0.75, g = 0.74, b = 0.71, a = 1 }
 local HIGHLIGHT = { r = 0.28, g = 0.24, b = 0.18, a = 1 }
 local CARD_ROW, CARD_HEADER, CARD_GAP = 25, 34, 12
 local DIRECTIONS = { "loaded", "unloaded" }
+local LAYOUT_VERSION = 2
 
 local function label(parent, name, caption, style, width)
   local el = parent.add { type = "label", name = name, caption = caption, style = style }
@@ -196,7 +197,7 @@ end
 
 local function build(content, width, height)
   local panel = content.add { type = "frame", name = "ssk_transfers", style = "inside_deep_frame",
-    direction = "vertical", tags = { transfers_layout = true } }
+    direction = "vertical", tags = { transfers_layout = LAYOUT_VERSION } }
   panel.style.width, panel.style.height = width, height
   panel.style.padding = 4
   local filters = strip(panel, "filters", 40)
@@ -237,7 +238,7 @@ local function build(content, width, height)
   local heading = strip(right, "heading", 38)
   local icon = heading.add { type = "sprite", name = "icon", resize_to_sprite = false }
   icon.style.width, icon.style.height = 26, 26
-  plain(label(heading, "platform", "", "subheader_caption_label", math.max(70, details_w - 224)))
+  label(heading, "platform", "", "subheader_caption_label", math.max(70, details_w - 224))
   spacer(heading)
   label(heading, "material", "", "subheader_semibold_label", math.min(142, math.floor(details_w / 4)))
     .style.horizontal_align = "right"
@@ -384,7 +385,10 @@ local function flow_graph(player, parent, result, width, viewport)
   local left, left_end = flow_layout(result.loading)
   local right, right_end = flow_layout(result.unloading)
   local made = #result.made.items > 0
-  local height = math.max(viewport - 4, left_end + (made and card_height(result.made.items) + CARD_GAP or 0), right_end, 240)
+  local empty_y = 36
+  local made_y = #left == 0 and empty_y + 30 or left_end
+  if made then left_end = made_y + card_height(result.made.items) + CARD_GAP end
+  local height = math.max(viewport - 4, left_end, right_end, 240)
   local card_w = math.min(254, math.floor(width * 0.28))
   local center_w = math.min(192, math.floor(width * 0.26))
   local x_left, x_right, x_center = 4, width - card_w - 4, math.floor((width - center_w) / 2)
@@ -416,7 +420,7 @@ local function flow_graph(player, parent, result, width, viewport)
     route_hover(shape, platform_name .. " → " .. endpoint_name(cell.route.endpoint), cell.route, "unloaded", i)
   end
   if made then
-    local x, y = x_left + card_w, left_end + card_height(result.made.items) / 2
+    local x, y = x_left + card_w, made_y + card_height(result.made.items) / 2
     painter.line(x, y, x_center, center_y + 94, MADE, 2, true)
     local shape = ribbon_shape(x, y, x_center, center_y + 94, 2, true)
     local tip = manifest_tooltip("Made aboard " .. platform_name, "Recorded platform production", result.made.items, result.made.seconds)
@@ -427,15 +431,15 @@ local function flow_graph(player, parent, result, width, viewport)
   canvas_label(parent, "Loading surfaces", "heading_2_label", x_left, 2, card_w)
   canvas_label(parent, "Selected platform", "heading_2_label", x_center, 2, center_w, "center")
   canvas_label(parent, "Unloading surfaces", "heading_2_label", x_right, 2, card_w)
-  if #left == 0 then canvas_label(parent, "No matching loads", "grey_label", x_left, 36, card_w) end
-  if #right == 0 then canvas_label(parent, "No matching unloads", "grey_label", x_right, 36, card_w) end
+  if #left == 0 then canvas_label(parent, "No matching loads", "grey_label", x_left, empty_y, card_w) end
+  if #right == 0 then canvas_label(parent, "No matching unloads", "grey_label", x_right, empty_y, card_w) end
   for _, entry in ipairs({ { left, x_left, 7 }, { right, x_right, 5 } }) do
     for _, cell in ipairs(entry[1]) do
       local name, icon = endpoint_name(cell.route.endpoint)
       ranking(parent, name, icon, cell.route, entry[2], cell.y, card_w, entry[3])
     end
   end
-  if made then ranking(parent, "Made aboard", nil, result.made, x_left, left_end, card_w, 15) end
+  if made then ranking(parent, "Made aboard", nil, result.made, x_left, made_y, card_w, 15) end
 
   local wrapper = parent.add { type = "flow", direction = "horizontal" }
   place(wrapper, x_center, center_y, center_w, 124)
@@ -444,7 +448,7 @@ local function flow_graph(player, parent, result, width, viewport)
   platform.style.width, platform.style.padding = center_w, 2
   local header = strip(platform, "heading", 34)
   sprite(header, result.platform.icon, 23)
-  plain(label(header, nil, result.platform.name, "subheader_semibold_label", center_w - 44)).tooltip = result.platform.name
+  label(header, nil, result.platform.name, "subheader_semibold_label", center_w - 44).tooltip = result.platform.name
   for _, stat in ipairs({ { "Loaded", result.loaded, 7 }, { "Unloaded", result.unloaded, 5 },
       { "Made", result.made, 15 } }) do
     local line = row(platform)
@@ -730,7 +734,7 @@ function UI.render(content, player, period, state, width, height)
   end
   state.view = state.view or "flow"
   local panel = content.ssk_transfers
-  if panel and not panel.tags.transfers_layout then panel.destroy(); panel = nil end
+  if panel and panel.tags.transfers_layout ~= LAYOUT_VERSION then panel.destroy(); panel = nil end
   panel = panel or build(content, width, height)
 
   local seconds = period > 0 and period or settings.global["ssk-window-seconds"].value
