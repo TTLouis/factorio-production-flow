@@ -402,9 +402,10 @@ local function plot_tooltips(parent, height, regions)
     parent.style.vertical_spacing = 0
     layer = parent.add { type = "flow", name = "ssk_history_tooltips", direction = "horizontal" }
     layer.style.horizontal_spacing = 0
-    layer.style.height = hover_height
-    layer.style.top_margin, layer.style.bottom_margin = PLOT_TOP - height, PLOT_BOTTOM
+    layer.style.bottom_margin = PLOT_BOTTOM
   end
+  layer.style.height = hover_height
+  layer.style.top_margin = PLOT_TOP - height
   local children, last, index = layer.children, 0, 0
   for _, region in ipairs(regions) do
     local left = math.max(last, region.left)
@@ -428,10 +429,11 @@ local function camera(player, parent, name, painter, width, height, top, regions
   if not view then
     spec.name, spec.ignored_by_interaction = name, true
     view = parent.add(spec)
-    view.style.width, view.style.height = width, height
+    view.style.width = width
   else
     view.position = spec.position
   end
+  view.style.height = height
   plot_tooltips(parent, height, regions)
 end
 
@@ -526,10 +528,23 @@ function H.fill(player, panel, us, key, width, panel_height)
   -- including their headings, note, and divider.
   local stock_heading_height, net_heading_height = 48, 36
   local compact_plot_height = math.max(136, math.floor(us.bal_height / 3) - stock_heading_height - net_heading_height)
-  local stock_height = math.floor(compact_plot_height / 2)
-  local net_height = compact_plot_height - stock_height
-  -- Leave room for the coverage message so the plot cameras keep their size.
-  local rate_height = math.max(72, scroll_height - 162 - BODY_MARGIN_Y - net_heading_height - compact_plot_height)
+  local stock_share = math.floor(compact_plot_height / 2)
+  local stock_height = stock and stock_share or 0
+  local net_height = rates and compact_plot_height - stock_share or 0
+  -- Keep space for the fixed captions, dividers, and insets. Only budget
+  -- space for the coverage and usage rows when they are shown.
+  local chart_space = scroll_height - 132
+  if coverage.visible then chart_space = chart_space - 24 end
+  if usage.visible then chart_space = chart_space - 46 end
+  local rate_height = 0
+  if active then
+    rate_height = math.max(72, chart_space - net_height - stock_height)
+  elseif rates then
+    net_height = math.max(net_height, chart_space - 24 - stock_height)
+  elseif stock then
+    -- The rate status replaces its chart and the Net section is hidden.
+    stock_height = math.max(stock_height, chart_space - 24 + net_heading_height)
+  end
   local net_top = rate_height + PLOT_GAP
   local stock_top = net_top + net_height + PLOT_GAP
   local painter, stock_regions

@@ -191,6 +191,8 @@ elseif mode=="diagnostics" then
   }
 elseif mode=="history-view" then
   cases={
+    {name="electronic-circuit-flow",surface="nauvis",tab="balance",focus="item/electronic-circuit",flow_only=true},
+    {name="electronic-circuit-history",surface="nauvis",tab="balance",focus="item/electronic-circuit"},
     {name="history-rates-and-stock",surface="nauvis",tab="balance",focus="item/iron-plate"},
     {name="history-net",surface="nauvis",tab="balance",focus="item/iron-plate",metric="net"},
     {name="history-long-window",surface="nauvis",tab="balance",focus="item/iron-plate",long_period=true},
@@ -300,12 +302,15 @@ local function exercise_history(UI, player, root, us, case)
   for _,sample in ipairs(history.stock) do
     if sample.measured then measured=measured+1 else estimated=estimated+1 end
   end
-  if case.focus=="item/iron-plate" then
-    assert(measured>=2 and (case.long_period or estimated>0),"History must render measured and estimated stock")
-    if case.name=="history-rates-and-stock" then
-      assert(history.stock[#history.stock].joined,"The first capture needs rates through the latest completed scan")
+  if history.stock_supported then
+    assert(measured>0,"Item History must render measured stock")
+    if case.focus=="item/iron-plate" then
+      assert(measured>=2 and (case.long_period or estimated>0),"Iron plate must render measured and estimated stock")
+      if case.name=="history-rates-and-stock" then
+        assert(history.stock[#history.stock].joined,"The Iron Plate capture needs rates through the latest completed scan")
+      end
     end
-    assert(#history.usage_keys>0,"Active iron plate must have usage history")
+    assert(#history.usage_keys>0,"Active items must have usage history")
     local stock_plot=assert(find_named(panel,"ssk_history_stock_camera"),"Item History needs a native stock plot").parent
     local stock_hover=assert(stock_plot.ssk_history_tooltips.children[1],"The stock plot needs hover targets")
     assert(not stock_hover.ignored_by_interaction and stock_hover.tooltip:find("stock",1,true),"Stock tooltips must be interactive")
@@ -541,7 +546,8 @@ function T.tick(UI, Sampler)
     game.speed=1
   end
   if not Sampler.stock_known(game.surfaces.nauvis.index) then return end
-  if mode=="history-view" and not stock_fixture then
+  local next_case=not capture and cases[step+1]
+  if mode=="history-view" and not stock_fixture and next_case and next_case.focus=="item/iron-plate" then
     -- The warmed fixture supplies real rates. Two controlled historical scan
     -- results let this native view exercise interpolation without waiting for scans.
     local scope=game.surfaces.nauvis.index
@@ -659,6 +665,7 @@ function T.tick(UI, Sampler)
   end
   if mode=="history-view" then
     us.bal_filter,us.bal_group="all",nil
+    us.bal_mode="flow"
     us.bal_favs={items={[c.focus]=true},groups={}}
   end
   if (mode=="full" or mode=="names") then
@@ -955,7 +962,7 @@ function T.tick(UI, Sampler)
   end
   if mode=="diagnostics" then
     exercise_diagnostics(UI,player,player.gui.screen.ssk_main,us,c)
-  elseif mode=="history-view" then
+  elseif mode=="history-view" and not c.flow_only then
     exercise_history(UI,player,player.gui.screen.ssk_main,us,c)
   end
   capture = c.name

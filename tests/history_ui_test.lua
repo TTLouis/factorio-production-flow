@@ -119,9 +119,12 @@ assert(named(root, "ssk_history_controls") == controls and named(root, "ssk_hist
 assert(camera.parent.ssk_history_tooltips.children[1] == rate_targets[1], "refresh must retain hover targets")
 assert(named(root, "ssk_bal_items") == items and not old[1].valid, "replace render objects while retaining GUI and scroll state")
 
+local all_height = camera.style.height
 assert(UI.on_checked(event(named(root, "ssk_history_net"))))
 assert(us.bal_history_view == "net" and named(root, "ssk_history_net").state and not named(root, "ssk_history_all").state)
 assert(not named(root, "ssk_history_uses").visible and named(root, "ssk_history_controls") == controls)
+assert(camera.style.height == all_height + 46 and rate_targets[1].style.height == camera.style.height - 33,
+  "hiding the usage legend should free room for the rate chart and resize its hover targets")
 for _, o in ipairs(objects()) do
   assert(o.k ~= "poly", "Net must not draw Used product bands")
 end
