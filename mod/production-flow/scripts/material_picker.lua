@@ -34,6 +34,37 @@ function P.button(row, key, target)
   return b
 end
 
+function P.add_heading(row, width)
+  local heading = row.add { type = "flow", name = "ssk_material_heading", direction = "horizontal" }
+  heading.style.vertical_align = "center"
+  heading.style.horizontal_spacing = 8
+  heading.add { type = "label", caption = "Item / fluid:" }
+  local slot = heading.add { type = "choose-elem-button", name = "ssk_material_slot", elem_type = "signal" }
+  slot.style.width, slot.style.height = SLOT, SLOT
+  slot.locked = true
+  if width >= 680 then
+    local caption = heading.add { type = "label", name = "ssk_material_name", style = "caption_label" }
+    caption.style.maximal_width = 160
+    caption.style.single_line = true
+  end
+  return heading
+end
+
+function P.update_heading(heading, key)
+  local kind, name
+  if key then kind, name = key:match("^([^/]+)/(.+)$") end
+  local proto = kind and prototypes[kind] and prototypes[kind][name]
+  local caption = proto and proto.localised_name or name or "No material selected"
+  local slot = heading.ssk_material_slot
+  slot.elem_value = proto and { type = kind, name = name } or nil
+  local tooltip = { "", caption, "\nSelect a material from the Balance list or click a node in Flow." }
+  slot.tooltip = tooltip
+  if heading.ssk_material_name then
+    heading.ssk_material_name.caption = caption
+    heading.ssk_material_name.tooltip = tooltip
+  end
+end
+
 -- Per-player serialized state: locale identifies the translation cache, names maps
 -- typed material keys to translated text, and pending maps translation IDs to keys.
 -- A locale change replaces both maps; GUI selection remains in the frame tags.

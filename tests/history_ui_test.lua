@@ -2,7 +2,7 @@ local UI = TREQ("scripts.ui")
 local SK = TREQ("scripts.sankey_ui")
 local History = TREQ("scripts.history")
 local player, us = game.players[1], storage.ui[1]
-local saved_mode, saved_view, saved_period, saved_filter = us.bal_mode, us.bal_history_view, us.period, us.bal_filter
+local saved_mode, saved_breakdown, saved_period, saved_filter = us.bal_mode, us.bal_usage_breakdown, us.period, us.bal_filter
 local previous_build = History.build
 local function find(element, predicate)
   if predicate(element) then return element end
@@ -21,7 +21,7 @@ local function objects()
   return storage.canvas[player.index].objs
 end
 
-us.tab_id, us.bal_mode, us.bal_history_view, us.bal_filter, us.period = "balance", "flow", "all", "all", 600
+us.tab_id, us.bal_mode, us.bal_usage_breakdown, us.bal_filter, us.period = "balance", "flow", nil, "all", 600
 local fx = SK.balance_state(us)
 local saved_focus = fx.focus
 fx.focus = "item/iron-plate"
@@ -60,6 +60,8 @@ local table_root = named(root, "ssk_bal_root")
 local items = named(table_root, "ssk_bal_items")
 local inspector_tabs = named(root, "ssk_balance_inspector_tabs")
 assert(inspector_tabs.type == "tabbed-pane")
+local flow_slot = named(inspector_tabs.ssk_balance_flow_panel, "ssk_material_slot")
+assert(flow_slot.locked and flow_slot.elem_value.name == "iron-plate")
 local function select_inspector(index)
   inspector_tabs.selected_tab_index = index
   assert(UI.on_tab_changed(event(inspector_tabs)))
@@ -68,6 +70,9 @@ select_inspector(2)
 assert(us.bal_mode == "history" and request[1] == us.sidx and request[2] == 600 and request[3] == fx.focus)
 assert(named(root, "ssk_bal_root") == table_root and named(root, "ssk_bal_items") == items)
 local controls = named(root, "ssk_history_controls")
+local history_slot = named(controls, "ssk_material_slot")
+assert(history_slot.locked and history_slot.elem_value.name == flow_slot.elem_value.name)
+assert(not find(controls, function(e) return e.type == "radiobutton" end), "all three charts are always shown")
 local camera, stock_camera = named(root, "ssk_history_camera"), named(root, "ssk_history_stock_camera")
 local net_camera = named(root, "ssk_history_net_camera")
 local history_panel = inspector_tabs.ssk_history_panel
@@ -97,18 +102,27 @@ assert(rate_targets[1].tooltip == "50s ago to 35s ago\nMade  10 items/s\nUsed  8
 assert(net_targets[2].tooltip == rate_targets[2].tooltip and net_targets[2].tooltip:find("Net  -2 items/s", 1, true))
 assert(stock_targets[1].tooltip == "50s ago\nMeasured stock  30 items"
   and stock_targets[2].tooltip == "35s ago\nEstimated stock  20 items")
-local polygons, rising_or_falling = 0, 0
+local polygons, rising_or_falling, positive, negative = 0, 0, 0, 0
+local zero = net_camera.position[2] - 4.5 / 32
 local stock = {}
 for _, o in ipairs(objects()) do
   if o.k == "poly" then polygons = polygons + 1 end
   if o.k == "line" and o.a.gap_length > 0 then
     local dx = o.a.to[1] - o.a.from[1]
     assert(dx > 0, "rate traces must not use vertical steps")
+    assert(o.a.color[1] == 1 and o.a.color[2] == 79 / 255, "Used must be bright red")
     if o.a.to[2] ~= o.a.from[2] then rising_or_falling = rising_or_falling + 1 end
+  elseif o.k == "line" and o.a.color[1] == 100 / 255 then
+    assert(math.max(o.a.from[2], o.a.to[2]) <= zero + 1e-6, "green net segments must stop at zero")
+    positive = positive + 1
+  elseif o.k == "line" and o.a.color[1] == 1 and o.a.color[2] == 79 / 255 then
+    assert(math.min(o.a.from[2], o.a.to[2]) >= zero - 1e-6, "red net segments must stop at zero")
+    negative = negative + 1
   end
   if o.k == "rect" and (o.a.color[1] == 181 / 255 or o.a.color[1] == 67 / 255) then stock[#stock + 1] = o.a end
 end
 assert(polygons == 4 and rising_or_falling >= 4, "Used needs separate filled paths across gaps and smoothed transitions")
+assert(positive > 0 and negative > 0, "Net must show green surplus and red deficit")
 assert(#stock == 4 and stock[1].right_bottom[1] == stock[2].left_top[1]
   and stock[2].right_bottom[1] == stock[3].left_top[1]
   and stock[3].right_bottom[1] < stock[4].left_top[1], "stock bars share edges only where a rate estimate is available")
@@ -120,14 +134,19 @@ assert(camera.parent.ssk_history_tooltips.children[1] == rate_targets[1], "refre
 assert(named(root, "ssk_bal_items") == items and not old[1].valid, "replace render objects while retaining GUI and scroll state")
 
 local all_height = camera.style.height
-assert(UI.on_checked(event(named(root, "ssk_history_net"))))
-assert(us.bal_history_view == "net" and named(root, "ssk_history_net").state and not named(root, "ssk_history_all").state)
+local checkbox = named(root, "ssk_history_usage")
+checkbox.state = false
+assert(UI.on_checked(event(checkbox)))
+assert(us.bal_usage_breakdown == false and not checkbox.state and net_camera.parent.visible and stock_camera.parent.visible)
 assert(not named(root, "ssk_history_uses").visible and named(root, "ssk_history_controls") == controls)
 assert(camera.style.height == all_height + 46 and rate_targets[1].style.height == camera.style.height - 33,
   "hiding the usage legend should free room for the rate chart and resize its hover targets")
+local used_total = false
 for _, o in ipairs(objects()) do
-  assert(o.k ~= "poly", "Net must not draw Used product bands")
+  assert(o.k ~= "poly", "totals must omit product bands")
+  used_total = used_total or o.k == "line" and o.a.gap_length > 0
 end
+assert(used_total, "totals must keep the Used line")
 local material_cell = assert(find(table_root, function(e)
   return e.tags.ssk_ui == "bal_material" and e.tags.key ~= fx.focus
 end))
@@ -150,7 +169,7 @@ select_inspector(1)
 assert(us.bal_mode == "flow" and named(inspector_tabs, "ssk_balance_flow_panel").ssk_sp)
 assert(fx.focus == "fluid/water" and named(root, "ssk_bal_items") == items)
 select_inspector(2)
-assert(named(root, "ssk_history_controls") == controls and us.bal_history_view == "net")
+assert(named(root, "ssk_history_controls") == controls and not checkbox.state)
 old = objects()
 local tabs = root.ssk_inner.ssk_tabs
 tabs.selected_tab_index = 4
@@ -165,6 +184,7 @@ old = objects()
 UI.close(player)
 assert(not old[1].valid and #objects() == 0, "closing History clears its render objects")
 History.build = previous_build
-us.bal_mode, us.bal_history_view, us.period, us.bal_filter, fx.focus = saved_mode, saved_view, saved_period, saved_filter, saved_focus
+us.bal_mode, us.bal_usage_breakdown, us.period, us.bal_filter, fx.focus =
+  saved_mode, saved_breakdown, saved_period, saved_filter, saved_focus
 UI.open(player)
 print("BALANCE HISTORY UI OK: retained list, controls, aligned axes, measured and estimated rendering, and cleanup")

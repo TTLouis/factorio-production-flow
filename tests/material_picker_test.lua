@@ -77,80 +77,81 @@ for _, tab in ipairs({ "balance", "focus" }) do
   UI.on_click { element = action(main, "chart_settings"), player_index = 1 }
   UI.on_click { element = action(chart.ssk_settings, "chart_settings"), player_index = 1 }
   assert(not fx.settings_open and not chart.ssk_settings, "the panel close button did not close chart settings")
-  local open = find(main, function(e) return e.tags.ssk_picker == "open" end)
-  assert(open and not find(main, function(e) return e.type == "choose-elem-button" end), "split selectors remain")
-  assert(UI.on_click { element = open, player_index = 1 })
-  local dialog = player.gui.screen.ssk_material_picker
-  assert(player.opened == main, "picker must retain the native main-window ownership")
-  assert(results(dialog).column_count == 10, "the material grid must have ten columns like the base game selector")
-  assert(results(dialog).tags.total == 4 and #results(dialog).tags.keys == 2, "catalog must include items and fluids, excluding hidden materials")
-  UI.on_click { element = find(dialog, function(e) return e.tags.ssk_picker == "group" and e.tags.group == "fluids" end), player_index = 1 }
-  assert(#results(dialog).tags.keys == 2, "category filter must restrict the visible slots")
-  assert(not find(dialog, function(e) return e.tags.ssk_picker == "group"
-    and (e.tags.group == "other" or e.tags.group == "signals") end), "signal/miscellaneous categories must be absent")
-  for _, query in ipairs({ "parameter", "signal-material", "misc-material" }) do
-    dialog.ssk_title.ssk_query.text = query
-    UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
-    assert(#results(dialog).tags.keys == 0, "excluded material leaked through search: " .. query)
-  end
-  UI.refresh(player, true)
-  assert(dialog.valid and player.gui.screen.ssk_material_picker == dialog, "live update replaced picker")
-  for id, s in pairs(requests) do
-    UI.on_string_translated { player_index = 1, id = id, translated = true, result = s == "wood" and "Bois" or s }
-  end
-  dialog.ssk_title.ssk_query.text = "bois"
-  assert(UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 })
-  assert(#results(dialog).tags.keys == 2, "translated-name search failed")
-  dialog.ssk_title.ssk_query.text = "does not exist"
-  UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
-  assert(#results(dialog).tags.keys == 0, "no-match state failed")
-  local search = find(dialog, function(e) return e.tags.ssk_picker == "search" end)
-  UI.on_click { element = search, player_index = 1 }
-  assert(dialog.ssk_title.ssk_query.visible == false and dialog.ssk_title.ssk_query.text == ""
-    and #results(dialog).tags.keys > 0, "hiding the search field must clear the search")
-  UI.on_click { element = search, player_index = 1 }
-  assert(dialog.ssk_title.ssk_query.visible, "the search button must show the field again")
-  dialog.ssk_title.ssk_query.text = "water"
-  UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
-  assert(#results(dialog).tags.keys == 2, "item/fluid names must coexist")
-  local chosen = find(dialog, function(e) return e.tags.ssk_picker == "pick" and e.tags.key == "fluid/water" end)
-  assert(chosen.type == "sprite-button" and not find(dialog, function(e) return e.type == "list-box" end), "materials must use an icon grid")
-  assert(UI.on_click { element = chosen, player_index = 1 })
-  assert(fx.focus == "fluid/water" and fx.live == false and not dialog.valid, "typed selection or paused chart failed")
-  assert(player.gui.screen.ssk_main == main, "picker selection reopened window")
-  if list then assert(find(main, function(e) return e.name == "ssk_bal_root" end) == list, "picker reset Balance list") end
   if tab == "balance" then
+    local slot = assert(find(main, function(e) return e.name == "ssk_material_slot" end))
+    assert(slot.locked and slot.elem_value.name == "iron-plate", "Balance heading must display a read-only item")
+    assert(not find(main, function(e) return e.tags.ssk_picker == "open" end), "Balance must use the list and graph nodes")
     assert(not action(main, "f_history") and not action(main, "f_back") and not action(main, "f_clear_history"),
-      "Balance chooses from its list and must not show Focus history")
-    fx.focus, fx.focus_hist, fx.focus_forward = "item/iron-plate", {}, {}
+      "Balance must keep the Focus visit controls out of its toolbar")
   else
-  local history = action(main, "f_history")
-  history.selected_index = 2
-  UI.on_selection { element = history, player_index = 1 }
-  assert(fx.focus == "item/iron-plate", "viewed history selection failed")
-  UI.on_click { element = action(main, "f_forward"), player_index = 1 }
-  assert(fx.focus == "fluid/water", "Forward lost the viewed fluid")
-  UI.on_click { element = action(main, "f_trail"), player_index = 1 }
-  assert(fx.focus == "item/iron-plate" and #fx.focus_forward == 1, "trail must retain the forward path")
-  local bins, focus = storage.bins, fx.focus
-  UI.on_click { element = action(main, "f_clear_history"), player_index = 1 }
-  assert(#fx.focus_hist == 0 and #fx.focus_forward == 0 and fx.focus == focus and storage.bins == bins, "clear history changed current material/production data")
-  assert(not action(main, "f_clear_history").enabled, "empty history clear must be disabled")
-  assert(not action(main, "f_history").enabled and not action(main, "f_back").enabled
-    and not action(main, "f_forward").enabled, "cleared history still navigates")
+    local open = find(main, function(e) return e.tags.ssk_picker == "open" end)
+    assert(open and not find(main, function(e) return e.type == "choose-elem-button" end), "split selectors remain")
+    assert(UI.on_click { element = open, player_index = 1 })
+    local dialog = player.gui.screen.ssk_material_picker
+    assert(player.opened == main, "picker must retain the native main-window ownership")
+    assert(results(dialog).column_count == 10, "the material grid must have ten columns like the base game selector")
+    assert(results(dialog).tags.total == 4 and #results(dialog).tags.keys == 2, "catalog must include items and fluids, excluding hidden materials")
+    UI.on_click { element = find(dialog, function(e) return e.tags.ssk_picker == "group" and e.tags.group == "fluids" end), player_index = 1 }
+    assert(#results(dialog).tags.keys == 2, "category filter must restrict the visible slots")
+    assert(not find(dialog, function(e) return e.tags.ssk_picker == "group"
+      and (e.tags.group == "other" or e.tags.group == "signals") end), "signal/miscellaneous categories must be absent")
+    for _, query in ipairs({ "parameter", "signal-material", "misc-material" }) do
+      dialog.ssk_title.ssk_query.text = query
+      UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
+      assert(#results(dialog).tags.keys == 0, "excluded material leaked through search: " .. query)
+    end
+    UI.refresh(player, true)
+    assert(dialog.valid and player.gui.screen.ssk_material_picker == dialog, "live update replaced picker")
+    for id, s in pairs(requests) do
+      UI.on_string_translated { player_index = 1, id = id, translated = true, result = s == "wood" and "Bois" or s }
+    end
+    dialog.ssk_title.ssk_query.text = "bois"
+    assert(UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 })
+    assert(#results(dialog).tags.keys == 2, "translated-name search failed")
+    dialog.ssk_title.ssk_query.text = "does not exist"
+    UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
+    assert(#results(dialog).tags.keys == 0, "no-match state failed")
+    local search = find(dialog, function(e) return e.tags.ssk_picker == "search" end)
+    UI.on_click { element = search, player_index = 1 }
+    assert(dialog.ssk_title.ssk_query.visible == false and dialog.ssk_title.ssk_query.text == ""
+      and #results(dialog).tags.keys > 0, "hiding the search field must clear the search")
+    UI.on_click { element = search, player_index = 1 }
+    assert(dialog.ssk_title.ssk_query.visible, "the search button must show the field again")
+    dialog.ssk_title.ssk_query.text = "water"
+    UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
+    assert(#results(dialog).tags.keys == 2, "item/fluid names must coexist")
+    local chosen = find(dialog, function(e) return e.tags.ssk_picker == "pick" and e.tags.key == "fluid/water" end)
+    assert(chosen.type == "sprite-button" and not find(dialog, function(e) return e.type == "list-box" end), "materials must use an icon grid")
+    assert(UI.on_click { element = chosen, player_index = 1 })
+    assert(fx.focus == "fluid/water" and fx.live == false and not dialog.valid, "typed selection or paused chart failed")
+    assert(player.gui.screen.ssk_main == main, "picker selection reopened window")
+    local history = action(main, "f_history")
+    history.selected_index = 2
+    UI.on_selection { element = history, player_index = 1 }
+    assert(fx.focus == "item/iron-plate", "viewed history selection failed")
+    UI.on_click { element = action(main, "f_forward"), player_index = 1 }
+    assert(fx.focus == "fluid/water", "Forward lost the viewed fluid")
+    UI.on_click { element = action(main, "f_trail"), player_index = 1 }
+    assert(fx.focus == "item/iron-plate" and #fx.focus_forward == 1, "trail must retain the forward path")
+    local bins, focus = storage.bins, fx.focus
+    UI.on_click { element = action(main, "f_clear_history"), player_index = 1 }
+    assert(#fx.focus_hist == 0 and #fx.focus_forward == 0 and fx.focus == focus and storage.bins == bins, "clear history changed current material/production data")
+    assert(not action(main, "f_clear_history").enabled, "empty history clear must be disabled")
+    assert(not action(main, "f_history").enabled and not action(main, "f_back").enabled
+      and not action(main, "f_forward").enabled, "cleared history still navigates")
+    local focus = fx.focus
+    SK.select_focus(fx, "fluid/water"); SK.select_focus(fx, "item/wood")
+    assert(SK.step_history(fx, -2) and fx.focus == focus and #fx.focus_forward == 2, "multi-step trail failed")
+    assert(SK.step_history(fx, 2) and fx.focus == "item/wood", "multi-step forward failed")
+    SK.step_history(fx, -1); SK.select_focus(fx, "item/water")
+    assert(#fx.focus_forward == 0, "a new branch must discard the abandoned forward path")
+    for i = 1, 30 do SK.select_focus(fx, i % 2 == 0 and "item/wood" or "fluid/water") end
+    assert(#fx.focus_hist == 6, "view history must keep only the last six materials")
+    UI.on_click { element = find(main, function(e) return e.tags.ssk_picker == "open" end), player_index = 1 }
+    dialog = player.gui.screen.ssk_material_picker
+    assert(UI.on_closed { element = main, player_index = 1 } and player.opened == main and not dialog.valid
+      and main.valid, "Escape must close the picker before the main UI")
   end
-  local focus = fx.focus
-  SK.select_focus(fx, "fluid/water"); SK.select_focus(fx, "item/wood")
-  assert(SK.step_history(fx, -2) and fx.focus == focus and #fx.focus_forward == 2, "multi-step trail failed")
-  assert(SK.step_history(fx, 2) and fx.focus == "item/wood", "multi-step forward failed")
-  SK.step_history(fx, -1); SK.select_focus(fx, "item/water")
-  assert(#fx.focus_forward == 0, "a new branch must discard the abandoned forward path")
-  for i = 1, 30 do SK.select_focus(fx, i % 2 == 0 and "item/wood" or "fluid/water") end
-  assert(#fx.focus_hist == 6, "view history must keep only the last six materials")
-  UI.on_click { element = find(main, function(e) return e.tags.ssk_picker == "open" end), player_index = 1 }
-  dialog = player.gui.screen.ssk_material_picker
-  assert(UI.on_closed { element = main, player_index = 1 } and player.opened == main and not dialog.valid
-    and main.valid, "Escape must close the picker before the main UI")
 end
 -- Many modded item groups: tabs wrap six per row, then the tab area scrolls and
 -- the ten-column grid keeps its height.

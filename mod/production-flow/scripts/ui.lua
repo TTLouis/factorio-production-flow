@@ -118,7 +118,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
   local inspector_height = pane_height - BALANCE_TAB_HEADER_HEIGHT
   local split = c.ssk_balance_split
   local modes = split and split.ssk_balance_focus.ssk_balance_inspector_tabs
-  if not modes or not modes.tags.ssk_balance_aligned then
+  if not modes or not modes.tags.ssk_balance_material_header then
     c.clear()
     split = c.add { type = "flow", name = "ssk_balance_split", direction = "horizontal" }
     split.style.horizontal_spacing = 12
@@ -133,7 +133,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     us.bal_chart_w = right_w - 8
     right.style.width, right.style.height = right_w, pane_height
     modes = right.add { type = "tabbed-pane", name = "ssk_balance_inspector_tabs",
-      style = "tabbed_pane_with_no_side_padding", tags = { ssk_balance_aligned = true } }
+      style = "tabbed_pane_with_no_side_padding", tags = { ssk_balance_material_header = true } }
     modes.style.top_margin = 0
     modes.style.horizontally_stretchable = true
     local flow = modes.add { type = "tab", caption = "Flow", tooltip = "Show the selected material's inputs and uses" }
@@ -356,7 +356,7 @@ function UI.is_open(player) return player.gui.screen[WIN] ~= nil end
 function UI.on_click(e)
   local el = e.element
   local player = game.get_player(e.player_index)
-  if el.tags and el.tags.ssk_picker == "open" then
+  if el.tags and el.tags.ssk_picker == "open" and el.tags.target == "focus" then
     close_inspectors(player)
     MaterialPicker.open(player, el.tags.target, el.tags.current)
     return true
@@ -444,7 +444,7 @@ function UI.on_selection(e)
     if key then
       local player = game.get_player(e.player_index)
       local us = ustate(e.player_index)
-      if target == us.tab_id then
+      if target == "focus" and us.tab_id == "focus" then
         local chart = chart_state(us)
         local previous = chart.focus
         SK.select_focus(chart, key)
@@ -501,11 +501,13 @@ end
 
 function UI.on_checked(e)
   local u0 = ustate(e.player_index)
-  if u0.tab_id == "balance" and u0.bal_mode == "history" and HistoryUI.on_checked(e, u0) then
+  local tags = e.element.tags
+  if u0.tab_id == "balance" and u0.bal_mode == "history" and tags and tags.ssk_ui == "history_usage" then
+    u0.bal_usage_breakdown = e.element.state
     UI.refresh(game.get_player(e.player_index), false, false, true)
     return true
   end
-  if e.element.tags and e.element.tags.ssk_ui == "bal_details" then
+  if tags and tags.ssk_ui == "bal_details" then
     u0.bal_details = e.element.state
     UI.refresh(game.get_player(e.player_index))
     return true
@@ -520,7 +522,7 @@ end
 
 function UI.on_elem_changed(e)
   local u0 = ustate(e.player_index)
-  if u0.tab_id == "focus" or u0.tab_id == "balance" then
+  if u0.tab_id == "focus" then
     local chart = chart_state(u0)
     local previous = chart.focus
     local r = SK.on_elem_changed(e, chart)

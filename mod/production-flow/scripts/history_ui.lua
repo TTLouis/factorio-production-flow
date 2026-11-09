@@ -4,17 +4,12 @@ local Canvas = require("scripts.canvas")
 local Graph = require("scripts.graph")
 local History = require("scripts.history")
 local Geometry = require("scripts.ribbon_geometry")
+local MaterialPicker = require("scripts.material_picker")
 
 local H = {}
-local VIEWS = {
-  { "all", "All", "Compare measured Made and Used, with estimated uses by product." },
-  { "made", "Made", "Show the measured production rate." },
-  { "used", "Used", "Show the measured consumption rate and estimated uses by product." },
-  { "net", "Net", "Show the measured Made rate minus the Used rate." },
-}
 local MADE = { 112, 224, 164 }
-local USED = { 255, 166, 110 }
-local NET = { 131, 200, 242 }
+local USED = { 255, 79, 89 }
+local NET_POSITIVE = { 100, 245, 114 }
 local USES = { { 202, 131, 84 }, { 191, 160, 90 }, { 157, 92, 89 }, { 99, 112, 130 } }
 local MEASURED = { 181, 203, 222 }
 local ESTIMATED = { 67, 106, 126 }
@@ -91,20 +86,15 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   controls.style.vertical_spacing = 8
   local header = row(controls, "ssk_history_header")
   header.style.height = 40
-  label(header, "ssk_history_material", "", "caption_label", math.min(280, chart_width))
-  if width >= 620 then
-    spacer(header)
+  MaterialPicker.add_heading(header, width)
+  spacer(header)
+  if width >= 720 then
     small(header, "ssk_history_summary", "").style.horizontal_align = "right"
   else
     small(controls, "ssk_history_summary", "", chart_width)
   end
-  local filters = row(controls, "ssk_history_views")
-  filters.style.height = 28
-  label(filters, nil, "View", "caption_label")
-  for _, view in ipairs(VIEWS) do
-    filters.add { type = "radiobutton", name = "ssk_history_" .. view[1], state = view[1] == "all",
-      caption = view[2], tooltip = view[3], tags = { ssk_ui = "history_view", view = view[1] } }
-  end
+  header.add { type = "checkbox", name = "ssk_history_usage", state = true, caption = "Usage breakdown",
+    tooltip = "Show estimated consumption by product alongside the total Used rate.", tags = { ssk_ui = "history_usage" } }
 
   local scroll = panel.add { type = "scroll-pane", name = "ssk_history_scroll", style = "naked_scroll_pane",
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
@@ -151,7 +141,7 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   label(net_title, nil, "Net rate", "caption_label")
   spacer(net_title)
   local legend = small(net_title, "ssk_history_net_legend", "")
-  legend.tooltip = "Made minus Used per second. Above zero is a surplus. Below zero is a deficit."
+  legend.tooltip = "Made minus Used per second. Green shows a surplus. Red shows a deficit. Zero means production matches consumption."
   net.add { type = "flow", name = "ssk_history_net_plot", direction = "vertical" }
 
   body.add { type = "line", direction = "horizontal" }
@@ -287,14 +277,26 @@ local function blend(a, b, fraction)
   return a + (b - a) * fraction
 end
 
-local function trace(painter, path, y, field, line_color, dashed)
+local function trace(painter, path, y, field, line_color, dashed, zero)
   local first = path[1]
   local start_x, previous_x = first.x, first.x
   local previous_y = y(first.a[field])
   local offset = 0
+  local negative = zero and color(USED)
   local function line(x1, y1, x2, y2)
-    painter.line(x1, y1, x2, y2, line_color, 2, dashed, offset)
-    offset = (offset + math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)) % 8
+    if zero then
+      if (y1 < zero and y2 > zero) or (y1 > zero and y2 < zero) then
+        local crossing = x1 + (x2 - x1) * (zero - y1) / (y2 - y1)
+        painter.line(x1, y1, crossing, zero, y1 < zero and line_color or negative, 2)
+        painter.line(crossing, zero, x2, y2, y2 < zero and line_color or negative, 2)
+      else
+        local tint = (y1 < zero or y2 < zero) and line_color or (y1 > zero or y2 > zero) and negative or BASELINE
+        painter.line(x1, y1, x2, y2, tint, 2)
+      end
+    else
+      painter.line(x1, y1, x2, y2, line_color, 2, dashed, offset)
+      if dashed then offset = (offset + math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)) % 8 end
+    end
   end
   for i = 2, #path do
     local sample = path[i]
@@ -309,25 +311,22 @@ local function trace(painter, path, y, field, line_color, dashed)
   if previous_x > start_x then line(start_x, previous_y, previous_x, previous_y) end
 end
 
-local function draw_rates(painter, h, width, height, view, top, paths)
-  local show_made = view == "all" or view == "made"
-  local show_used = view == "all" or view == "used"
+local function draw_rates(painter, h, width, height, mode, top, paths)
+  local net = mode == "net"
   local highest = 0
   for _, p in ipairs(h.points) do
     if p.made ~= nil and not p.partial then
-      if show_made then highest = math.max(highest, p.made) end
-      if show_used then highest = math.max(highest, p.used) end
-      if view == "net" then highest = math.max(highest, math.abs(p.net)) end
+      highest = net and math.max(highest, math.abs(p.net)) or math.max(highest, p.made, p.used)
     end
   end
   local intervals = height < 100 and 2 or height < 140 and 3 or 4
-  local step = nice_step(highest, view == "net" and math.floor(intervals / 2) or intervals)
+  local step = nice_step(highest, net and math.floor(intervals / 2) or intervals)
   local max_value = math.max(step, math.ceil(highest / step) * step)
-  local min_value = view == "net" and -max_value or 0
+  local min_value = net and -max_value or 0
   local x, y = axes(painter, h, width, height, top, min_value, max_value, step)
 
   paths = paths or rate_paths(h.points, x)
-  if show_used then
+  if mode == "breakdown" then
     for _, path in ipairs(paths) do
       local base = {}
       for i, key in ipairs(h.usage_keys) do
@@ -346,9 +345,12 @@ local function draw_rates(painter, h, width, height, view, top, paths)
     end
   end
   for _, path in ipairs(paths) do
-    if show_made then trace(painter, path, y, "made", color(MADE), false) end
-    if show_used then trace(painter, path, y, "used", color(USED), true) end
-    if view == "net" then trace(painter, path, y, "net", color(NET), false) end
+    if net then
+      trace(painter, path, y, "net", color(NET_POSITIVE), false, y(0))
+    else
+      trace(painter, path, y, "made", color(MADE), false)
+      trace(painter, path, y, "used", color(USED), true)
+    end
   end
   return paths
 end
@@ -439,7 +441,7 @@ end
 
 function H.fill(player, panel, us, key, width, panel_height)
   local chart_width = width - 2 * (PANEL_INSET + SCROLLBAR_WIDTH)
-  local toolbar_height = width < 620 and 116 or 92
+  local toolbar_height = width < 720 and 80 or 56
   local scroll_height = math.max(1, panel_height - toolbar_height - 2 * PANEL_INSET)
   local scroll = panel.ssk_history_scroll
   local body = scroll and scroll.ssk_history_body
@@ -450,13 +452,9 @@ function H.fill(player, panel, us, key, width, panel_height)
   end
   local controls = panel.ssk_history_toolbar.ssk_history_controls
   local header = controls.ssk_history_header
-  local view = us.bal_history_view or "all"
-  for _, spec in ipairs(VIEWS) do
-    controls.ssk_history_views["ssk_history_" .. spec[1]].state = spec[1] == view
-  end
-  local name = material(key)
-  header.ssk_history_material.caption = name
-  header.ssk_history_material.tooltip = name
+  local breakdown = us.bal_usage_breakdown ~= false
+  header.ssk_history_usage.state = breakdown
+  MaterialPicker.update_heading(header.ssk_material_heading, key)
   local summary = header.ssk_history_summary or controls.ssk_history_summary
   local h = key and History.build(us.sidx, us.period, key)
   local rates = h and h.seconds > 0
@@ -470,10 +468,7 @@ function H.fill(player, panel, us, key, width, panel_height)
   summary.tooltip = "Measured average per second over the recorded time in the selected period."
   local legend = body.ssk_history_rate_title.ssk_history_rate_legend
   local units = key and key:sub(1, 6) == "fluid/" and "fluid/s" or "items/s"
-  local made_legend, used_legend, net_legend = swatch(MADE) .. " Made",
-    swatch(USED) .. " Used", swatch(NET) .. " Net"
-  legend.caption = (view == "all" and made_legend .. "   " .. used_legend or view == "made" and made_legend
-    or view == "used" and used_legend or net_legend) .. "   " .. units
+  legend.caption = swatch(MADE) .. " Made   " .. swatch(USED) .. " Used   " .. units
   local rate_state = body.ssk_history_rate_state
   rate_state.visible = not active
   rate_state.caption = not key and "Select a material from the Balance table."
@@ -490,7 +485,7 @@ function H.fill(player, panel, us, key, width, panel_height)
   end
 
   local usage = body.ssk_history_uses
-  usage.visible = active and #h.usage_keys > 0 and (view == "all" or view == "used") or false
+  usage.visible = active and breakdown and #h.usage_keys > 0 or false
   if usage.visible then
     for i = 1, 4 do
       local entry = usage.ssk_history_products["ssk_history_use_" .. i]
@@ -523,7 +518,8 @@ function H.fill(player, panel, us, key, width, panel_height)
 
   local net = body.ssk_history_net_section
   net.visible = rates == true
-  net.ssk_history_net_title.ssk_history_net_legend.caption = "0 = balanced   " .. units
+  net.ssk_history_net_title.ssk_history_net_legend.caption =
+    swatch(NET_POSITIVE) .. " Surplus   " .. swatch(USED) .. " Deficit   " .. units
   -- Allow a third of the inspector for the stock and net sections together,
   -- including their headings, note, and divider.
   local stock_heading_height, net_heading_height = 48, 36
@@ -551,7 +547,7 @@ function H.fill(player, panel, us, key, width, panel_height)
   if rates or stock then
     painter = Canvas.begin(player, chart_width, stock and stock_top + stock_height or net_top + net_height)
     local paths
-    if active then paths = draw_rates(painter, h, chart_width, rate_height, view, 0) end
+    if active then paths = draw_rates(painter, h, chart_width, rate_height, breakdown and "breakdown" or "total", 0) end
     if rates then draw_rates(painter, h, chart_width, net_height, "net", net_top, paths) end
     if stock then stock_regions = draw_stock(painter, h, chart_width, stock_height, stock_top) end
   else
@@ -561,14 +557,6 @@ function H.fill(player, panel, us, key, width, panel_height)
   camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0, buckets)
   camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top, buckets)
   camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top, stock_regions)
-end
-
-function H.on_checked(e, us)
-  local tags = e.element.tags
-  if not (tags and tags.ssk_ui == "history_view") then return false end
-  -- Factorio radiobuttons do not create an exclusive group by themselves.
-  us.bal_history_view = tags.view
-  return true
 end
 
 return H

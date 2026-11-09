@@ -338,11 +338,6 @@ local function settings_panel(c, us, L, player, W, viewH)
   panel.style.top_margin, panel.style.bottom_margin = top, -(top + height)
 end
 
-local function item_pickers(row, us)
-  small(row, "Item / fluid:")
-  MaterialPicker.button(row, us.focus, us.neighborhood and "balance" or "focus")
-end
-
 local function material_caption(key)
   local kind, name = key:match("^(%a+)/(.+)$")
   local proto = prototypes[kind] and prototypes[kind][name]
@@ -417,9 +412,14 @@ end
 
 local function focus_toolbar(bar, us, player)
   local _, main = toolbar_strip(bar, us)
-  item_pickers(main, us)
-  -- Balance picks its material from the list beside the chart, so only Focus keeps history.
-  if not us.neighborhood then history_controls(main, us) end
+  if us.neighborhood then
+    local heading = MaterialPicker.add_heading(main, us.toolbar_width)
+    MaterialPicker.update_heading(heading, us.focus)
+  else
+    small(main, "Item / fluid:")
+    MaterialPicker.button(main, us.focus, "focus")
+    history_controls(main, us)
+  end
   local actions = right_group(main, us)
   if us.neighborhood then
     actions.add { type = "sprite-button", name = "ssk_watch_action", style = "tool_button", sprite = "utility/warning",
@@ -854,7 +854,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     end
     canvas.clear()
     Canvas.clear(player.index)
-    local l = canvas.add { type = "label", caption = us.neighborhood and "Pick an item or fluid above, or use a row's magnifier to inspect its materials and uses." or "Pick an item or fluid above, or use a row's magnifier in the Balance tab." }
+    local l = canvas.add { type = "label", caption = us.neighborhood and "Select an item or fluid from the Balance list to inspect its inputs and uses." or "Pick an item or fluid above, or use a row's magnifier in the Balance tab." }
     l.style.single_line = false
     place(l, 24, 40, math.max(100, W - 48), 60)
     return

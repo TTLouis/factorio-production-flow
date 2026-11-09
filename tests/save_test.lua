@@ -88,14 +88,13 @@ end
 
 if mode == "picker" then
   cases={
-    {name="picker-balance-browse",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,query=""},
-    {name="picker-fluid-group",surface="nauvis",tab="balance",focus="fluid/water",depth=1,query="",group_material="fluid/water"},
-    {name="picker-scroll-results",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,query="e",expect_scroll=true},
-    {name="picker-balance-catalog",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,query="iron"},
-    {name="picker-balance-history",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water"},
+    {name="picker-focus-browse",surface="nauvis",tab="focus",focus="item/iron-plate",query=""},
+    {name="picker-fluid-group",surface="nauvis",tab="focus",focus="fluid/water",query="",group_material="fluid/water"},
+    {name="picker-scroll-results",surface="nauvis",tab="focus",focus="item/iron-plate",query="e",expect_scroll=true},
+    {name="picker-focus-iron-catalog",surface="nauvis",tab="focus",focus="item/iron-plate",query="iron"},
+    {name="picker-balance-list",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water"},
     {name="picker-balance-groups",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water",groups=true,
       favs={items={["item/steel-plate"]=true},groups={["plates"]=true}}},
-    {name="picker-balance-cleared",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water",clear=true},
     {name="picker-balance-scroll-bottom",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water",bottom=true},
     {name="picker-balance-options",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,pick="fluid/water",options=true},
     {name="picker-focus-options",surface="nauvis",tab="focus",focus="item/electronic-circuit",pick="item/wood",options=true},
@@ -194,7 +193,7 @@ elseif mode=="history-view" then
     {name="electronic-circuit-flow",surface="nauvis",tab="balance",focus="item/electronic-circuit",flow_only=true},
     {name="electronic-circuit-history",surface="nauvis",tab="balance",focus="item/electronic-circuit"},
     {name="history-rates-and-stock",surface="nauvis",tab="balance",focus="item/iron-plate"},
-    {name="history-net",surface="nauvis",tab="balance",focus="item/iron-plate",metric="net"},
+    {name="history-totals",surface="nauvis",tab="balance",focus="item/iron-plate",breakdown=false},
     {name="history-long-window",surface="nauvis",tab="balance",focus="item/iron-plate",long_period=true},
     {name="history-selected-fluid",surface="vulcanus",tab="balance",focus="fluid/water"},
   }
@@ -236,6 +235,14 @@ local function find_named(element, name)
   end
 end
 
+local function material_row(element,key)
+  if element.tags.ssk_ui=="focus_item" and element.tags.key==key then return element end
+  for _,child in ipairs(element.children) do
+    local row=material_row(child,key)
+    if row then return row end
+  end
+end
+
 local function exercise_history(UI, player, root, us, case)
   local split=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split
   local list=split.ssk_balance_table.ssk_bal_root
@@ -251,9 +258,21 @@ local function exercise_history(UI, player, root, us, case)
     assert(us.bal_mode==expected and tabs.selected_tab_index==index,"Inspector tab selection did not persist")
   end
   select_tab(1,"flow")
-  assert(find_node(tabs.ssk_balance_flow_panel),"Flow did not render for the same material")
+  local flow=tabs.ssk_balance_flow_panel
+  assert(find_node(flow),"Flow did not render for the same material")
+  if case.name=="electronic-circuit-history" then
+    local fx=SK.balance_state(us)
+    click(find_action(flow,"node","item/copper-cable#input"))
+    assert(fx.focus=="item/copper-cable" and fx.focus_hist[#fx.focus_hist]==case.focus,
+      "Balance Flow node clicks must still select and record visits")
+    click(material_row(items,case.focus))
+  end
+  local flow_slot=assert(find_named(flow,"ssk_material_slot"))
   select_tab(2,"history")
   local panel=tabs.ssk_history_panel
+  local history_slot=assert(find_named(panel,"ssk_material_slot"))
+  assert(flow_slot.locked and history_slot.locked and flow_slot.elem_value.name==history_slot.elem_value.name,
+    "Flow and History must show the same read-only material")
   local rate_plot=assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera").parent
   local net_plot=assert(find_named(panel,"ssk_history_net_camera"),"History needs a separate net rate plot").parent
   local order={}
@@ -268,23 +287,15 @@ local function exercise_history(UI, player, root, us, case)
     and rate_hover.tooltip:find("Net",1,true),"Rate and net plots must share interactive bucket values")
   assert(SK.balance_state(us).focus==case.focus and items.valid,"History lost the Balance selection or scroller")
   if case.name=="history-rates-and-stock" then
-    local function row_for(element,key)
-      if element.tags.ssk_ui=="focus_item" and element.tags.key==key then return element end
-      for _,child in ipairs(element.children) do
-        local row=row_for(child,key)
-        if row then return row end
-      end
-    end
-    click(row_for(items,"item/copper-plate"))
+    click(material_row(items,"item/copper-plate"))
     assert(SK.balance_state(us).focus=="item/copper-plate" and items.valid,"Selecting a material lost History or the Balance list")
-    click(row_for(items,case.focus))
+    click(material_row(items,case.focus))
     assert(tabs.ssk_history_panel==panel and tabs.selected_tab_index==2,"Selecting a material rebuilt History")
   end
-  local metric=assert(find_ui(panel,case.metric or "all","view"),"History metric control is missing")
-  metric.state=true
-  assert(UI.on_checked{player_index=player.index,element=metric},"History metric change was not handled")
-  local mode_control=assert(find_ui(panel,case.metric or "all","view"))
-  assert(mode_control.state,"Wrong History metric selected")
+  local mode_control=assert(find_ui(panel,"history_usage"),"History usage toggle is missing")
+  mode_control.state=case.breakdown~=false
+  assert(UI.on_checked{player_index=player.index,element=mode_control},"History usage change was not handled")
+  assert(find_named(panel,"ssk_history_uses").visible==mode_control.state,"Wrong History breakdown state")
   local function choose_period(index)
     local period=assert(find_ui(root,"period"))
     period.selected_index=index
@@ -821,97 +832,100 @@ function T.tick(UI, Sampler)
       UI.on_click{player_index=player.index,element=find_action(root,"chart_settings")}
       assert(chart.ssk_settings,"Chart settings did not reopen")
     end
-    fx.focus_hist,fx.focus_forward={},{}
-    SK.select_focus(fx,"item/copper-plate")
-    UI.refresh(player,false,false,true)
     local function picker_action(el,action)
       if el.tags and el.tags.ssk_picker==action then return el end
       for _,child in pairs(el.children) do local hit=picker_action(child,action);if hit then return hit end end
     end
-    local list=find_named(root,"ssk_bal_root")
-    UI.on_click{player_index=player.index,element=picker_action(root,"open")}
-    local dialog=assert(player.gui.screen.ssk_material_picker)
-    local grid=find_named(dialog,"ssk_results")
-    assert(grid.type=="table" and grid.tags.total>100,"Incomplete material icon grid")
-    local categories=dialog.ssk_material_inner.ssk_group_scroll.ssk_groups
-    for _,category in pairs(categories.children) do
-      assert(category.tags.group~="other" and category.tags.group~="signals", "Excluded selector category remains visible")
-    end
-    for _,query in ipairs({"parameter-", "blueprint", "deconstruction planner"}) do
-      dialog.ssk_title.ssk_query.text=query
-      UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
-      for _,key in ipairs(grid.tags.keys) do
-        local kind,name=key:match("^(%a+)/(.+)$")
-        local proto=prototypes[kind][name]
-        assert(not proto.parameter and proto.group.name~="other" and proto.group.name~="signals", "Excluded selector entry leaked into search")
-      end
-    end
-    UI.refresh(player,true)
-    assert(dialog.valid,"Live refresh destroyed open material picker")
-    if c.group_material then
-      dialog.ssk_title.ssk_query.text=""
-      UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
-      local kind,name=c.group_material:match("^(%a+)/(.+)$")
-      local wanted=kind=="fluid" and "fluids" or prototypes[kind][name].group.name
-      local function group_button(el)
-        if el.tags.ssk_picker=="group" and el.tags.group==wanted then return el end
-        for _,child in pairs(el.children) do local hit=group_button(child);if hit then return hit end end
-      end
-      UI.on_click{player_index=player.index,element=assert(group_button(dialog))}
-    end
-    dialog.ssk_title.ssk_query.text=c.query or c.pick:match("/(.+)$"):gsub("%-"," ")
-    UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
-    if c.expect_scroll then
-      local scroll=dialog.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll
-      assert(math.ceil(#grid.children/grid.column_count)*40 > scroll.style.minimal_height,
-        "Scrollbar reference case must contain more rows than fit")
-    end
-    if c.pick then
-      local function material_button(el)
-        if el.tags.ssk_picker=="pick" and el.tags.key==c.pick then return el end
-        for _,child in pairs(el.children) do local hit=material_button(child);if hit then return hit end end
-      end
-      UI.on_click{player_index=player.index,element=assert(material_button(dialog),"Material absent from icon grid")}
-      assert(fx.focus==c.pick and not dialog.valid,"Native material choice failed")
-      if list then assert(list.valid,"Native material choice rebuilt Balance list") end
-      if c.tab=="focus" then
-      local previous=fx.focus_hist[#fx.focus_hist]
-      UI.on_click{player_index=player.index,element=find_action(root,"f_back")}
-      assert(fx.focus==previous and #fx.focus_forward==1,"Back lost forward material")
-      UI.on_click{player_index=player.index,element=find_action(root,"f_forward")}
-      assert(fx.focus==c.pick,"Forward did not restore material")
-      UI.on_click{player_index=player.index,element=find_action(root,"f_trail")}
-      assert(fx.focus==c.focus and #fx.focus_forward==2,"Trail did not restore parent path")
-      UI.on_click{player_index=player.index,element=find_action(root,"f_forward")}
-      if c.clear then
-        local bins,focus=storage.bins,fx.focus
-        UI.on_click{player_index=player.index,element=find_action(root,"f_clear_history")}
-        assert(fx.focus==focus and #fx.focus_hist==0 and #fx.focus_forward==0 and storage.bins==bins,"Clear history changed material or production data")
-        assert(not find_action(root,"f_back").enabled and not find_action(root,"f_forward").enabled,"Cleared history still navigates")
-      end
+    if c.tab=="balance" then
+      local slot=assert(find_named(bar,"ssk_material_slot"))
+      assert(slot.locked and not picker_action(bar,"open"),"Balance toolbar must be read-only")
+      assert(UI.on_click{player_index=player.index,element=assert(material_row(list_before,c.pick))})
+      assert(fx.focus==c.pick and list_before.valid,"Selecting from the Balance list must keep its scroller")
+      if c.bottom then
+        local items=list_before.ssk_bal_list.ssk_bal_items
+        local sections=items.children
+        local t=sections[#sections].ssk_bal_table
+        items.scroll_to_element(t.children[#t.children-t.column_count+1],"in-view")
       end
     else
-      assert(#grid.tags.keys>0,"Native search returned no materials")
-    end
-    if c.six_visits then
-      fx.focus,fx.focus_hist,fx.focus_forward="item/iron-plate",{},{}
-      for _,key in ipairs({"item/copper-plate","fluid/water","item/iron-gear-wheel","item/steel-plate","fluid/petroleum-gas","item/electronic-circuit"}) do
-        SK.select_focus(fx,key)
+      fx.focus_hist,fx.focus_forward={},{}
+      SK.select_focus(fx,"item/copper-plate")
+      UI.refresh(player,false,false,true)
+      UI.on_click{player_index=player.index,element=picker_action(root,"open")}
+      local dialog=assert(player.gui.screen.ssk_material_picker)
+      local grid=find_named(dialog,"ssk_results")
+      assert(grid.type=="table" and grid.tags.total>100,"Incomplete material icon grid")
+      local categories=dialog.ssk_material_inner.ssk_group_scroll.ssk_groups
+      for _,category in pairs(categories.children) do
+        assert(category.tags.group~="other" and category.tags.group~="signals", "Excluded selector category remains visible")
       end
-      UI.refresh(player,false,false,true)
-      assert(#fx.focus_hist==6 and #find_action(root,"f_history").items==7,"Last visits must retain exactly six previous materials")
-    end
-    if c.stay_pick then
-      SK.select_focus(fx,c.pick)
-      UI.refresh(player,false,false,true)
-      local empty=View.build(player,fx,us.canvas_w,us.canvas_h)
-      assert(not next(empty.nodes) and not find_action(root,"node"),"Unrecorded wood restored unrelated factory flows")
-    end
-    if c.bottom then
-      local items=list.ssk_bal_list.ssk_bal_items
-      local sections=items.children
-      local t=sections[#sections].ssk_bal_table
-      items.scroll_to_element(t.children[#t.children-t.column_count+1],"in-view")
+      for _,query in ipairs({"parameter-", "blueprint", "deconstruction planner"}) do
+        dialog.ssk_title.ssk_query.text=query
+        UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
+        for _,key in ipairs(grid.tags.keys) do
+          local kind,name=key:match("^(%a+)/(.+)$")
+          local proto=prototypes[kind][name]
+          assert(not proto.parameter and proto.group.name~="other" and proto.group.name~="signals", "Excluded selector entry leaked into search")
+        end
+      end
+      UI.refresh(player,true)
+      assert(dialog.valid,"Live refresh destroyed open material picker")
+      if c.group_material then
+        dialog.ssk_title.ssk_query.text=""
+        UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
+        local kind,name=c.group_material:match("^(%a+)/(.+)$")
+        local wanted=kind=="fluid" and "fluids" or prototypes[kind][name].group.name
+        local function group_button(el)
+          if el.tags.ssk_picker=="group" and el.tags.group==wanted then return el end
+          for _,child in pairs(el.children) do local hit=group_button(child);if hit then return hit end end
+        end
+        UI.on_click{player_index=player.index,element=assert(group_button(dialog))}
+      end
+      dialog.ssk_title.ssk_query.text=c.query or c.pick:match("/(.+)$"):gsub("%-"," ")
+      UI.on_text_changed{player_index=player.index,element=dialog.ssk_title.ssk_query}
+      if c.expect_scroll then
+        local scroll=dialog.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll
+        assert(math.ceil(#grid.children/grid.column_count)*40 > scroll.style.minimal_height,
+          "Scrollbar reference case must contain more rows than fit")
+      end
+      if c.pick then
+        local function material_button(el)
+          if el.tags.ssk_picker=="pick" and el.tags.key==c.pick then return el end
+          for _,child in pairs(el.children) do local hit=material_button(child);if hit then return hit end end
+        end
+        UI.on_click{player_index=player.index,element=assert(material_button(dialog),"Material absent from icon grid")}
+        assert(fx.focus==c.pick and not dialog.valid,"Native material choice failed")
+        local previous=fx.focus_hist[#fx.focus_hist]
+        UI.on_click{player_index=player.index,element=find_action(root,"f_back")}
+        assert(fx.focus==previous and #fx.focus_forward==1,"Back lost forward material")
+        UI.on_click{player_index=player.index,element=find_action(root,"f_forward")}
+        assert(fx.focus==c.pick,"Forward did not restore material")
+        UI.on_click{player_index=player.index,element=find_action(root,"f_trail")}
+        assert(fx.focus==c.focus and #fx.focus_forward==2,"Trail did not restore parent path")
+        UI.on_click{player_index=player.index,element=find_action(root,"f_forward")}
+        if c.clear then
+          local bins,focus=storage.bins,fx.focus
+          UI.on_click{player_index=player.index,element=find_action(root,"f_clear_history")}
+          assert(fx.focus==focus and #fx.focus_hist==0 and #fx.focus_forward==0 and storage.bins==bins,"Clear history changed material or production data")
+          assert(not find_action(root,"f_back").enabled and not find_action(root,"f_forward").enabled,"Cleared history still navigates")
+        end
+      else
+        assert(#grid.tags.keys>0,"Native search returned no materials")
+      end
+      if c.six_visits then
+        fx.focus,fx.focus_hist,fx.focus_forward="item/iron-plate",{},{}
+        for _,key in ipairs({"item/copper-plate","fluid/water","item/iron-gear-wheel","item/steel-plate","fluid/petroleum-gas","item/electronic-circuit"}) do
+          SK.select_focus(fx,key)
+        end
+        UI.refresh(player,false,false,true)
+        assert(#fx.focus_hist==6 and #find_action(root,"f_history").items==7,"Last visits must retain exactly six previous materials")
+      end
+      if c.stay_pick then
+        SK.select_focus(fx,c.pick)
+        UI.refresh(player,false,false,true)
+        local empty=View.build(player,fx,us.canvas_w,us.canvas_h)
+        assert(not next(empty.nodes) and not find_action(root,"node"),"Unrecorded wood restored unrelated factory flows")
+      end
     end
     log("MATERIAL PICKER NATIVE PASS "..c.name)
   end
