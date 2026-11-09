@@ -1,4 +1,9 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.1.4
+Date: 2026-11-08
+  Bugfixes:
+    - Fix a crash when opening item and fluid search before selecting a material. (https://github.com/TTLouis/factorio-production-flow/issues/1)
+---------------------------------------------------------------------------------------------------
 Version: 0.1.3
 Date: 2026-10-24
   Features:

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.4 — 2026-11-08
+
+- Fix a crash when opening the shared item and fluid picker before selecting a
+  material. [Issue #1](https://github.com/TTLouis/factorio-production-flow/issues/1)
+- Refactor the picker, Balance calculations, and production graph internals and
+  document the sampler's data structures.
+
+Verified first-use Focus search with recorded item and fluid flows on Factorio
+2.1.24 with Space Age.
+
 ## 0.1.3 — 2026-10-24
 
 ### UI improvements

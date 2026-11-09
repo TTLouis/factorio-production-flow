@@ -3,16 +3,15 @@
 **Production balances and interactive Sankey charts for Factorio.**
 
 Production Flow shows what your factory makes, what it consumes, and how recipes
-connect on the selected surface. Public beta: **0.1.3**, by **TTLouis**.
+connect on the selected surface. The current public beta is **0.1.4** by **TTLouis**.
 
 **Feedback needed:** Help shape the beta by sharing what works, what is confusing,
 and what needs improving. Report bugs or suggest improvements on
 [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues) or the
 [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion).
 
-**New in 0.1.3:** compact chart controls, a combined item/fluid icon
-selector, Focus navigation, Balance favourites and framed headings, plus the
-configurable chest-stock cooldown (1-minute minimum, 5-minute default).
+**New in 0.1.4:** The magnifier opens the shared item and fluid picker even
+when no material is selected. This fixes the crash on first use in Focus.
 See [UI screenshots](docs/ui-preview-0.1.3.md) and [the changelog](CHANGELOG.md).
 
 ## Views
@@ -43,15 +42,16 @@ The default measurement window is
 
 ## Install
 
-Requires **Factorio 2.1**. Tested with Factorio **2.1.23** and a Space Age save,
+Requires **Factorio 2.1**. Tested with Factorio **2.1.24** and a Space Age save,
 including planetary and local space-platform production.
 
 Install [Production Flow from the Mod Portal](https://mods.factorio.com/mod/production-flow),
-or download `production-flow_0.1.3.zip` from the
-[GitHub beta release](https://github.com/TTLouis/factorio-production-flow/releases/tag/v0.1.3)
+or download `production-flow_0.1.4.zip` from the
+[GitHub beta release](https://github.com/TTLouis/factorio-production-flow/releases/tag/v0.1.4)
 and place it in your Factorio mods directory.
 Open Production Flow in-game, select a surface, and inspect a Balance row with
 its magnifier button. Expand inputs to follow its recipe chain upstream.
+In Focus, use the magnifier in the toolbar to search for an item or fluid.
 
 ## What the charts measure
 
@@ -73,11 +73,6 @@ Compressed widths, minimum visible thickness and separate fluid scaling help
 readability; they are not a conserved mass balance across different materials.
 Dense charts can still cross or require scrolling. Modpack compatibility,
 multiplayer and large-factory performance need broader testing.
-
-Diagnostic files remain local under `script-output/production-flow`. Automatic
-exports are optional and off by default for new installations. Manual exports
-and renderer comparisons are available only with debug controls enabled. Nothing
-is uploaded automatically.
 
 ## Development
 
