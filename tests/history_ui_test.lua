@@ -78,6 +78,14 @@ assert(camera.position[2] < stock_camera.position[2] and stock_camera.position[2
 local lower_fraction = (stock_camera.style.height + net_camera.style.height + 84) / (us.canvas_h + 100)
 assert(math.abs(lower_fraction - 1 / 3) < 0.02, "stock and net should share the lower third of the inspector")
 assert(named(root, "ssk_history_products").column_count == 4, "consumption entries must fit on one row")
+local rate_targets = camera.parent.ssk_history_tooltips.children
+local net_targets = net_camera.parent.ssk_history_tooltips.children
+local stock_targets = stock_camera.parent.ssk_history_tooltips.children
+assert(#rate_targets == 3 and #net_targets == 3, "partial or unrecorded rates have no tooltip")
+assert(rate_targets[1].tooltip == "50s ago to 35s ago\nMade  10 items/s\nUsed  8 items/s\nNet  2 items/s")
+assert(net_targets[2].tooltip == rate_targets[2].tooltip and net_targets[2].tooltip:find("Net  -2 items/s", 1, true))
+assert(stock_targets[1].tooltip == "50s ago\nMeasured stock  30 items"
+  and stock_targets[2].tooltip == "35s ago\nEstimated stock  20 items")
 local polygons, rising_or_falling = 0, 0
 local stock = {}
 for _, o in ipairs(objects()) do
@@ -97,6 +105,7 @@ assert(named(root, "ssk_history_use_1").rate.caption == "5.1/s" and named(root, 
 local old = objects()
 UI.refresh(player, true)
 assert(named(root, "ssk_history_controls") == controls and named(root, "ssk_history_camera") == camera)
+assert(camera.parent.ssk_history_tooltips.children[1] == rate_targets[1], "refresh must retain hover targets")
 assert(named(root, "ssk_bal_items") == items and not old[1].valid, "replace render objects while retaining GUI and scroll state")
 
 assert(UI.on_checked(event(named(root, "ssk_history_net"))))

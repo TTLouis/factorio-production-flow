@@ -23,14 +23,15 @@ local BASELINE = { 0.56, 0.54, 0.52, 1 }
 local TICK_TEXT = { 0.78, 0.75, 0.71, 1 }
 local PLOT_GAP = 64
 local PLOT_LEFT, PLOT_RIGHT = 52, 24
+local PLOT_TOP, PLOT_BOTTOM = 12, 21
 local STOCK_MARKER_HALF = 3
 
 local function color(rgb)
   return { rgb[1] / 255, rgb[2] / 255, rgb[3] / 255, 1 }
 end
 
-local function mark(rgb, glyph)
-  return string.format("[color=#%02x%02x%02x]%s[/color]", rgb[1], rgb[2], rgb[3], glyph)
+local function swatch(rgb)
+  return string.format("[color=#%02x%02x%02x]■[/color]", rgb[1], rgb[2], rgb[3])
 end
 
 local function number(n)
@@ -143,7 +144,7 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   local stock = row(body, "ssk_history_stock_title")
   label(stock, nil, "Chest stock", "caption_label")
   spacer(stock)
-  small(stock, "ssk_history_stock_legend", mark(MEASURED, "■") .. " Measured  " .. mark(ESTIMATED, "■") .. " Estimated")
+  small(stock, "ssk_history_stock_legend", swatch(MEASURED) .. " Measured  " .. swatch(ESTIMATED) .. " Estimated")
   body.add { type = "flow", name = "ssk_history_stock_plot", direction = "vertical" }
   local stock_state = small(body, "ssk_history_stock_state", "", chart_width)
   stock_state.style.single_line = false
@@ -192,12 +193,16 @@ local function ago(seconds)
   return "-" .. number(seconds) .. "s"
 end
 
--- Identical x positions in both viewports, including the period's unrecorded time.
+local function time_x(h, width, tick)
+  return PLOT_LEFT + (width - PLOT_LEFT - PLOT_RIGHT) * (tick - h.start_tick) / (h.end_tick - h.start_tick)
+end
+
+-- Identical x positions in every viewport, including the period's unrecorded time.
 local function axes(painter, h, width, height, top, minimum, maximum, step)
   local left, right = PLOT_LEFT, width - PLOT_RIGHT
-  local plot_top, bottom = top + 12, top + height - 21
+  local plot_top, bottom = top + PLOT_TOP, top + height - PLOT_BOTTOM
   local function x(tick)
-    return left + (right - left) * (tick - h.start_tick) / (h.end_tick - h.start_tick)
+    return time_x(h, width, tick)
   end
   local function y(value)
     return bottom - (bottom - plot_top) * (value - minimum) / (maximum - minimum)
@@ -217,6 +222,30 @@ local function axes(painter, h, width, height, top, minimum, maximum, step)
     painter.text(left - 5, pos, number(value), TICK_TEXT, "right")
   end
   return x, y, left, right, plot_top
+end
+
+local function elapsed(h, tick)
+  local seconds = math.floor((h.end_tick - tick) / 60 + 0.5)
+  if seconds == 0 then return "Now" end
+  if seconds < 60 then return string.format("%ds ago", seconds) end
+  if seconds < 3600 then return string.format("%dm %02ds ago", math.floor(seconds / 60), seconds % 60) end
+  return string.format("%dh %02dm %02ds ago", math.floor(seconds / 3600), math.floor(seconds / 60) % 60, seconds % 60)
+end
+
+local function rate_regions(h, width, units)
+  local regions = {}
+  for _, p in ipairs(h.points) do
+    if p.made ~= nil and not p.partial then
+      local left = Geometry.round(time_x(h, width, p.start_tick))
+      local right = Geometry.round(time_x(h, width, p.end_tick))
+      if right > left then
+        local tooltip = string.format("%s to %s\nMade  %.5g %s\nUsed  %.5g %s\nNet  %.5g %s",
+          elapsed(h, p.start_tick), elapsed(h, p.end_tick), p.made, units, p.used, units, p.net, units)
+        regions[#regions + 1] = { left = left, right = right, tooltip = tooltip }
+      end
+    end
+  end
+  return regions
 end
 
 -- The bucket midpoint holds the sampled rate. A shared easing curve keeps the
@@ -322,6 +351,7 @@ end
 
 local function draw_stock(painter, h, width, height, top)
   local highest = 0
+  local regions = {}
   for _, sample in ipairs(h.stock) do highest = math.max(highest, sample.count) end
   local step = nice_step(highest, height < 100 and 2 or height < 140 and 3 or 4)
   local max_value = math.max(step, math.ceil(highest / step) * step)
@@ -345,15 +375,48 @@ local function draw_stock(painter, h, width, height, top)
     end
     local y1 = math.min(bottom - 1, y(sample.count))
     painter.rect(x1, y1, x2 - x1, bottom - y1, color(sample.measured and MEASURED or ESTIMATED))
+    if x2 > x1 then
+      local source = sample.measured and "Measured stock" or "Estimated stock"
+      regions[#regions + 1] = { left = x1, right = x2,
+        tooltip = string.format("%s\n%s  %.0f items", elapsed(h, sample.tick), source, sample.count) }
+    end
     if sample.measured and center - last_label >= 56 then
       local label_x = math.min(right - 12, math.max(left + 12, center))
       painter.text(label_x, math.max(plot_top - 4, y1 - 8), number(sample.count), TICK_TEXT, "center")
       last_label = center
     end
   end
+  return regions
 end
 
-local function camera(player, parent, name, painter, width, height, top)
+-- Native tooltip targets line up with the plotted buckets. Lay the transparent
+-- row over the camera using negative margins and keep its elements on refresh.
+local function plot_tooltips(parent, height, regions)
+  local hover_height = height - PLOT_TOP - PLOT_BOTTOM
+  local layer = parent.ssk_history_tooltips
+  if not layer then
+    parent.style.vertical_spacing = 0
+    layer = parent.add { type = "flow", name = "ssk_history_tooltips", direction = "horizontal" }
+    layer.style.horizontal_spacing = 0
+    layer.style.height = hover_height
+    layer.style.top_margin, layer.style.bottom_margin = PLOT_TOP - height, PLOT_BOTTOM
+  end
+  local children, last, index = layer.children, 0, 0
+  for _, region in ipairs(regions) do
+    local left = math.max(last, region.left)
+    if region.right > left then
+      index = index + 1
+      local target = children[index] or layer.add { type = "empty-widget" }
+      target.style.width, target.style.height = region.right - left, hover_height
+      target.style.left_margin = left - last
+      target.tooltip, target.visible = region.tooltip, true
+      last = region.right
+    end
+  end
+  for i = index + 1, #children do children[i].visible = false end
+end
+
+local function camera(player, parent, name, painter, width, height, top, regions)
   local view = parent[name]
   parent.visible = not not painter
   if not painter then return end
@@ -365,6 +428,7 @@ local function camera(player, parent, name, painter, width, height, top)
   else
     view.position = spec.position
   end
+  plot_tooltips(parent, height, regions)
 end
 
 function H.fill(player, panel, us, key, width, height)
@@ -400,8 +464,8 @@ function H.fill(player, panel, us, key, width, height)
   summary.tooltip = "Measured average per second over the recorded time in the selected period."
   local legend = body.ssk_history_rate_title.ssk_history_rate_legend
   local units = key and key:sub(1, 6) == "fluid/" and "fluid/s" or "items/s"
-  local made_legend, used_legend, net_legend = mark(MADE, "==") .. " Made",
-    mark(USED, "--") .. " Used", mark(NET, "==") .. " Net"
+  local made_legend, used_legend, net_legend = swatch(MADE) .. " Made",
+    swatch(USED) .. " Used", swatch(NET) .. " Net"
   legend.caption = (view == "all" and made_legend .. "   " .. used_legend or view == "made" and made_legend
     or view == "used" and used_legend or net_legend) .. "   " .. units
   local rate_state = body.ssk_history_rate_state
@@ -429,7 +493,7 @@ function H.fill(player, panel, us, key, width, height)
       if product then
         local other = product == History.OTHER
         local caption = other and "Other uses" or material(product)
-        entry.material_name.caption = { "", mark(USES[other and 4 or i], "■"), " ", caption }
+        entry.material_name.caption = { "", swatch(USES[other and 4 or i]), " ", caption }
         entry.material_name.tooltip = caption
         entry.rate.caption = number((uses[product] or 0) / h.seconds) .. "/s"
         entry.rate.tooltip = other and "Measured consumption outside the top three estimated output uses."
@@ -459,19 +523,20 @@ function H.fill(player, panel, us, key, width, height)
   local rate_height = math.max(72, scroll_height - 162 - net_heading_height - lower_plot_height)
   local stock_top = rate_height + PLOT_GAP
   local net_top = stock_top + stock_height + PLOT_GAP
-  local painter
+  local painter, stock_regions
   if rates or stock then
     painter = Canvas.begin(player, chart_width, rates and net_top + net_height or stock_top + stock_height)
     local paths
     if active then paths = draw_rates(painter, h, chart_width, rate_height, view, 0) end
-    if stock then draw_stock(painter, h, chart_width, stock_height, stock_top) end
+    if stock then stock_regions = draw_stock(painter, h, chart_width, stock_height, stock_top) end
     if rates then draw_rates(painter, h, chart_width, net_height, "net", net_top, paths) end
   else
     Canvas.clear(player.index)
   end
-  camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0)
-  camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top)
-  camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top)
+  local buckets = rates and rate_regions(h, chart_width, units)
+  camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0, buckets)
+  camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top, stock_regions)
+  camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top, buckets)
 end
 
 function H.on_checked(e, us)

@@ -252,8 +252,13 @@ local function exercise_history(UI, player, root, us, case)
   assert(find_node(tabs.ssk_balance_flow_panel),"Flow did not render for the same material")
   select_tab(2,"history")
   local panel=tabs.ssk_history_panel
-  assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera")
-  assert(find_named(panel,"ssk_history_net_camera"),"History needs a separate net rate plot")
+  local rate_plot=assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera").parent
+  local net_plot=assert(find_named(panel,"ssk_history_net_camera"),"History needs a separate net rate plot").parent
+  local rate_hover=assert(rate_plot.ssk_history_tooltips.children[1],"The rate plot needs hover targets")
+  local net_hover=assert(net_plot.ssk_history_tooltips.children[1],"The net plot needs hover targets")
+  assert(not rate_hover.ignored_by_interaction and rate_hover.tooltip==net_hover.tooltip
+    and rate_hover.tooltip:find("Made",1,true) and rate_hover.tooltip:find("Used",1,true)
+    and rate_hover.tooltip:find("Net",1,true),"Rate and net plots must share interactive bucket values")
   assert(SK.balance_state(us).focus==case.focus and items.valid,"History lost the Balance selection or scroller")
   if case.name=="history-rates-and-stock" then
     local function row_for(element,key)
@@ -296,7 +301,9 @@ local function exercise_history(UI, player, root, us, case)
       assert(history.stock[#history.stock].joined,"The first capture needs rates through the latest completed scan")
     end
     assert(#history.usage_keys>0,"Active iron plate must have usage history")
-    assert(find_named(panel,"ssk_history_stock_camera"),"Item History needs a native stock plot")
+    local stock_plot=assert(find_named(panel,"ssk_history_stock_camera"),"Item History needs a native stock plot").parent
+    local stock_hover=assert(stock_plot.ssk_history_tooltips.children[1],"The stock plot needs hover targets")
+    assert(not stock_hover.ignored_by_interaction and stock_hover.tooltip:find("stock",1,true),"Stock tooltips must be interactive")
   else
     assert(not history.stock_supported and #history.stock==0,"Fluid must not show measured chest stock")
   end
