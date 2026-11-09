@@ -1,5 +1,6 @@
 local Canvas = require("scripts.canvas")
 local Graph = require("scripts.graph")
+local Sampler = require("scripts.sampler")
 local Sprites = require("shared.sprites")
 local Transfers = require("scripts.transfers")
 
@@ -686,7 +687,7 @@ local function render_history(player, body, result, state, note)
     scroll(body, "log_scroll", width, math.max(70, height - chart_height - 126))
   end
   local seconds = result.bucket_ticks / 60
-  local period = seconds >= 60 and number(seconds / 60) .. " min" or number(seconds) .. " s"
+  local period = Sampler.duration(seconds)
   local heading = body.timeline_heading
   heading.units.caption = (state.material and "Selected items" or "Confirmed pods") .. " / " .. period
   heading.units.tooltip = note or "Select a time bucket to filter delivered cargo. Hover either lane for its complete manifest."
@@ -748,7 +749,7 @@ function UI.render(content, player, period, state, width, height)
       label(body, "empty", "", "grey_label").style.left_margin = 8
     end
     body.empty.caption = available and "No space platforms on this force." or "Transfers are available with Space Age enabled."
-    return
+    return result.covered_seconds
   end
   state.platform = result.platform.id
   if body.empty then body.empty.destroy() end
@@ -759,6 +760,7 @@ function UI.render(content, player, period, state, width, height)
   else
     render_flow(player, body, result, note)
   end
+  return result.covered_seconds
 end
 
 function UI.on_selection(event, state)

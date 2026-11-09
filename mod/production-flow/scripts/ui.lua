@@ -41,12 +41,13 @@ local function ustate(pi)
     s.layout_snapshot, s.auto_rank, s.sel = nil, nil, nil
     s.plain_names_default = true
   end
-  -- Adopt the requested default once for existing Live/default users, retaining
-  -- explicit longer periods. Later manual choices (including Live) persist.
+  -- Preserve established periods and map an explicit legacy Recent selection
+  -- to the new shortest period. New windows still default to 10 minutes.
   if not s.period_default_10m then
     if not s.period or s.period == 0 then s.period = Sampler.DEFAULT_PERIOD end
     s.period_default_10m = true
   end
+  if s.period == 0 then s.period = Sampler.PERIODS[1] end
   if s.period == nil then s.period = Sampler.DEFAULT_PERIOD end
   return s
 end
@@ -166,7 +167,13 @@ end
 
 function fill.transfers(player, c, us)
   us.transfers = us.transfers or {}
-  TransfersUI.render(c, player, us.period, us.transfers, us.canvas_w, us.canvas_h + 100)
+  local seconds = TransfersUI.render(c, player, us.period, us.transfers, us.canvas_w, us.canvas_h + 100)
+  if seconds and seconds < us.period then
+    local label = player.gui.screen[WIN].ssk_window_bar.ssk_history
+    label.visible = true
+    label.caption = "Recorded " .. Sampler.duration(seconds) .. " / " .. Sampler.duration(us.period)
+    label.tooltip = "This period includes time before cargo recording began or deliveries aged out of the retained log. Totals use available deliveries."
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -189,9 +196,9 @@ local function update_header(player,us)
   local label=bar.ssk_history
   if not scoped then label.visible = false; return end
   local _,seconds=Sampler.rates(us.sidx,us.period)
-  local target=us.period>0 and us.period or settings.global["ssk-window-seconds"].value
+  local target=us.period
   label.visible=seconds<target
-  label.caption=string.format("History collected: %.0f / %d s",seconds,target)
+  label.caption="Recorded "..Sampler.duration(seconds).." / "..Sampler.duration(target)
   label.tooltip="The selected period is still filling. Rates use the recorded history available so far, not an assumed full window. Recording continues while the factory runs."
 end
 
@@ -288,12 +295,9 @@ function UI.open(player)
   surface_picker.style.width = math.min(240, math.floor(W * 0.22))
   local pl = tb.add { type = "label", caption = "Period:" }
   pl.style.left_margin = 12
-  local psel = 1
+  local psel = 2
   for i, v in ipairs(Sampler.PERIODS) do if us.period == v then psel = i end end
-  local items = {}
-  for i, cpt in ipairs(Sampler.PERIOD_CAPTIONS) do items[i] = cpt end
-  items[1] = string.format("Recent (%d s)", settings.global["ssk-window-seconds"].value)
-  tb.add { type = "drop-down", items = items, selected_index = psel, tags = { ssk_ui = "period" },
+  tb.add { type = "drop-down", items = Sampler.PERIOD_CAPTIONS, selected_index = psel, tags = { ssk_ui = "period" },
            tooltip = "How far back rates and transfers are counted. Longer periods smooth out bursts; history builds up while the factory runs." }
   local history=tb.add{type="label",name="ssk_history"}
   history.style.font="default-small-bold";history.style.font_color={1,0.82,0.35}

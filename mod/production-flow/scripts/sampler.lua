@@ -102,6 +102,8 @@ local function init_machine_status()
   end
 end
 
+local init_rings
+
 function Sm.init()
   ChestStock.init()
   storage.machines = storage.machines or {} -- unit_number -> {e, u, s, r, pf}
@@ -120,19 +122,26 @@ function Sm.init()
       if not storage.bins[slot] or storage.bins[slot].id < b.id then storage.bins[slot] = b end
     end
   end
-  -- coarse history for longer observation periods: completed 1 s bins are rolled up
-  if not storage.rings then
-    storage.rings = {
-      { secs = 60,  n = 60, bins = {} },  -- 1 min bins  -> up to 1 h
-      { secs = 600, n = 60, bins = {} },  -- 10 min bins -> up to 10 h
-    }
-  end
+  init_rings()
 end
 
--- observation periods offered in the UI (seconds; "window" = the fine window setting)
-Sm.PERIODS = { 0, 600, 3600, 36000 }
+Sm.PERIODS = { 60, 600, 3600, 36000, 180000, 900000, 3600000 }
 Sm.DEFAULT_PERIOD = 600
-Sm.PERIOD_CAPTIONS = { "Recent (window)", "10 min", "1 hour", "10 hours" }
+Sm.PERIOD_CAPTIONS = { "1m", "10m", "1H", "10H", "50H", "250H", "1000H" }
+
+local RING_SPECS = { {60, 60}, {600, 60}, {3600, 51}, {18000, 51}, {72000, 51} }
+
+function Sm.duration(seconds)
+  if seconds >= 3600 then
+    local hours, minutes = math.floor(seconds / 3600), math.floor(seconds % 3600 / 60)
+    return hours .. " h" .. (minutes > 0 and " " .. minutes .. " min" or "")
+  end
+  if seconds >= 60 then
+    local minutes, remainder = math.floor(seconds / 60), math.floor(seconds % 60)
+    return minutes .. " min" .. (remainder > 0 and " " .. remainder .. " s" or "")
+  end
+  return string.format("%d s", math.floor(seconds))
+end
 
 local function add_into(dst, src)
   for s, recs in pairs(src.rec) do
@@ -157,18 +166,53 @@ local function add_into(dst, src)
   end
 end
 
-local function roll_up(b)
-  for _, ring in ipairs(storage.rings or {}) do
-    local per = ring.secs * 60 / BIN_TICKS
-    local id = math.floor(b.id / per)
-    local slot = id % ring.n + 1
-    local c = ring.bins[slot]
-    if not c or c.id ~= id then
-      c = { id = id, secs = 0, rec = {}, stat = {} }
-      ring.bins[slot] = c
+local function add_to_ring(ring, source, source_seconds)
+  local id = math.floor(source.id * source_seconds / ring.secs)
+  local slot = id % ring.n + 1
+  local bin = ring.bins[slot]
+  if not bin or bin.id ~= id then
+    bin = { id = id, secs = 0, rec = {}, stat = {} }
+    ring.bins[slot] = bin
+  end
+  bin.secs = bin.secs + source_seconds
+  add_into(bin, source)
+  return bin
+end
+
+init_rings = function()
+  local rings = storage.rings or {}
+  storage.rings = rings
+  for i, spec in ipairs(RING_SPECS) do
+    if not rings[i] then
+      local ring = { secs = spec[1], n = spec[2], bins = {} }
+      rings[i] = ring
+      local previous = rings[i - 1]
+      if previous then
+        -- Seed upgrades from completed retained bins. The current partial bin
+        -- will be sent onward by the normal rollup when it completes.
+        local completed = {}
+        for _, bin in pairs(previous.bins) do
+          if bin.secs == previous.secs then completed[#completed + 1] = bin end
+        end
+        table.sort(completed, function(a, b) return a.id < b.id end)
+        for _, bin in ipairs(completed) do add_to_ring(ring, bin, previous.secs) end
+      end
     end
-    c.secs = c.secs + BIN_TICKS / 60
-    add_into(c, b)
+  end
+end
+
+local function roll_up(b)
+  if not storage.rings or #storage.rings < #RING_SPECS then init_rings() end
+  local rings = storage.rings
+  local seconds = BIN_TICKS / 60
+  add_to_ring(rings[1], b, seconds)
+  local bin = add_to_ring(rings[2], b, seconds)
+  -- Keep the 1h and 10h resolutions up to date as before. The longer rings
+  -- receive completed lower-resolution bins instead of processing every second.
+  for i = 3, #rings do
+    local span = rings[i - 1].secs
+    if bin.secs ~= span then break end
+    bin = add_to_ring(rings[i], bin, span)
   end
 end
 
@@ -401,6 +445,58 @@ end
 ---------------------------------------------------------------------------
 -- queries
 ---------------------------------------------------------------------------
+local function source_bins(bins, size, sidx, start_tick, end_tick, stats_only)
+  local sources = {}
+  local width = size * 60
+  for _, bin in pairs(bins) do
+    local first = bin.id * width
+    local last = first + width
+    if first < end_tick and last <= end_tick and last > start_tick and (size == 1 or bin.secs == size) then
+      local known = not stats_only or (sidx and bin.stat[sidx] ~= nil) or (not sidx and next(bin.stat) ~= nil)
+      sources[#sources + 1] = { first = first, last = last, bin = bin, known = known }
+    end
+  end
+  table.sort(sources, function(a, b) return a.first < b.first end)
+  return sources
+end
+
+-- The resolutions nest on the same absolute time grid. Use the finer bins if
+-- they cover the interval, or if they record a gap the coarse total cannot locate.
+local function merge_sources(fine, coarse, start_tick)
+  local result, index = {}, 1
+  for _, wide in ipairs(coarse) do
+    while fine[index] and fine[index].first < wide.first do
+      result[#result + 1] = fine[index]
+      index = index + 1
+    end
+    local first, covered, known, missing = index, 0, false, false
+    while fine[index] and fine[index].first < wide.last do
+      local narrow = fine[index]
+      covered = covered + narrow.last - math.max(narrow.first, start_tick)
+      known = known or narrow.known
+      missing = missing or not narrow.known
+      index = index + 1
+    end
+    local duration = wide.last - math.max(wide.first, start_tick)
+    if covered == duration or (wide.known and missing) or (not wide.known and known) then
+      for i = first, index - 1 do result[#result + 1] = fine[i] end
+    else
+      result[#result + 1] = wide
+    end
+  end
+  for i = index, #fine do result[#result + 1] = fine[i] end
+  return result
+end
+
+function Sm.history_sources(sidx, start_tick, end_tick, stats_only)
+  local sources = source_bins(storage.bins or {}, 1, sidx, start_tick, end_tick, stats_only)
+  for _, ring in ipairs(storage.rings or {}) do
+    local coarse = source_bins(ring.bins, ring.secs, sidx, start_tick, end_tick, stats_only)
+    sources = merge_sources(sources, coarse, start_tick)
+  end
+  return sources
+end
+
 -- returns {recipes = {[r] = {cps, prod}}, nodes = {[key] = {prod, cons}}}, seconds
 -- period: seconds to average over (nil / 0 = the fine rate window)
 ---@param sidx integer? Surface index; nil combines all recorded surfaces.
@@ -409,52 +505,48 @@ end
 ---@return number seconds Actual recorded duration used as the denominator.
 function Sm.rates(sidx, period)
   local now_id = math.floor(game.tick / BIN_TICKS)
-  local rc, st, nfull = {}, {}, 0
+  local rc, st, secs = {}, {}, 0
   local requested = period and period > 0 and period or settings.global["ssk-window-seconds"].value
-  local bins, unit = storage.bins, nil
-  local take = function(b) return b.id < now_id and b.id >= now_id - requested end
-  local fine_secs = 0
-  for _, b in pairs(bins) do if take(b) then fine_secs = fine_secs + 1 end end
-  -- An upgraded save may already have coarse history older than its fine bins.
-  -- Prefer the fine window once complete; otherwise use the longer coverage.
-  if requested > fine_secs and period and period > 0 and storage.rings then
-    local ring = storage.rings[#storage.rings]
-    for _, rg in ipairs(storage.rings) do
-      if requested <= rg.secs * rg.n then ring = rg break end
-    end
-    local cid = math.floor(game.tick / 60 / ring.secs)
-    local need = math.ceil(requested / ring.secs)
-    local coarse_take = function(b) return b.id <= cid and b.id > cid - need end
-    local coarse_secs = 0
-    for _, b in pairs(ring.bins) do if coarse_take(b) then coarse_secs = coarse_secs + b.secs end end
-    if coarse_secs > fine_secs then bins, take, unit = ring.bins, coarse_take, true end
-  end
-  for _, b in pairs(bins) do
-    if take(b) then
-      nfull = nfull + (unit and b.secs or 1)
-      for s, recs in pairs(b.rec) do
-        if not sidx or s == sidx then
-          for r, a in pairs(recs) do
-            local x = rc[r]
-            if not x then x = { c = 0, p = 0 }; rc[r] = x end
-            x.c = x.c + a.c
-            x.p = x.p + a.p
-          end
+  local first_id = now_id - requested
+  local function accumulate(bin, fraction)
+    for s, recs in pairs(bin.rec) do
+      if not sidx or s == sidx then
+        for r, a in pairs(recs) do
+          local x = rc[r]
+          if not x then x = { c = 0, p = 0 }; rc[r] = x end
+          x.c = x.c + a.c * fraction
+          x.p = x.p + a.p * fraction
         end
       end
-      for s, keys in pairs(b.stat) do
-        if not sidx or s == sidx then
-          for k, a in pairs(keys) do
-            local x = st[k]
-            if not x then x = { i = 0, o = 0 }; st[k] = x end
-            x.i = x.i + a.i
-            x.o = x.o + a.o
-          end
+    end
+    for s, keys in pairs(bin.stat) do
+      if not sidx or s == sidx then
+        for k, a in pairs(keys) do
+          local x = st[k]
+          if not x then x = { i = 0, o = 0 }; st[k] = x end
+          x.i = x.i + a.i * fraction
+          x.o = x.o + a.o * fraction
         end
       end
     end
   end
-  local secs = nfull * BIN_TICKS / 60
+  local bins, fine_secs = storage.bins, 0
+  for _, bin in pairs(bins) do
+    if bin.id >= first_id and bin.id < now_id then fine_secs = fine_secs + 1 end
+  end
+  if fine_secs == requested or not period or period <= 0 or not storage.rings then
+    secs = fine_secs
+    for _, bin in pairs(bins) do
+      if bin.id >= first_id and bin.id < now_id then accumulate(bin, 1) end
+    end
+  else
+    local start_tick = first_id * BIN_TICKS
+    for _, source in ipairs(Sm.history_sources(sidx, start_tick, now_id * BIN_TICKS)) do
+      local ticks = source.last - math.max(source.first, start_tick)
+      accumulate(source.bin, ticks / (source.last - source.first))
+      secs = secs + ticks / 60
+    end
+  end
   local out = { recipes = {}, nodes = {} }
   if secs > 0 then
     for r, x in pairs(rc) do

@@ -187,7 +187,12 @@ local wrapped = Transfers.platform_view(player, 34269, 600, { platform = 24, vie
 assert(wrapped.truncated and wrapped.unloaded.pods == 32768 and wrapped.unloaded.weight == 32768000)
 assert(wrapped.arrival_count == 32768 and wrapped.page == 328 and wrapped.pages == 328)
 assert(#wrapped.arrivals == 68 and wrapped.arrivals[#wrapped.arrivals].tick == 1502)
-Transfers.on_housekeeping(34269 + 10 * 3600 * 60 + 1)
+local later = 34269 + 50 * 3600 * 60 + 1
+local long = Transfers.platform_view(player, later, 250 * 3600, { platform = 24, view = "history" })
+assert(long.truncated and long.arrival_count == 32768 and #long.buckets <= 16)
+assert(long.covered_seconds < 250 * 3600 and long.covered_seconds > 50 * 3600)
+assert(Transfers.platform_view(player, later, 50 * 3600, { platform = 24, view = "history" }).arrival_count == 0)
+Transfers.on_housekeeping(34269 + 1000 * 3600 * 60 + 1)
 assert(storage.transfers.count == 0 and next(storage.transfers.dropped) == nil)
 
 print("TRANSFERS OK: verified pod arrivals, loss guards, filters, retention, platform routes, weights, buckets and manifests")

@@ -4,12 +4,13 @@ local Sampler = require("scripts.sampler")
 local Surfaces = require("scripts.surfaces")
 
 local T = {}
-local HISTORY_TICKS = 10 * 3600 * 60
+local HISTORY_TICKS = Sampler.PERIODS[#Sampler.PERIODS] * 60
 local HISTORY_LIMIT = 32768
 local PENDING_TICKS = 10 * 60 * 60
 local PENDING_LIMIT = 4096
 local ARRIVALS_PER_PAGE = 100
-local BUCKET_SECONDS = { 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600 }
+local BUCKET_SECONDS = { 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600,
+  18000, 36000, 90000, 180000, 360000 }
 
 function T.available()
   return script and script.active_mods and script.active_mods["space-age"] ~= nil
@@ -18,12 +19,19 @@ function T.available()
     and defines.events.on_cargo_pod_delivered_cargo ~= nil
 end
 
-local function ledger()
+local function recording_start(state, tick)
+  local first = state.history[state.first]
+  return state.recording_start or (first and first.tick) or tick
+end
+
+local function ledger(tick)
   if not storage.transfers then
     storage.transfers = { pending = {}, pending_count = 0, endpoints = {}, serial = 0,
       history = {}, first = 1, count = 0, dropped = {} }
   end
-  return storage.transfers
+  local state = storage.transfers
+  if not state.recording_start then state.recording_start = recording_start(state, tick) end
+  return state
 end
 
 local function surface_name(surface)
@@ -86,7 +94,7 @@ function T.on_departed(event)
   local inventory = pod.get_inventory(defines.inventory.cargo_unit)
   if not inventory or inventory.is_empty() then return end
 
-  local state = ledger()
+  local state = ledger(event.tick)
   local id = pod.unit_number
   if state.pending[id] or state.pending_count >= PENDING_LIMIT then return end
   state.pending[id] = { pod = pod, force = pod.force, from = endpoint_for(state, pod.surface),
@@ -190,8 +198,7 @@ function T.on_delivered(event)
 end
 
 function T.on_housekeeping(tick)
-  local state = storage.transfers
-  if not state then return end
+  local state = ledger(tick)
   for id, pending in pairs(state.pending) do
     if not pending.pod.valid or tick - pending.tick > PENDING_TICKS then forget(state, id) end
   end
@@ -406,9 +413,12 @@ function T.platform_view(force, tick, seconds, filters)
   local loading, unloading, arrivals = {}, {}, {}
   local page = math.max(1, math.floor(filters.page or 1))
   local ledger_state = storage.transfers
+  local earliest = ledger_state and recording_start(ledger_state, tick) or tick
+  local dropped = ledger_state and ledger_state.dropped[force.index]
+  result.truncated = dropped and dropped.force == force and dropped.tick >= result.from_tick
+  if result.truncated then earliest = math.max(earliest, dropped.tick) end
+  result.covered_seconds = (tick - math.min(tick, math.max(earliest, result.from_tick))) / 60
   if ledger_state and surface and surface.valid then
-    local dropped = ledger_state.dropped[force.index]
-    result.truncated = dropped and dropped.force == force and dropped.tick >= result.from_tick
     local first_arrival = (page - 1) * ARRIVALS_PER_PAGE
     for i = ledger_state.count - 1, 0, -1 do
       local slot = (ledger_state.first - 1 + i) % HISTORY_LIMIT + 1

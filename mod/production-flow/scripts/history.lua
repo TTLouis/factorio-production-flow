@@ -5,49 +5,6 @@ local H = { OTHER = "other" }
 local TICKS_PER_SECOND = 60
 local MAX_BUCKETS = 60
 
-local function source_bins(bins, size, sidx, start_tick, end_tick)
-  local sources = {}
-  local width = size * TICKS_PER_SECOND
-  for _, bin in pairs(bins) do
-    local first = bin.id * width
-    local last = first + width
-    if first < end_tick and last <= end_tick and last > start_tick and (size == 1 or bin.secs == size) then
-      local known = (sidx and bin.stat[sidx] ~= nil) or (not sidx and next(bin.stat) ~= nil)
-      sources[#sources + 1] = { first = first, last = last, bin = bin, known = known }
-    end
-  end
-  table.sort(sources, function(a, b) return a.first < b.first end)
-  return sources
-end
-
--- The resolutions nest on the same absolute time grid. Use the finer bins if
--- they cover the interval, or if they record a gap the coarse total cannot locate.
-local function merge_sources(fine, coarse, start_tick)
-  local result, index = {}, 1
-  for _, wide in ipairs(coarse) do
-    while fine[index] and fine[index].first < wide.first do
-      result[#result + 1] = fine[index]
-      index = index + 1
-    end
-    local first, covered, known, missing = index, 0, false, false
-    while fine[index] and fine[index].first < wide.last do
-      local narrow = fine[index]
-      covered = covered + narrow.last - math.max(narrow.first, start_tick)
-      known = known or narrow.known
-      missing = missing or not narrow.known
-      index = index + 1
-    end
-    local duration = wide.last - math.max(wide.first, start_tick)
-    if covered == duration or (wide.known and missing) or (not wide.known and known) then
-      for i = first, index - 1 do result[#result + 1] = fine[i] end
-    else
-      result[#result + 1] = wide
-    end
-  end
-  for i = index, #fine do result[#result + 1] = fine[i] end
-  return result
-end
-
 local function candidate_recipes(key)
   local graph = storage.graph
   local node = graph and graph.nodes[key]
@@ -295,10 +252,7 @@ function H.build(sidx, period, key)
       break
     end
   end
-  local sources = source_bins(storage.bins or {}, 1, sidx, start_tick, now)
-  for _, ring in ipairs(storage.rings or {}) do
-    sources = merge_sources(sources, source_bins(ring.bins, ring.secs, sidx, start_tick, now), start_tick)
-  end
+  local sources = Sampler.history_sources(sidx, start_tick, now, true)
   local recipes = candidate_recipes(key)
   for _, source in ipairs(sources) do
     if source.known then

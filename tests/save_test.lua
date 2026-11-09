@@ -336,8 +336,10 @@ local function exercise_history(UI, player, root, us, case)
     assert(UI.on_selection{player_index=player.index,element=period},"History period change was not handled")
   end
   if case.long_period then
-    choose_period(4)
-    assert(us.period==36000,"History must use the selected ten-hour period")
+    choose_period(7)
+    assert(us.period==3600000,"History must use the selected 1000-hour period")
+    local coverage=root.ssk_window_bar.ssk_history
+    assert(coverage.visible and coverage.caption:find("1000 h",1,true),"History must show incomplete long-window coverage")
     items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
   end
   UI.refresh(player,true)
@@ -518,6 +520,14 @@ local function exercise_transfers(UI, player, root, us, case)
     for i,item in ipairs(result.arrivals[manifest_row].items) do
       local tags=manifest.children[i].tags
       assert(tags.transfer_item==item.name and tags.count==item.count,"Expanded pod changed its cargo")
+    end
+    after_capture=function()
+      local period=assert(find_ui(root,"period"))
+      period.selected_index=7
+      assert(UI.on_selection{player_index=player.index,element=period} and us.period==3600000)
+      local coverage=root.ssk_window_bar.ssk_history
+      assert(coverage.visible and coverage.caption:find("1000 h",1,true),"Transfers must show the retained cargo coverage")
+      log("TRANSFERS LONG WINDOW PASS 1000-hour period and cargo coverage")
     end
     log("TRANSFERS HISTORY NATIVE PASS direction-specific hover manifests, bucket filtering and pod expansion")
   else
@@ -1106,8 +1116,9 @@ function T.tick(UI, Sampler)
     end
     if c.recent then
       local period=find_ui(root,"period");period.selected_index=1
+      assert(table.concat(period.items," ")=="1m 10m 1H 10H 50H 250H 1000H","Incorrect Period options")
       UI.on_selection({player_index=player.index,element=period})
-      assert(us.period==0,"Recent period action failed")
+      assert(us.period==60,"One-minute period action failed")
     end
     if c.update_list then
       local old=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root

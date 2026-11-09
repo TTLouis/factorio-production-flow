@@ -5,6 +5,7 @@ local Graph = require("scripts.graph")
 local History = require("scripts.history")
 local Geometry = require("scripts.ribbon_geometry")
 local MaterialPicker = require("scripts.material_picker")
+local Sampler = require("scripts.sampler")
 
 local H = {}
 local MADE = { 112, 224, 164 }
@@ -505,7 +506,7 @@ function H.fill(player, panel, us, key, width, panel_height)
   local missing = rates and duration - h.seconds or 0
   coverage.visible = missing >= 1 or partial == true
   if coverage.visible then
-    coverage.caption = missing >= 1 and string.format("Recorded %.0f of %.0f s.", h.seconds, duration)
+    coverage.caption = missing >= 1 and ("Recorded " .. Sampler.duration(h.seconds) .. " of " .. Sampler.duration(duration) .. ".")
       or "Some buckets have missing samples."
     coverage.tooltip = "The chart leaves gaps where a time bucket has missing samples. Period averages still use the recorded portions."
   end

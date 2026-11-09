@@ -13,13 +13,13 @@ UI.on_click({element=find(root,function(e)return e.tags.ssk_sk=="chart_settings"
 local live=find(root,function(e)return e.tags.ssk_sk=="live" end)
 assert(live.caption=="Auto-update chart","update control must name its scope")
 local period=find(root,function(e)return e.tags.ssk_ui=="period" end)
-assert(period.items[1]:find("Recent"),"short averaging period must not reuse Live")
+assert(table.concat(period.items, " ")=="1m 10m 1H 10H 50H 250H 1000H","Period must match the fixed production scopes")
 local uses=find(root,function(e)return e.tags.ssk_column=="uses" end)
 assert(type(uses.caption)=="table" and uses.caption[2]:find("consumed"),"Uses must identify selected-material consumption")
 local saved_rates=Sm.rates
 Sm.rates=function(...)local rates=saved_rates(...);return rates,42 end
 UI.refresh(player,true)
-assert(root.ssk_window_bar.ssk_history.visible and root.ssk_window_bar.ssk_history.caption:find("42 / 600"),"warm-up must show available history")
+assert(root.ssk_window_bar.ssk_history.visible and root.ssk_window_bar.ssk_history.caption:find("42 s / 10 min",1,true),"warm-up must show available history")
 Sm.rates=saved_rates
 local help=find(root,function(e)return e.tags.ssk_ui=="help" end)
 assert(help.type=="sprite-button" and help.sprite=="utility/questionmark","Help must use the built-in question-mark frame action icon")
