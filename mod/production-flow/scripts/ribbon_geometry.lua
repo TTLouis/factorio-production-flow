@@ -95,6 +95,40 @@ function G.arc_points(p, steps)
   return points
 end
 
+-- Approximate the rendered shape with narrow GUI rectangles. A whole curve's
+-- bounding box would intercept nearby ribbons across the space between them.
+function G.hover_regions(pieces, visit)
+  local function area(left, top, right, bottom)
+    local y = math.max(0, top - math.max(0, (4 - (bottom - top)) / 2))
+    local x, yy, w, h = G.box(left, y, right - left, math.max(4, bottom - top))
+    if w > 0 and h > 0 then visit(x, yy, w, h) end
+  end
+  for _, p in ipairs(pieces) do
+    if p.kind == "bar" then
+      area(p.x, p.y, p.x + p.w, p.y + p.h)
+    elseif p.kind == "curve" then
+      local steps = math.max(2, math.min(12, math.ceil(math.max(p.w, p.h) / 40)))
+      local x, y, thickness = p.x, p.ya, p.t0
+      for i = 1, steps do
+        local u = i / steps
+        local bx, by = G.bezier(u)
+        if p.linear then bx, by = u, u end
+        local next_x, next_y = p.x + p.w * bx, p.ya + (p.yb - p.ya) * by
+        local next_t = p.t0 + (p.t1 - p.t0) * by
+        area(x, math.min(y, next_y), next_x, math.max(y + thickness, next_y + next_t))
+        x, y, thickness = next_x, next_y, next_t
+      end
+    else
+      local points = G.arc_points(p, 4)
+      for i = 1, #points - 2, 2 do
+        local a, b, c, d = points[i], points[i + 1], points[i + 2], points[i + 3]
+        area(math.min(a[1], b[1], c[1], d[1]), math.min(a[2], b[2], c[2], d[2]),
+          math.max(a[1], b[1], c[1], d[1]), math.max(a[2], b[2], c[2], d[2]))
+      end
+    end
+  end
+end
+
 -- One triangle strip for a complete routed ribbon. Degenerate triangles join
 -- primitive strips without painting spurious diagonals between their endpoints.
 function G.mesh(pieces)

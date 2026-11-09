@@ -107,6 +107,24 @@ end
 ---------------------------------------------------------------------------
 -- display graph
 ---------------------------------------------------------------------------
+local function add_link(links, from, to, rate)
+  local id = from .. ">" .. to
+  local link = links[id]
+  if not link then
+    link = { from = from, to = to, rate = 0, details = {} }
+    links[id] = link
+  end
+  link.rate = link.rate + rate
+  return link
+end
+
+local function remap_link(links, link, from, to)
+  if from == to then return end
+  local merged = add_link(links, from, to, link.rate)
+  for _, detail in ipairs(link.details) do merged.details[#merged.details + 1] = detail end
+  merged.note = merged.note or link.note
+end
+
 local function build_graph(pi, m, us)
   local nodes, links = {}, {}
   local function node(k)
@@ -119,12 +137,10 @@ local function build_graph(pi, m, us)
     end
     return n
   end
-  local function link(a, b, rate)
+  local function link(a, b, rate, recipe)
     if rate <= EPS or a == b then return end
-    local id = a .. ">" .. b
-    local l = links[id]
-    if not l then l = { from = a, to = b, rate = 0 }; links[id] = l end
-    l.rate = l.rate + rate
+    local l = add_link(links, a, b, rate)
+    l.details[#l.details + 1] = { from = a, to = b, rate = rate, recipe = recipe }
   end
 
   local by_recipe = {}
@@ -191,16 +207,16 @@ local function build_graph(pi, m, us)
       -- remember which drawn links carry this production, so the "other sources" stub can
       -- grow again when those links are filtered out (focus, presets, hidden items)
       local via = {}
-      for _, i in ipairs(x.ins) do node(i.from); link(i.from, o.to, i.rate); via[#via + 1] = i.from end
+      for _, i in ipairs(x.ins) do node(i.from); link(i.from, o.to, i.rate, r); via[#via + 1] = i.from end
       pn.contrib = pn.contrib or {}
       table.insert(pn.contrib, { rate = o.rate, via = via })
     elseif #x.outs > 1 then
       local rn = node(r)
-      for _, i in ipairs(x.ins) do node(i.from); link(i.from, r, i.rate) end
+      for _, i in ipairs(x.ins) do node(i.from); link(i.from, r, i.rate, r) end
       for _, o in ipairs(x.outs) do
         local pn = node(o.to)
         pn.shown_in = pn.shown_in + o.rate
-        link(r, o.to, o.rate)
+        link(r, o.to, o.rate, r)
         pn.contrib = pn.contrib or {}
         table.insert(pn.contrib, { rate = o.rate, via = { r } })
       end
@@ -268,12 +284,7 @@ local function apply_collapse(pi, nodes, links, collapsed)
   for _, id in ipairs(sorted_keys(links)) do
     local l = links[id]
     local a, b = map[l.from] or l.from, map[l.to] or l.to
-    if a ~= b then
-      local nid = a .. ">" .. b
-      local x = nl[nid]
-      if not x then x = { from = a, to = b, rate = 0 }; nl[nid] = x end
-      x.rate = x.rate + l.rate
-    end
+    remap_link(nl, l, a, b)
   end
   return nn, nl, map
 end
@@ -355,12 +366,7 @@ local function apply_overview(pi, nodes, links, opened)
   for _, id in ipairs(sorted_keys(links)) do
     local l = links[id]
     local a, b = map[l.from] or l.from, map[l.to] or l.to
-    if a ~= b then
-      local nid = a .. ">" .. b
-      local x = nl[nid]
-      if not x then x = { from = a, to = b, rate = 0 }; nl[nid] = x end
-      x.rate = x.rate + l.rate
-    end
+    remap_link(nl, l, a, b)
   end
   return nn, nl, map
 end

@@ -25,7 +25,8 @@ grouped activity counts), `warmup` (fresh-install defaults and incomplete histor
 `diagnostics` (Balance sort controls, watches, sampled machine status, preview
 zoom and remote view), `history-view` (Balance's Flow and History selector,
 material and metric changes, shared time axes, and measured and estimated stock),
-and `transfer-view` (native cargo arrivals and route and material filters).
+`transfer-view` (native cargo arrivals and route and material filters), and
+`ribbon-view` (itemised hover details in Balance History, Focus, Full Sankey and Transfers at 100% scale).
 Phase-specific evidence records native image hashes and the clean archive hash.
 Release packages contain Balance with Flow and History, Focus, Full Sankey and
 Transfers. Local diagnostic and render fixtures live under `tests/development/`.

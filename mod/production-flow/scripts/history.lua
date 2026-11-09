@@ -124,6 +124,13 @@ local function group_uses(result, totals)
   local has_other = false
   for _, point in ipairs(result.points) do
     if point.uses then
+      local unattributed = point.used
+      for _, rate in pairs(point.uses) do unattributed = unattributed - rate end
+      point.usage_detail = point.uses
+      if unattributed > 1e-9 then
+        point.usage_detail[H.OTHER] = unattributed
+        totals[H.OTHER] = (totals[H.OTHER] or 0) + unattributed * point.seconds
+      end
       local bands, left = {}, point.used
       for _, key in ipairs(result.usage_keys) do
         local rate = math.min(left, point.uses[key] or 0)
@@ -134,6 +141,7 @@ local function group_uses(result, totals)
       point.uses = bands
     end
   end
+  result.usage_totals = totals
   if has_other then result.usage_keys[#result.usage_keys + 1] = H.OTHER end
 end
 

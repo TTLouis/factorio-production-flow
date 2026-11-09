@@ -17,6 +17,12 @@ end
 local function event(element)
   return { element = element, player_index = player.index }
 end
+local function tooltip_text(tooltip)
+  if type(tooltip) ~= "table" then return tooltip end
+  local text = {}
+  for i, part in ipairs(tooltip) do text[i] = tooltip_text(part) end
+  return table.concat(text)
+end
 local function objects()
   return storage.canvas[player.index].objs
 end
@@ -30,6 +36,7 @@ History.build = function(surface, period, key)
   request = { surface, period, key }
   local fluid = key:sub(1, 6) == "fluid/"
   local uses = { ["item/steel-plate"] = 6, other = 2 }
+  local details = { ["item/steel-plate"] = 6, ["item/iron-gear-wheel"] = 1, other = 1 }
   if data_state == "flat" then
     return { start_tick = 0, end_tick = 6000, seconds = 15, bucket_seconds = 15,
       points = { { start_tick = 3000, end_tick = 3900, seconds = 15, made = 40, used = 40, net = 0, uses = {} } },
@@ -42,13 +49,17 @@ History.build = function(surface, period, key)
   return {
     start_tick = 0, end_tick = 6000, seconds = 50, bucket_seconds = 15,
     points = {
-      { start_tick = 3000, end_tick = 3900, seconds = 15, made = 10, used = 8, net = 2, uses = uses },
+      { start_tick = 3000, end_tick = 3900, seconds = 15, made = 10, used = 8, net = 2, uses = uses, usage_detail = details },
       { start_tick = 3900, end_tick = 4800, seconds = 15, made = 2, used = 4, net = -2,
-        uses = { ["item/steel-plate"] = 3, other = 1 } },
-      { start_tick = 4800, end_tick = 5100, seconds = 5, made = 10, used = 8, net = 2, uses = uses, partial = true },
-      { start_tick = 5100, end_tick = 6000, seconds = 15, made = 2, used = 8, net = -6, uses = uses },
+        uses = { ["item/steel-plate"] = 3, other = 1 },
+        usage_detail = { ["item/steel-plate"] = 3, ["item/iron-gear-wheel"] = 0.5, other = 0.5 } },
+      { start_tick = 4800, end_tick = 5100, seconds = 5, made = 10, used = 8, net = 2, uses = uses,
+        usage_detail = details, partial = true },
+      { start_tick = 5100, end_tick = 6000, seconds = 15, made = 2, used = 8, net = -6, uses = uses,
+        usage_detail = details },
     },
     usage_keys = { "item/steel-plate", History.OTHER },
+    usage_totals = { ["item/steel-plate"] = 255, ["item/iron-gear-wheel"] = 42.5, other = 42.5 },
     stock_supported = not fluid,
     stock = not fluid and {
       { tick = 3000, count = 30, measured = true },
@@ -107,8 +118,14 @@ local rate_targets = camera.parent.ssk_history_tooltips.children
 local net_targets = net_camera.parent.ssk_history_tooltips.children
 local stock_targets = stock_camera.parent.ssk_history_tooltips.children
 assert(#rate_targets == 3 and #net_targets == 3, "partial or unrecorded rates have no tooltip")
-assert(rate_targets[1].tooltip == "50s ago to 35s ago\nMade  10 items/s\nUsed  8 items/s\nNet  2 items/s")
-assert(net_targets[2].tooltip == rate_targets[2].tooltip and net_targets[2].tooltip:find("Net  -2 items/s", 1, true))
+local first_tooltip = tooltip_text(rate_targets[1].tooltip)
+assert(first_tooltip:find("50s ago to 35s ago\nMade  10 items/s\nUsed  8 items/s\nNet  2 items/s", 1, true))
+assert(first_tooltip:find("iron-gear-wheel", 1, true) and first_tooltip:find("Unattributed use  1 items/s", 1, true))
+local net_tooltip = tooltip_text(net_targets[2].tooltip)
+assert(net_tooltip == tooltip_text(rate_targets[2].tooltip) and net_tooltip:find("Net  -2 items/s", 1, true))
+local other_tooltip = tooltip_text(named(root, "ssk_history_use_2").rate.tooltip)
+assert(other_tooltip:find("iron-gear-wheel", 1, true) and other_tooltip:find("0.85 items/s", 1, true)
+  and not other_tooltip:find("steel-plate", 1, true), "Other must list hidden product uses and rates")
 assert(stock_targets[1].tooltip == "50s ago\nMeasured stock  30 items"
   and stock_targets[2].tooltip == "35s ago\nEstimated stock  20 items")
 local polygons, rising_or_falling, positive, negative = 0, 0, 0, 0

@@ -1,6 +1,7 @@
 -- Injected into an isolated copy only. Never included in release packages.
 local T = {}
 local mode = require("scripts.save_test_mode")
+local full_view = mode=="full" or mode=="ribbon-view"
 local SK = require("scripts.sankey_ui")
 local Model = require("scripts.model")
 local View = require("scripts.view")
@@ -202,6 +203,16 @@ elseif mode=="transfer-view" then
     {name="transfers-flow",surface="nauvis",tab="transfers"},
     {name="transfers-history",surface="nauvis",tab="transfers",history=true},
   }
+elseif mode=="ribbon-view" then
+  cases={
+    {name="electronic-circuit-flow",surface="nauvis",tab="balance",focus="item/electronic-circuit",usage_history=true,flow_only=true},
+    {name="electronic-circuit-history",surface="nauvis",tab="balance",focus="item/electronic-circuit",usage_history=true},
+    {name="full-nauvis",surface="nauvis",tab="sankey",view="overview"},
+    {name="full-nauvis-sprites",surface="nauvis",tab="sankey",view="overview",renderer="sprites"},
+    {name="focus-circuit",surface="nauvis",tab="focus",focus="item/electronic-circuit"},
+    {name="transfers-flow",surface="nauvis",tab="transfers"},
+    {name="transfers-history",surface="nauvis",tab="transfers",history=true},
+  }
 end
 local after_capture, diagnostic_machine
 local stock_fixture, transfer_fixture
@@ -316,9 +327,16 @@ local function exercise_history(UI, player, root, us, case)
     "History must show Rate history, Net rate, then Chest stock")
   local rate_hover=assert(rate_plot.ssk_history_tooltips.children[1],"The rate plot needs hover targets")
   local net_hover=assert(net_plot.ssk_history_tooltips.children[1],"The net plot needs hover targets")
-  assert(not rate_hover.ignored_by_interaction and rate_hover.tooltip==net_hover.tooltip
-    and rate_hover.tooltip:find("Made",1,true) and rate_hover.tooltip:find("Used",1,true)
-    and rate_hover.tooltip:find("Net",1,true),"Rate and net plots must share interactive bucket values")
+  local rate_tip=serpent.line(rate_hover.tooltip)
+  assert(not rate_hover.ignored_by_interaction and rate_tip==serpent.line(net_hover.tooltip)
+    and rate_tip:find("Made",1,true) and rate_tip:find("Used",1,true)
+    and rate_tip:find("Net",1,true),"Rate and net plots must share interactive bucket values")
+  if case.name=="electronic-circuit-history" then
+    assert(rate_tip:find("Estimated usage by product",1,true) and rate_tip:find("advanced-circuit",1,true),
+      "History bucket tooltip must list the products consuming electronic circuits")
+    local average=assert(find_named(panel,"ssk_history_usage_average"))
+    assert(serpent.line(average.tooltip):find("advanced-circuit",1,true),"History must expose period usage details")
+  end
   assert(SK.balance_state(us).focus==case.focus and items.valid,"History lost the Balance selection or scroller")
   if case.name=="history-rates-and-stock" then
     click(material_row(items,"item/copper-plate"))
@@ -393,14 +411,14 @@ local function send_fixture_cargo(fixture, name, count, offset)
   pod.cargo_pod_destination={type=defines.cargo_destination.surface,surface=ground,position=position,land_at_exact_position=true}
 end
 
-local function start_transfer_fixture()
+local function start_transfer_fixture(preview_only)
   local ground, force=game.surfaces.nauvis, game.forces.player
   local platform=assert(force.create_space_platform{
     name="Fixture Freighter",planet="nauvis",starter_pack="space-platform-starter-pack"})
   local hub=assert(platform.apply_starter_pack(true))
   platform.space_location="nauvis"
   local fixture={hub=hub}
-  send_fixture_cargo(fixture,"copper-plate",50,20)
+  if not preview_only then send_fixture_cargo(fixture,"copper-plate",50,20) end
   return fixture
 end
 
@@ -409,16 +427,19 @@ local function seed_transfer_preview(fixture, force, platform_end, nauvis)
   -- native chart and expansion with two surfaces in each direction.
   local state = storage.transfers
   local capacity = 32768
-  local function endpoint(name)
-    local surface = assert(game.surfaces[name])
+  local function endpoint(surface)
     local existing = state.endpoints[surface.index]
     if existing and existing.surface == surface then return existing end
     state.serial = state.serial + 1
-    local ep = {id=state.serial, surface=surface, name=name, icon="space-location/"..name}
+    local platform = surface.platform
+    local ep = {id=state.serial, surface=surface, name=platform and platform.name or surface.name,
+      icon=platform and "item/space-platform-hub" or "space-location/"..surface.name}
     state.endpoints[surface.index] = ep
     return ep
   end
-  local vulcanus, fulgora, gleba = endpoint("vulcanus"), endpoint("fulgora"), endpoint("gleba")
+  platform_end = platform_end or endpoint(fixture.hub.surface)
+  nauvis = nauvis or endpoint(game.surfaces.nauvis)
+  local vulcanus, fulgora, gleba = endpoint(game.surfaces.vulcanus), endpoint(game.surfaces.fulgora), endpoint(game.surfaces.gleba)
   local records = {}
   for i=0,state.count-1 do
     records[#records+1] = state.history[(state.first-1+i)%capacity+1]
@@ -448,6 +469,7 @@ local function seed_transfer_preview(fixture, force, platform_end, nauvis)
   assert(#records<=capacity,"Preview fixture exceeded transfer ledger capacity")
   table.sort(records,function(a,b) return a.tick<b.tick end)
   state.history, state.first, state.count = records, 1, #records
+  state.recording_start = math.min(state.recording_start or now, records[1].tick)
   fixture.hub.force.get_item_production_statistics(fixture.hub.surface).on_flow("carbon",520)
   fixture.hub.force.get_item_production_statistics(fixture.hub.surface).on_flow("calcite",320)
 end
@@ -505,7 +527,8 @@ local function exercise_transfers(UI, player, root, us, case)
     local unload=assert(find_named(panel,"ssk_transfer_bucket_unloaded_"..index),"Missing unload hover target")
     assert(not load.ignored_by_interaction and not unload.ignored_by_interaction
       and serpent.line(load.tooltip):find("tungsten-plate",1,true)
-      and serpent.line(unload.tooltip):find("advanced-circuit",1,true),"History hover lost direction-specific manifests")
+      and serpent.line(unload.tooltip):find("advanced-circuit",1,true)
+      and serpent.line(unload.tooltip):find("items/s",1,true),"History hover lost direction-specific manifests or rates")
     assert(UI.on_click{player_index=player.index,element=load},"History bucket selection was not handled")
     assert(us.transfers.bucket==bucket.start_tick,"Selected History bucket did not persist")
     result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
@@ -553,10 +576,14 @@ local function exercise_transfers(UI, player, root, us, case)
       "Flow must show the first five items with a full manifest on hover")
     assert(find_named(panel,"ssk_transfer_platform_node") and find_named(panel,"ssk_transfer_camera"),
       "Flow needs its platform node and native ribbon rendering")
+    local arrow=assert(find_named(panel,"ssk_transfer_ribbon_loaded_1_1"),"Transfers is missing its ribbon hover target")
+    local tip=serpent.line(arrow.tooltip)
+    assert(not arrow.ignored_by_interaction and tip:find("items/s",1,true) and tip:find("electronic-circuit",1,true),
+      "Transfer ribbon must list the cargo and rates")
     local filter=assert(find_named(panel,"ssk_transfer_from"))
     UI.refresh(player,true)
     assert(filter.valid and pane.valid,"Live Transfers refresh rebuilt the controls")
-    log("TRANSFERS FLOW NATIVE PASS exact real pod counts, native tabs, platform, production and filters")
+    log("TRANSFERS FLOW NATIVE PASS native tabs, platform, production, filters and ribbon tooltips")
   end
 end
 
@@ -703,7 +730,7 @@ function T.tick(UI, Sampler)
       diagnostic_machine=assert(surface.create_entity{name="assembling-machine-2",position={0,0},force="player",raise_built=true})
       diagnostic_machine.set_recipe("iron-gear-wheel")
     end
-    if mode=="transfer-view" then transfer_fixture=start_transfer_fixture() end
+    if mode=="transfer-view" or mode=="ribbon-view" then transfer_fixture=start_transfer_fixture(mode=="ribbon-view") end
     game.speed = mode=="transfer-view" and 8 or 1
     local _, seconds = Sampler.rates(game.surfaces.nauvis.index, 600)
     if mode~="warmup" then assert(seconds == 600, "Ten-minute history did not survive save/reload")
@@ -716,9 +743,14 @@ function T.tick(UI, Sampler)
     if elapsed==1800 then prepare_transfer_preview(transfer_fixture) end
     if elapsed<2100 then return end
     game.speed=1
+  elseif mode=="ribbon-view" and elapsed==64 then
+    -- Rendering checks use seeded manifests. Native arrivals are exercised in transfer-view.
+    Transfers.on_housekeeping(game.tick)
+    seed_transfer_preview(transfer_fixture,transfer_fixture.hub.force)
   end
   if not Sampler.stock_known(game.surfaces.nauvis.index) then return end
   local next_case=not capture and cases[step+1]
+  if mode=="ribbon-view" and next_case and next_case.tab=="transfers" and elapsed<190 then return end
   if mode=="history-view" and not stock_fixture and next_case and next_case.focus=="item/iron-plate" then
     -- The warmed fixture supplies real rates. Two controlled historical scan
     -- results let this native view exercise interpolation without waiting for scans.
@@ -752,7 +784,8 @@ function T.tick(UI, Sampler)
     capture=cases[step].name.."-after"
     log("BALANCE SELECTION PASS "..cases[step].name.." key="..fx.focus)
   end
-  if elapsed % 60 ~= 0 then return end
+  local capture_interval = mode=="ribbon-view" and 15 or 60
+  if elapsed % capture_interval ~= 0 then return end
   local player = game.connected_players[1]
   assert(player, "Graphical test has no connected player")
   if capture then
@@ -781,6 +814,19 @@ function T.tick(UI, Sampler)
       assert(node.tooltip ~= nil, "Node has no tooltip")
       assert(UI.on_hover({element=node, player_index=player.index}, true))
       assert(UI.on_hover({element=node, player_index=player.index}, false))
+    end
+    local case=cases[step]
+    if case.name=="electronic-circuit-flow" or case.name=="focus-circuit" or case.name=="full-nauvis"
+        or case.name=="full-nauvis-proportional" or case.name=="full-nauvis-sprites" then
+      local root=player.gui.screen.ssk_main.ssk_inner.ssk_tabs["content_"..case.tab]
+      local ribbon=assert(find_action(root,"ribbon"),"Rendered Sankey has no ribbon hover target")
+      local tip=serpent.line(ribbon.tooltip)
+      assert(not ribbon.ignored_by_interaction and tip:find("Flow by recipe",1,true) and tip:find("Total flow",1,true),
+        "Sankey ribbon is missing its item and rate breakdown")
+      assert(UI.on_hover({element=ribbon, player_index=player.index},true))
+      UI.refresh(player,true)
+      assert(ribbon.valid,"Live update removed the ribbon tooltip")
+      assert(UI.on_hover({element=ribbon, player_index=player.index},false))
     end
     -- The hidden native window can inherit the desktop cursor position. Clear
     -- tooltip properties only after assertions so that incidental hover popups
@@ -835,12 +881,12 @@ function T.tick(UI, Sampler)
     us.bal_filter="all"
     if c.watch then us.bal_favs,us.bal_watches=nil,nil end
   end
-  if mode=="history-view" then
+  if mode=="history-view" or c.usage_history then
     us.bal_filter,us.bal_group="all",nil
     us.bal_mode="flow"
     us.bal_favs={items={[c.focus]=true},groups={}}
   end
-  if (mode=="full" or mode=="names") then
+  if full_view or mode=="names" then
     us.preset=c.preset or "all"; us.sel=nil; us.layout_snapshot=nil; us.auto_rank=nil
     us.show_labels=true; us.heights=c.heights or "sqrt"; us.color_mode="destination"
     us.layout="clean"; us.tier_mode="depth"; us.tier_lo=nil; us.tier_hi=nil
@@ -858,11 +904,11 @@ function T.tick(UI, Sampler)
   elseif c.tab == "focus" then
     local fx=SK.focus_state(us); if c.focus then fx.focus=c.focus end; fx.live=false
     if mode=="focus" then fx.renderer=c.renderer or "poly"; fx.show_labels=true; fx.focus_steps=3 end
-    if (mode=="full" or mode=="names") then fx.show_labels=true; fx.focus_steps=2; fx.layout_snapshot=nil; fx.auto_rank=nil end
+    if full_view or mode=="names" then fx.show_labels=true; fx.focus_steps=2; fx.layout_snapshot=nil; fx.auto_rank=nil end
   end
   UI.open(player)
   if c.tab~="transfers" then assert(us.sidx==game.surfaces[c.surface].index,"Wrong rendered surface") end
-  if mode=="transfer-view" then
+  if c.tab=="transfers" then
     exercise_transfers(UI,player,player.gui.screen.ssk_main,us,c)
     capture=c.name
     return
@@ -906,7 +952,7 @@ function T.tick(UI, Sampler)
     for _,n in pairs(L.nodes) do assert(n.kind~="group","plain copper chain still has a category node") end
   end
   assert(us.surface_names[find_scope(player.gui.screen.ssk_main).selected_index]==c.surface,"Surface picker does not identify rendered surface")
-  if mode=="balance" or mode=="scroll" or mode=="ux" or mode=="warmup" or ((mode=="full" or mode=="names") and c.tab~="focus") then
+  if mode=="balance" or mode=="scroll" or mode=="ux" or mode=="warmup" or ((full_view or mode=="names") and c.tab~="focus") then
     -- Balance and Focus keep Center in Chart settings; close them again before capture.
     local opened_settings=not find_action(player.gui.screen.ssk_main,"center_selection")
     if opened_settings then UI.on_click{player_index=player.index,element=find_action(player.gui.screen.ssk_main,"chart_settings")} end
@@ -1137,7 +1183,7 @@ function T.tick(UI, Sampler)
   end
   if mode=="diagnostics" then
     exercise_diagnostics(UI,player,player.gui.screen.ssk_main,us,c)
-  elseif mode=="history-view" and not c.flow_only then
+  elseif (mode=="history-view" or c.usage_history) and not c.flow_only then
     exercise_history(UI,player,player.gui.screen.ssk_main,us,c)
   end
   capture = c.name

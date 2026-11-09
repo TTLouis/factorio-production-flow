@@ -11,9 +11,10 @@ local Canvas = require("scripts.canvas")
 local Geometry = require("scripts.ribbon_geometry")
 local MaterialPicker = require("scripts.material_picker")
 local Watch = require("scripts.watch")
+local Tooltip = require("scripts.tooltip")
 
 local SK = {}
-local hovered_nodes = {}
+local hovered_elements = {}
 local ZOOM_STEP = 1.25
 
 local function round(v) return math.floor(v + 0.5) end
@@ -89,6 +90,33 @@ local function localised_name(n)
   local kind, name = base_key(n.key):match("^(%a+)/(.+)$")
   local proto = prototypes[kind] and prototypes[kind][name]
   return proto and proto.localised_name or (name or n.key):gsub("%-", " ")
+end
+
+local function ribbon_tooltip(link)
+  local function name(node)
+    return { "", rt(sprite_for(node)), " ", localised_name(node) }
+  end
+  local material = link.a.kind == "recipe" and link.b or link.a
+  local parts = { name(link.a), " → ", name(link.b),
+    string.format("\nTotal flow  %.5g %s", link.rate, units(material)), "\n\nFlow by recipe" }
+  table.sort(link.details, function(a, b)
+    if a.rate ~= b.rate then return a.rate > b.rate end
+    if a.from ~= b.from then return a.from < b.from end
+    if a.to ~= b.to then return a.to < b.to end
+    return a.recipe < b.recipe
+  end)
+  for _, detail in ipairs(link.details) do
+    local from = { key = detail.from, kind = detail.from:match("^(%a+)/") }
+    local to = { key = detail.to, kind = detail.to:match("^(%a+)/") }
+    local row = { "", "\n", name(from), " → ", name(to),
+      string.format("  %.5g %s", detail.rate, units(from.kind == "recipe" and to or from)) }
+    if detail.recipe ~= detail.from and detail.recipe ~= detail.to then
+      row[#row + 1] = { "", " via ", localised_name({ key = detail.recipe }) }
+    end
+    parts[#parts + 1] = row
+  end
+  if link.note then parts[#parts + 1] = "\n" .. link.note end
+  return Tooltip.lines(parts)
 end
 
 local function label_toggle(row, us)
@@ -612,10 +640,13 @@ local function draw(canvas, L, us, st, player, W, H)
 
   -- 2. Shared route primitives; backend selection cannot change the route.
   st.paths = {}
-  local meshes, mesh_order = {}, {}
-  local function ribbon(l, xa, xb, color, tip)
+  local meshes, mesh_order, tooltips, hover = {}, {}, {}, {}
+  local function ribbon(l, xa, xb, color)
     local pieces = Geometry.route(l, xa, xb, l.y1, l.y2)
     st.paths[#st.paths + 1] = { from = l.from, to = l.to, pieces = pieces }
+    local link = l.link or l
+    if not tooltips[link] then tooltips[link] = ribbon_tooltip(link) end
+    hover[#hover + 1] = { pieces = pieces, tip = tooltips[link], from = l.from, to = l.to }
     if POLY then
       local key = l.from .. ">" .. l.to
       if not meshes[key] then
@@ -628,7 +659,8 @@ local function draw(canvas, L, us, st, player, W, H)
     for _, p in ipairs(pieces) do
       local r = { kind = p.kind, corner = p.corner, dir = p.dir, k = p.k, box_h = p.box_h,
         color = color, from = l.from, to = l.to }
-      r.elem = add_sprite(canvas, ribbon_sprite(r, color), tip)
+      r.elem = add_sprite(canvas, ribbon_sprite(r, color))
+      r.elem.ignored_by_interaction = true
       place(r.elem, p.x, p.y, p.w, p.h)
       if r.ro or r.elem then st.ribbons[#st.ribbons + 1] = r end
     end
@@ -639,8 +671,7 @@ local function draw(canvas, L, us, st, player, W, H)
       local src, dst = sg.link.a, sg.link.b
       local endpoint = us.color_mode ~= "source" and dst or src
       local color = endpoint.color or endpoint.ginfo.color
-      local tip = string.format("%s → %s\n%s %s of %s", rt(sprite_for(src)), rt(sprite_for(dst)), fmt(sg.rate), units(src.kind == "recipe" and dst or src), display_name(src.kind == "recipe" and dst or src))
-      ribbon(sg, x1, sg.b.x, color, tip)
+      ribbon(sg, x1, sg.b.x, color)
       count = count + 1
     end
   end
@@ -649,10 +680,7 @@ local function draw(canvas, L, us, st, player, W, H)
     if x2 > x1 then
       local endpoint = us.color_mode ~= "source" and l.b or l.a
       local color = endpoint.color or endpoint.ginfo.color
-      local source = l.a.kind == "recipe" and l.b or l.a
-      local tip = string.format("%s → %s\n%s %s of %s", rt(sprite_for(l.a)), rt(sprite_for(l.b)), fmt(l.rate), units(source), display_name(source))
-      if l.note then tip = tip .. "\n" .. l.note end
-      ribbon(l, x1, x2, color, tip)
+      ribbon(l, x1, x2, color)
       count = count + 1
     end
   end
@@ -660,6 +688,9 @@ local function draw(canvas, L, us, st, player, W, H)
     local r = meshes[key]
     r.ro = POLY.ribbon(r.pieces, Canvas.col(r.color))
     st.ribbons[#st.ribbons + 1] = r
+  end
+  for _, target in ipairs(hover) do
+    Tooltip.ribbon(canvas, target.pieces, target.tip, { ssk_sk = "ribbon", from = target.from, to = target.to })
   end
   -- 3. stubs + node bars (sprites); buttons and labels deferred
   for _, col in ipairs(L.cols) do
@@ -823,13 +854,13 @@ end
 
 -- c: tab content (vertical flow). full=false keeps the scroll-pane (and its scroll position).
 function SK.fill(player, c, us, W, viewH, full, only_auto)
-  local hovered=hovered_nodes[player.index]
+  local hovered=hovered_elements[player.index]
   if hovered and hovered.valid then
     local ancestor=hovered
     while ancestor and ancestor~=c do ancestor=ancestor.parent end
     if ancestor==c and only_auto and not full then return end
   end
-  hovered_nodes[player.index]=nil
+  hovered_elements[player.index]=nil
   SK.defaults(us)
   if full or not c.ssk_sp then
     c.clear()
@@ -1128,9 +1159,10 @@ end
 
 function SK.on_hover(e, entering)
   local tags = e.element.valid and e.element.tags
-  if not (tags and tags.ssk_sk == "node") then return false end
-  if entering then hovered_nodes[e.player_index]=e.element
-  elseif hovered_nodes[e.player_index]==e.element then hovered_nodes[e.player_index]=nil end
+  if not tags or (tags.ssk_sk ~= "node" and tags.ssk_sk ~= "ribbon") then return false end
+  if entering then hovered_elements[e.player_index]=e.element
+  elseif hovered_elements[e.player_index]==e.element then hovered_elements[e.player_index]=nil end
+  if tags.ssk_sk == "ribbon" then return true end
   local st = rstate(e.player_index, tags.fx and "focus" or nil)
   local key = entering and tags.key or st.selected
   highlight(st, key)

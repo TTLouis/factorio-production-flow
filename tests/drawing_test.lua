@@ -69,6 +69,7 @@ local function configuration(view, layout, lines)
 end
 local c = player.gui.screen.add { type = "flow", name = "ssk_drawing_test", direction = "vertical" }
 local thick_header_checked = false
+local grouped_detail_checked = false
 local function headers(us, width)
   local layout = View.build(player, us, width, 900)
   local function find(el, name)
@@ -77,7 +78,13 @@ local function headers(us, width)
   end
   local canvas = assert(find(c, "ssk_canvas"))
   local checked = 0
+  local hits, first_hit = {}
   for i, wrapper in ipairs(canvas.children) do
+    if wrapper.tags.ssk_sk == "ribbon" then
+      assert(not wrapper.ignored_by_interaction and type(wrapper.tooltip) == "table", "ribbon needs a native tooltip")
+      hits[wrapper.tags.from .. ">" .. wrapper.tags.to] = true
+      first_hit = first_hit or wrapper
+    end
     local icon = wrapper.children[1]
     if icon and icon.type == "sprite-button" and icon.tags.ssk_sk == "node" then
       local n = assert(layout.nodes[icon.tags.key])
@@ -103,13 +110,28 @@ local function headers(us, width)
     end
   end
   assert(checked > 0, "header fixture is empty")
+  for _, link in ipairs(layout.links) do
+    assert(hits[link.from .. ">" .. link.to], "visible arrow has no hover target")
+    local total = 0
+    for _, detail in ipairs(link.details) do
+      assert(detail.recipe:sub(1,7)=="recipe/")
+      total = total + detail.rate
+    end
+    near(total, link.rate)
+    if (link.a.kind == "group" or link.b.kind == "group") and #link.details > 1 then grouped_detail_checked = true end
+  end
+  return first_hit
 end
 for _, setting in ipairs({ { "detail", "clean" }, { "detail", "lanes" }, { "focus", "clean" }, { "overview", "clean" } }) do
   for _, lines in ipairs({ "curves", "metro" }) do
     local us = configuration(setting[1], setting[2], lines)
     us.renderer = "sprites"
     SK.fill(player, c, us, 1800, 900, true)
-    headers(us, 1800)
+    local hit = headers(us, 1800)
+    assert(SK.on_hover({ player_index = 1, element = hit }, true))
+    SK.fill(player, c, us, 1800, 900, false, true)
+    assert(hit.valid, "live refresh removed the hovered arrow")
+    assert(SK.on_hover({ player_index = 1, element = hit }, false))
     local id = us.view == "focus" and "1:focus" or 1
     local sprite = trace(storage.sk_render[id])
     assert(#sprite > 0)
@@ -142,6 +164,7 @@ for _, setting in ipairs({ { "detail", "clean" }, { "detail", "lanes" }, { "focu
   end
 end
 assert(thick_header_checked, "missing thick-bar header regression fixture")
+assert(grouped_detail_checked, "missing grouped arrow usage fixture")
 for _, layout in ipairs({ "clean", "lanes" }) do
   local narrow = configuration("detail", layout, "metro")
   SK.fill(player, c, narrow, 1000, 900, true)

@@ -179,7 +179,7 @@ def run(stage, args, phase):
                         result = json.loads((folder / 'gui.json').read_text())
                         if not result['captures']:
                             raise RuntimeError('No GUI views captured')
-                        if phase in ('history-view', 'transfer-view') and result['display_scale'] != 1:
+                        if phase in ('history-view', 'transfer-view', 'ribbon-view') and result['display_scale'] != 1:
                             raise RuntimeError(f'Expected 100% GUI scale, got {result["display_scale"]:.0%}')
                         for name in result['captures']:
                             shot = folder / f'{name}.png'
@@ -206,7 +206,7 @@ def main():
     parser.add_argument('--save', type=Path, default=PROFILE / 'saves/_autosave4.zip')
     parser.add_argument('--exe', type=Path, default=Path(r'D:\SteamLibrary\steamapps\common\Factorio\bin\x64\Factorio.exe'))
     parser.add_argument('--stage', type=Path, help='Reuse a previously isolated stage for iteration')
-    parser.add_argument('--phase', choices=['all', 'history', 'gui', 'balance', 'full', 'focus', 'selection', 'picker', 'scroll', 'names', 'audit', 'ux', 'warmup', 'diagnostics', 'history-view', 'transfer-view'], default='all')
+    parser.add_argument('--phase', choices=['all', 'history', 'gui', 'balance', 'full', 'focus', 'selection', 'picker', 'scroll', 'names', 'audit', 'ux', 'warmup', 'diagnostics', 'history-view', 'transfer-view', 'ribbon-view'], default='all')
     parser.add_argument('--timeout', type=int, default=1200)
     args = parser.parse_args()
     stage = args.stage.resolve() if args.stage else prepare(args)

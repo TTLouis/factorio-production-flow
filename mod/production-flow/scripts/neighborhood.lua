@@ -18,11 +18,17 @@ function N.build(nodes, links, model, focus, depth)
     nn[alias] = out
     return out
   end
-  local function link(from, to, rate, note)
-    if rate <= 1e-4 then return end
+  local function link(from, to, original, note)
+    if original.rate <= 1e-4 then return end
     local id = from.key .. ">" .. to.key
-    if not nl[id] then nl[id] = { from = from.key, to = to.key, rate = 0, note = note } end
-    nl[id].rate = nl[id].rate + rate
+    local edge = nl[id]
+    if not edge then
+      edge = { from = from.key, to = to.key, rate = 0, details = {} }
+      nl[id] = edge
+    end
+    edge.rate = edge.rate + original.rate
+    edge.note = note or edge.note
+    for _, detail in ipairs(original.details or {}) do edge.details[#edge.details + 1] = detail end
   end
   local visited = {}
   local function inputs(key, distance)
@@ -37,13 +43,13 @@ function N.build(nodes, links, model, focus, depth)
           for _, ingredient in pairs(links) do
             if ingredient.to == l.from then
               local input = inputs(ingredient.from, distance + 1)
-              link(input, target, ingredient.rate, "Full input to the producing recipe; shared co-products are not allocated.")
+              link(input, target, ingredient, "This input is shared by all products of the recipe.")
               via[#via + 1] = input.key
             end
           end
         else
           local input = inputs(l.from, distance + 1)
-          link(input, target, l.rate)
+          link(input, target, l)
           via[#via + 1] = input.key
         end
         via_map[l.from] = via
@@ -62,7 +68,7 @@ function N.build(nodes, links, model, focus, depth)
   for _, l in pairs(links) do
     if l.from == focus then
       local use = copy(l.to, -1)
-      link(center, use, l.rate)
+      link(center, use, l)
       use.selected_usage = (use.selected_usage or 0) + l.rate
       use.selected_material = focus
       if use.kind == "recipe" then

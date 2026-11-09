@@ -6,6 +6,7 @@ local History = require("scripts.history")
 local Geometry = require("scripts.ribbon_geometry")
 local MaterialPicker = require("scripts.material_picker")
 local Sampler = require("scripts.sampler")
+local Tooltip = require("scripts.tooltip")
 
 local H = {}
 local MADE = { 112, 224, 164 }
@@ -45,6 +46,26 @@ local function material(key)
   local kind, name = key:match("^([^/]+)/(.+)$")
   local proto = kind and prototypes[kind] and prototypes[kind][name]
   return proto and { "", Graph.rt(key), " ", proto.localised_name } or name or key
+end
+
+local function usage_tooltip(header, totals, seconds, units, skip)
+  local parts, keys = { header }, {}
+  for key, amount in pairs(totals) do
+    if amount > 0 and not (skip and skip[key]) then keys[#keys + 1] = key end
+  end
+  if #keys == 0 then return header end
+  table.sort(keys, function(a, b)
+    if a == History.OTHER then return false end
+    if b == History.OTHER then return true end
+    if totals[a] == totals[b] then return a < b end
+    return totals[a] > totals[b]
+  end)
+  parts[#parts + 1] = "\n\nEstimated usage by product"
+  for _, key in ipairs(keys) do
+    parts[#parts + 1] = { "", "\n", key == History.OTHER and "Unattributed use" or material(key),
+      string.format("  %.5g %s", totals[key] / seconds, units) }
+  end
+  return Tooltip.lines(parts)
 end
 
 local function label(parent, name, caption, style, width)
@@ -102,7 +123,7 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   scroll.style.width = width - 2 * PANEL_INSET
   scroll.style.height = scroll_height
   local body = scroll.add { type = "flow", name = "ssk_history_body", direction = "vertical",
-    tags = { ssk_history_layout = "rate_net_stock" } }
+    tags = { ssk_history_layout = "rate_net_stock_usage" } }
   body.style.width = chart_width
   -- Match the reserved scrollbar width on the left so plot gutters stay even.
   body.style.left_margin = SCROLLBAR_WIDTH
@@ -120,11 +141,10 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
 
   local uses = body.add { type = "flow", name = "ssk_history_uses", direction = "vertical" }
   uses.style.vertical_spacing = 2
-  local heading = row(uses)
-  label(heading, nil, "Where it goes", "caption_label")
+  local heading = row(uses, "ssk_history_usage_heading")
+  label(heading, "ssk_history_usage_title", "Where it goes", "caption_label")
   spacer(heading)
-  local average = small(heading, nil, "Average used")
-  average.tooltip = "Estimated consumption of the selected material per second, averaged over recorded time in this period."
+  small(heading, "ssk_history_usage_average", "Average used")
   local products = uses.add { type = "table", name = "ssk_history_products", column_count = 4 }
   products.style.horizontal_spacing = 8
   local cell_width = math.floor((chart_width - 24) / 4)
@@ -237,6 +257,7 @@ local function rate_regions(h, width, units)
       if right > left then
         local tooltip = string.format("%s to %s\nMade  %.5g %s\nUsed  %.5g %s\nNet  %.5g %s",
           elapsed(h, p.start_tick), elapsed(h, p.end_tick), p.made, units, p.used, units, p.net, units)
+        tooltip = usage_tooltip(tooltip, p.usage_detail or {}, 1, units)
         regions[#regions + 1] = { left = left, right = right, tooltip = tooltip }
       end
     end
@@ -472,7 +493,7 @@ function H.fill(player, panel, us, key, width, panel_height)
   local scroll_height = math.max(1, panel_height - toolbar_height - 2 * PANEL_INSET)
   local scroll = panel.ssk_history_scroll
   local body = scroll and scroll.ssk_history_body
-  if not body or body.tags.ssk_history_layout ~= "rate_net_stock" then
+  if not body or body.tags.ssk_history_layout ~= "rate_net_stock_usage" then
     panel.clear()
     build(panel, width, chart_width, toolbar_height, scroll_height)
     body = panel.ssk_history_scroll.ssk_history_body
@@ -492,9 +513,11 @@ function H.fill(player, panel, us, key, width, panel_height)
   summary.caption = rates and string.format("Made %s/s   Used %s/s   Net %s%s/s",
     number(made), number(used), made > used and "+" or "", number(made - used)) or ""
   summary.visible = rates == true
-  summary.tooltip = "Measured average per second over the recorded time in the selected period."
   local legend = body.ssk_history_rate_title.ssk_history_rate_legend
   local units = key and key:sub(1, 6) == "fluid/" and "fluid/s" or "items/s"
+  local period_tip = usage_tooltip("Average over recorded time in the selected period.",
+    rates and (h.usage_totals or {}) or {}, rates and h.seconds or 1, units)
+  summary.tooltip = period_tip
   legend.caption = swatch(MADE) .. " Made   " .. swatch(USED) .. " Used   " .. units
   local rate_state = body.ssk_history_rate_state
   rate_state.visible = not active
@@ -514,6 +537,12 @@ function H.fill(player, panel, us, key, width, panel_height)
   local usage = body.ssk_history_uses
   usage.visible = active and breakdown and #h.usage_keys > 0 or false
   if usage.visible then
+    usage.ssk_history_usage_heading.ssk_history_usage_title.tooltip = period_tip
+    usage.ssk_history_usage_heading.ssk_history_usage_average.tooltip = period_tip
+    local named = {}
+    for _, product in ipairs(h.usage_keys) do if product ~= History.OTHER then named[product] = true end end
+    local other_tip = usage_tooltip("Usage outside the three products shown on the chart.", h.usage_totals or {},
+      h.seconds, units, named)
     for i = 1, 4 do
       local entry = usage.ssk_history_products["ssk_history_use_" .. i]
       local product = h.usage_keys[i]
@@ -522,10 +551,10 @@ function H.fill(player, panel, us, key, width, panel_height)
         local other = product == History.OTHER
         local caption = other and "Other uses" or material(product)
         entry.material_name.caption = { "", swatch(USES[other and 4 or i]), " ", caption }
-        entry.material_name.tooltip = caption
         entry.rate.caption = number((uses[product] or 0) / h.seconds) .. "/s"
-        entry.rate.tooltip = other and "Measured consumption outside the top three estimated output uses."
-          or "Estimated amount of the selected material used per second to make this product."
+        local tip = other and other_tip or { "", caption, string.format("\nEstimated usage  %.5g %s",
+          (uses[product] or 0) / h.seconds, units) }
+        entry.material_name.tooltip, entry.rate.tooltip = tip, tip
       end
     end
   end

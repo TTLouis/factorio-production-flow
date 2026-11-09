@@ -129,6 +129,9 @@ local first, next_point, third, fourth, idle, gap = table.unpack(h.points, 1, 6)
 near(first.made, 2); near(first.used, 12); near(first.net, -10)
 near(first.uses[a], 8 * 12 / 23); near(first.uses[b], 7 * 12 / 23); near(first.uses[d], 12 / 23)
 near(first.uses[other], 7 * 12 / 23)
+near(first.usage_detail[c], 4 * 12 / 23)
+near(first.usage_detail[other], 3 * 12 / 23)
+near(h.usage_totals[c], 4 * 12 / 23 + 1)
 near(next_point.uses[d], 10); near(next_point.uses[a], 0)
 near(third.uses[other], 0); near(fourth.uses[other], 20)
 assert(idle.made == 0 and idle.used == 0 and gap.made == nil and gap.used == nil)
@@ -138,6 +141,9 @@ for _, point in ipairs(h.points) do
     local sum = 0
     for _, key in ipairs(h.usage_keys) do sum = sum + point.uses[key] end
     near(sum, point.used)
+    local detailed = 0
+    for _, rate in pairs(point.usage_detail) do detailed = detailed + rate end
+    near(detailed, point.used)
   end
 end
 

@@ -3,6 +3,7 @@ local Graph = require("scripts.graph")
 local Sampler = require("scripts.sampler")
 local Sprites = require("shared.sprites")
 local Transfers = require("scripts.transfers")
+local Tooltip = require("scripts.tooltip")
 
 local UI = {}
 local FILTERS = { { "from", "Load from" }, { "to", "Unload to" }, { "material", "Material" } }
@@ -94,22 +95,15 @@ local function item_name(name, with_icon)
   return prototype.localised_name
 end
 
--- A Factorio LocalisedString can concatenate at most 20 parameters per node.
-local function concatenate(parts)
-  local text = { "" }
-  for _, part in ipairs(parts) do
-    if #text == 21 then text = { "", text } end
-    text[#text + 1] = part
-  end
-  return text
-end
-
-local function manifest_tooltip(header, detail, items)
+local function manifest_tooltip(header, detail, items, seconds)
   local parts = { header, "\n", detail }
+  if seconds and seconds > 0 and #items > 0 then parts[#parts + 1] = "\nAverage rate over recorded time" end
   for _, item in ipairs(items) do
-    parts[#parts + 1] = { "", "\n", item_name(item.name, true), "  ", number(item.count) }
+    local entry = { "", "\n", item_name(item.name, true), "  ", number(item.count) }
+    if seconds and seconds > 0 then entry[#entry + 1] = string.format("  ·  %.5g items/s", item.count / seconds) end
+    parts[#parts + 1] = entry
   end
-  return concatenate(parts)
+  return Tooltip.lines(parts)
 end
 
 local function endpoint_name(endpoint)
@@ -341,14 +335,20 @@ local function ranking(parent, name, icon, data, x, y, width, colour)
   end
 end
 
+local function ribbon_shape(x0, y0, x1, y1, width, linear)
+  return { kind = "curve", x = x0, w = x1 - x0, h = math.abs(y1 - y0) + width,
+    ya = y0 - width / 2, yb = y1 - width / 2, t0 = width, t1 = width, linear = linear }
+end
+
 local function draw_ribbon(painter, x0, y0, x1, y1, data, highest, color)
   local width = math.min(30, (data.weight or 0) * 30 / highest)
   if width < 1 then
     painter.line(x0, y0, x1, y1, color, 2, true)
-    return
+    return ribbon_shape(x0, y0, x1, y1, 2, true)
   end
   painter.curve(x0, x1, y0 - width / 2, y1 - width / 2, width, color)
   painter.polygon({ { x1 - 6, y1 - 4 }, { x1 - 6, y1 + 4 }, { x1, y1 } }, TICK)
+  return ribbon_shape(x0, y0, x1, y1, width)
 end
 
 local function flow_signature(result)
@@ -399,17 +399,28 @@ local function flow_graph(player, parent, result, width, viewport)
   parent.style.width, parent.style.height = width, height
   local painter = Canvas.begin(player, width, height)
   camera(parent, player, painter, width, height)
+  local platform_name = result.platform.name
+  local function route_hover(shape, caption, route, direction, index)
+    local tip = manifest_tooltip(caption, "Cargo mass: " .. mass(route), route.items, result.covered_seconds)
+    Tooltip.ribbon(parent, { shape }, tip, { transfer_ribbon = direction },
+      "ssk_transfer_ribbon_" .. direction .. "_" .. index .. "_")
+  end
   for i, cell in ipairs(left) do
     local offset = (i / (#left + 1) - 0.5) * 34
-    draw_ribbon(painter, x_left + card_w, cell.center, x_center, center_y + 52 + offset, cell.route, highest, LOADED)
+    local shape = draw_ribbon(painter, x_left + card_w, cell.center, x_center, center_y + 52 + offset, cell.route, highest, LOADED)
+    route_hover(shape, endpoint_name(cell.route.endpoint) .. " → " .. platform_name, cell.route, "loaded", i)
   end
   for i, cell in ipairs(right) do
     local offset = (i / (#right + 1) - 0.5) * 34
-    draw_ribbon(painter, x_center + center_w, center_y + 52 + offset, x_right, cell.center, cell.route, highest, UNLOADED)
+    local shape = draw_ribbon(painter, x_center + center_w, center_y + 52 + offset, x_right, cell.center, cell.route, highest, UNLOADED)
+    route_hover(shape, platform_name .. " → " .. endpoint_name(cell.route.endpoint), cell.route, "unloaded", i)
   end
   if made then
-    painter.line(x_left + card_w, left_end + card_height(result.made.items) / 2,
-      x_center, center_y + 94, MADE, 2, true)
+    local x, y = x_left + card_w, left_end + card_height(result.made.items) / 2
+    painter.line(x, y, x_center, center_y + 94, MADE, 2, true)
+    local shape = ribbon_shape(x, y, x_center, center_y + 94, 2, true)
+    local tip = manifest_tooltip("Made aboard " .. platform_name, "Recorded platform production", result.made.items, result.made.seconds)
+    Tooltip.ribbon(parent, { shape }, tip, { transfer_ribbon = "made" }, "ssk_transfer_ribbon_made_")
   end
   if not update then return end
   parent.tags = { transfer_graph = signature }
@@ -471,14 +482,15 @@ local function bucket_value(data, material)
   return material and data.count or data.pods
 end
 
-local function bucket_tooltip(bucket, direction, material)
+local function bucket_tooltip(bucket, direction, material, start_tick, end_tick, recorded_from)
   local cargo = bucket[direction]
   local title = (direction == "loaded" and "Loaded onto platform" or "Unloaded to surface")
-    .. " · " .. range(bucket.start_tick, bucket.end_tick)
+    .. " · " .. range(start_tick, end_tick)
   local detail = number(cargo.pods) .. (cargo.pods == 1 and " pod" or " pods")
   if material then detail = detail .. " · " .. number(cargo.count) .. " selected items" end
   if cargo.pods > 0 then detail = detail .. " · " .. mass(cargo) end
-  return manifest_tooltip(title, detail, cargo.items)
+  local seconds = math.max(0, end_tick - math.max(start_tick, recorded_from)) / 60
+  return manifest_tooltip(title, detail, cargo.items, seconds)
 end
 
 local function nice_step(value)
@@ -502,6 +514,7 @@ local function timeline(player, chart, result, width, height, material)
   local edge = math.ceil(peak / step) * step
   local scale = (mid - top - 4) / edge
   local domain = math.max(1, result.to_tick - result.from_tick)
+  local recorded_from = result.to_tick - result.covered_seconds * 60
   local function x(tick) return left + (right - left) * (tick - result.from_tick) / domain end
 
   local selected = result.bucket
@@ -535,8 +548,8 @@ local function timeline(player, chart, result, width, height, material)
   end
 
   for i, bucket in ipairs(result.buckets) do
-    local a = math.floor(x(math.max(bucket.start_tick, result.from_tick)))
-    local b = math.ceil(x(math.min(bucket.end_tick, result.to_tick)))
+    local start_tick, end_tick = math.max(bucket.start_tick, result.from_tick), math.min(bucket.end_tick, result.to_tick)
+    local a, b = math.floor(x(start_tick)), math.ceil(x(end_tick))
     local band = math.max(1, b - a)
     local gap = math.floor(band * 0.14)
     for j, direction in ipairs(DIRECTIONS) do
@@ -553,7 +566,7 @@ local function timeline(player, chart, result, width, height, material)
       local name = "ssk_transfer_bucket_" .. direction .. "_" .. i
       local hit = chart[name] or chart.add { type = "sprite", name = name, sprite = "ssk-node-hit",
         resize_to_sprite = false }
-      hit.tooltip = bucket_tooltip(bucket, direction, material)
+      hit.tooltip = bucket_tooltip(bucket, direction, material, start_tick, end_tick, recorded_from)
       hit.tags = { transfer_bucket = bucket.start_tick, transfer_direction = direction }
       place(hit, a, up and top or mid, band, up and mid - top or bottom - mid)
       hit.visible = true
