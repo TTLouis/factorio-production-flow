@@ -16,11 +16,11 @@ local period=find(root,function(e)return e.tags.ssk_ui=="period" end)
 assert(table.concat(period.items, " ")=="1m 10m 1H 10H 50H 250H 1000H","Period must match the fixed production scopes")
 local uses=find(root,function(e)return e.tags.ssk_column=="uses" end)
 assert(type(uses.caption)=="table" and uses.caption[2]:find("consumed"),"Uses must identify selected-material consumption")
-local saved_rates=Sm.rates
-Sm.rates=function(...)local rates=saved_rates(...);return rates,42 end
+local saved_coverage=Sm.coverage
+Sm.coverage=function() return 42 end
 UI.refresh(player,true)
 assert(root.ssk_window_bar.ssk_history.visible and root.ssk_window_bar.ssk_history.caption:find("42 s / 10 min",1,true),"warm-up must show available history")
-Sm.rates=saved_rates
+Sm.coverage=saved_coverage
 local help=find(root,function(e)return e.tags.ssk_ui=="help" end)
 assert(help.type=="sprite-button" and help.sprite=="utility/questionmark","Help must use the built-in question-mark frame action icon")
 assert(not find(root,function(e)return e.tags.ssk_ui=="export" or e.tags.ssk_sk=="f_renderer" end),"normal menus must exclude developer controls")

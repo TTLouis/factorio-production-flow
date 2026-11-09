@@ -208,26 +208,38 @@ local Watch = TREQ("scripts.watch")
 local saved_evaluate = Watch.evaluate
 local stock, totals = {}, {}
 B.rows = function() return fixture, 60, stock, true, totals end
-local watch_calls, warning = 0, "Watched stock is low."
+local watch_calls, warning = 0, nil
 Watch.evaluate = function(p, state, seconds, raw_stock, known, raw_totals)
   assert(p == player and state == us and seconds == 60)
   assert(raw_stock == stock and known and raw_totals == totals)
   watch_calls = watch_calls + 1
   return { [surplus.key] = warning }
 end
-local watched = root()
-local watched_cell = tables()[1].children[2]
-UI.refresh(player, true)
-assert(watch_calls == 1 and root() == watched, "one watch evaluation per Balance update")
-assert(watched_cell.caption[2] == "[img=utility/warning_icon] " and watched_cell.tooltip[4] == warning,
-  "the favourite's existing item cell must show its watch warning")
-warning = nil
-UI.refresh(player, true)
-assert(watch_calls == 2 and root() == watched and tables()[1].children[2] == watched_cell)
-assert(watched_cell.caption[2] ~= "[img=utility/warning_icon] " and watched_cell.tooltip[6] == surplus.key,
-  "watch recovery must clear the icon and restore the item tooltip")
-Watch.evaluate = saved_evaluate
+local function check_watch_row()
+  local watched = root()
+  local watched_cell = assert(find(watched, function(e)
+    return e.tags.ssk_ui == "bal_material" and e.tags.key == surplus.key
+  end)[1])
+  local calls = watch_calls
+  warning = "Watched stock is low."
+  UI.refresh(player, true)
+  assert(watch_calls == calls + 1 and root() == watched, "one watch evaluation per Balance update")
+  assert(watched_cell.caption[2] == "[img=utility/warning_icon] " and watched_cell.tooltip[4] == warning,
+    "the existing item cell must show its watch warning")
+  warning = nil
+  UI.refresh(player, true)
+  assert(watch_calls == calls + 2 and root() == watched and watched_cell.valid)
+  assert(watched_cell.caption[2] ~= "[img=utility/warning_icon] " and watched_cell.tooltip[6] == surplus.key,
+    "watch recovery must clear the icon and restore the item tooltip")
+end
+check_watch_row()
 click({ ssk_ui = "bal_fav", key = surplus.key })
+local watched_group = TREQ("scripts.groups").of(player.index, surplus.key)
+click({ ssk_ui = "bal_fav_group", gid = watched_group })
+assert(not us.bal_favs.items[surplus.key] and us.bal_favs.groups[watched_group])
+check_watch_row()
+click({ ssk_ui = "bal_fav_group", gid = watched_group })
+Watch.evaluate = saved_evaluate
 
 B.rows = saved_rows
 prototypes.item["test-1"] = old_proto

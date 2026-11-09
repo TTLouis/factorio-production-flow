@@ -202,6 +202,40 @@ storage.bins[2600] = nil
 h = H.build(1, 36000, material)
 assert(h.rolling_points[#h.rolling_points].partial, "A gap within a bucket stays a gap in the rolling chart")
 
+-- Earlier samples warm the plotted average without changing visible period totals.
+reset(7200 * 60 + 30)
+storage.graph = { nodes = { [material] = { consumers = { "a", "b" } } }, recipes = {
+  a = recipe(single, input(a, 1)), b = recipe(single, input(b, 1)),
+} }
+for sec = 3420, 3599 do fine(sec, stats(0, 3), nil, { { b = crafts(3) } }) end
+for sec = 3600, 3659 do fine(sec, stats(90, 9), nil, { { a = crafts(9) } }) end
+h = H.build(1, 3600, material)
+local leading = h.rolling_points[1]
+near(leading.start_tick, h.start_tick)
+near(leading.average_start_tick, 3480 * 60)
+near(leading.made, 30); near(leading.used, 5)
+near(leading.uses[a], 3); near(leading.uses[other], 2)
+near(leading.usage_detail[b], 2)
+assert(#h.rolling_points == #h.points and #h.usage_keys == 2 and h.usage_keys[1] == a and h.usage_keys[2] == other)
+assert(h.usage_totals[b] == nil, "Earlier usage must not affect the visible rankings or totals")
+near(h.seconds, 59.5); near(h.usage_totals[a], 59.5 * 9)
+storage.bins[3599] = nil
+h = H.build(1, 3600, material)
+near(h.rolling_points[1].average_start_tick, 3600 * 60)
+near(h.rolling_points[1].made, 90)
+
+reset(7190 * 60)
+storage.rings[1] = { secs = 60, bins = {
+  { id = 59, secs = 60, stat = { stats(900, 0) }, rec = {} },
+} }
+for sec = 3590, 3599 do fine(sec, stats(90, 0)) end
+h = H.build(1, 3600, material)
+near(h.points[1].seconds, 10)
+near(h.points[1].made, 90)
+near(h.seconds, 10)
+near(h.rolling_points[1].average_start_tick, 3540 * 60)
+near(h.rolling_points[1].made, 15)
+
 reset(12 * 60 + 20)
 for sec = 0, 11 do
   fine(sec, stats(sec < 5 and 20 or 0, sec >= 5 and sec < 10 and 10 or 0), stats(500, 0))

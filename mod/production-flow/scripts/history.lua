@@ -69,19 +69,21 @@ local function material_totals(source, sidx, key, recipes)
   source.made, source.used, source.estimates = made, used, estimates
 end
 
-local function rate_points(result, sources, lab_input)
+local function rate_points(result, sources, lab_input, rate_start_tick)
   local width = result.bucket_seconds * TICKS_PER_SECOND
-  local first, index = result.start_tick, 1
-  local totals = {}
+  local first, index = rate_start_tick, 1
+  local totals, points, duration = {}, {}, 0
   while first < result.end_tick do
-    local last = math.min(result.end_tick, (math.floor(first / width) + 1) * width)
+    local visible = first >= result.start_tick
+    local boundary = visible and result.end_tick or result.start_tick
+    local last = math.min(boundary, (math.floor(first / width) + 1) * width)
     local made, used, seconds, seen_first, seen_last = 0, 0, 0, nil, nil
     local estimates = {}
     while sources[index] and sources[index].first < last do
       local source = sources[index]
       local left, right = math.max(first, source.first), math.min(last, source.last)
       if source.known and right > left then
-        local fraction = (right - left) / (source.last - source.first)
+        local fraction = (right - left) / (source.duration or (source.last - source.first))
         made = made + source.made * fraction
         used = used + source.used * fraction
         seconds = seconds + (right - left) / TICKS_PER_SECOND
@@ -107,19 +109,19 @@ local function rate_points(result, sources, lab_input)
       for key, amount in pairs(estimates) do
         if key ~= H.OTHER and scale > 0 then
           local adjusted = amount * scale
-          totals[key] = (totals[key] or 0) + adjusted
+          if visible then totals[key] = (totals[key] or 0) + adjusted end
           point.uses[key] = adjusted / seconds
         end
       end
-      result.seconds = result.seconds + seconds
     end
-    result.points[#result.points + 1] = point
+    points[#points + 1] = point
+    if visible then duration = duration + seconds end
     first = last
   end
-  return totals
+  return points, totals, duration
 end
 
-local function group_uses(result, totals)
+local function ranked_uses(totals)
   local keys = {}
   for key in pairs(totals) do keys[#keys + 1] = key end
   table.sort(keys, function(a, b)
@@ -127,19 +129,22 @@ local function group_uses(result, totals)
     if totals[a] == totals[b] then return a < b end
     return totals[a] > totals[b]
   end)
-  for i = 1, math.min(3, #keys) do result.usage_keys[i] = keys[i] end
+  return { table.unpack(keys, 1, math.min(3, #keys)) }
+end
+
+local function group_uses(points, keys, totals)
   local has_other = false
-  for _, point in ipairs(result.points) do
+  for _, point in ipairs(points) do
     if point.uses then
       local unattributed = point.used
       for _, rate in pairs(point.uses) do unattributed = unattributed - rate end
       point.usage_detail = point.uses
       if unattributed > 1e-9 then
         point.usage_detail[H.OTHER] = unattributed
-        totals[H.OTHER] = (totals[H.OTHER] or 0) + unattributed * point.seconds
+        if totals then totals[H.OTHER] = (totals[H.OTHER] or 0) + unattributed * point.seconds end
       end
       local bands, left = {}, point.used
-      for _, key in ipairs(result.usage_keys) do
+      for _, key in ipairs(keys) do
         local rate = math.min(left, point.uses[key] or 0)
         bands[key], left = rate, left - rate
       end
@@ -148,8 +153,7 @@ local function group_uses(result, totals)
       point.uses = bands
     end
   end
-  result.usage_totals = totals
-  if has_other then result.usage_keys[#result.usage_keys + 1] = H.OTHER end
+  return has_other
 end
 
 local function add_weighted_rates(target, rates, weight)
@@ -226,7 +230,7 @@ local function add_stock_estimates(result, sources, from, to, old, new, scope, k
       local change = stock_net(source, scope, key)
       if change == nil then break end
       local stop = math.min(source.last, to)
-      local net_per_tick = change / (source.last - source.first)
+      local net_per_tick = change / (source.duration or (source.last - source.first))
       local start = result.start_tick
       if start > from and start > tick and start <= stop and start < to then
         estimates[#estimates + 1] = { tick = start, net = net + (start - tick) * net_per_tick }
@@ -293,6 +297,11 @@ function H.build(sidx, period, key)
     bucket_seconds = math.ceil(requested / MAX_BUCKETS), points = {}, usage_keys = {}, stock = {},
     stock_supported = key:sub(1, 5) == "item/" }
   local scans = result.stock_supported and storage.stock_basis == "physical-chests-v1" and storage.stock or {}
+  local rate_start_tick = result.start_tick
+  if requested >= ROLLING_MIN_PERIOD then
+    result.rolling_seconds = result.bucket_seconds * ROLLING_BUCKETS
+    rate_start_tick = rate_start_tick - result.rolling_seconds * TICKS_PER_SECOND
+  end
   local start_tick = result.start_tick
   -- A scan just before the visible range can still anchor estimates in it.
   for i = #scans, 1, -1 do
@@ -303,17 +312,41 @@ function H.build(sidx, period, key)
   end
   local sources = Sampler.history_sources(sidx, start_tick, now, true)
   local recipes = candidate_recipes(key)
+  local separate_lookback = rate_start_tick < start_tick
+  local recipe_start = separate_lookback and result.start_tick or rate_start_tick
   for _, source in ipairs(sources) do
     if source.known then
-      material_totals(source, sidx, key, source.last > result.start_tick and recipes or nil)
+      material_totals(source, sidx, key, source.last > recipe_start and recipes or nil)
     end
   end
   local lab_inputs = result.stock_supported and Graph.lab_inputs()
-  group_uses(result, rate_points(result, sources, lab_inputs and lab_inputs[key]))
-  if requested >= ROLLING_MIN_PERIOD then
-    result.rolling_seconds = result.bucket_seconds * ROLLING_BUCKETS
-    result.rolling_points = rolling_points(result.points, result.rolling_seconds * TICKS_PER_SECOND)
+  local lab_input = lab_inputs and lab_inputs[key]
+  result.points, result.usage_totals, result.seconds = rate_points(result, sources, lab_input, result.start_tick)
+  result.usage_keys = ranked_uses(result.usage_totals)
+  local has_other = group_uses(result.points, result.usage_keys, result.usage_totals)
+  if result.rolling_seconds then
+    local lookback = separate_lookback and Sampler.history_sources(sidx, rate_start_tick, now, true) or sources
+    local points = result.points
+    if lookback[1] and lookback[1].first < result.start_tick then
+      -- The visible totals retain their fine cutoff. Build each rolling point
+      -- from one set of sources so a coarse bin and its finer suffix cannot overlap.
+      if separate_lookback then
+        for _, source in ipairs(lookback) do
+          if source.known then material_totals(source, sidx, key, recipes) end
+        end
+      end
+      points = rate_points(result, lookback, lab_input, rate_start_tick)
+      group_uses(points, result.usage_keys)
+    end
+    local rolling = rolling_points(points, result.rolling_seconds * TICKS_PER_SECOND)
+    result.rolling_points = {}
+    for i = #points - #result.points + 1, #points do
+      local point = rolling[i]
+      result.rolling_points[#result.rolling_points + 1] = point
+      has_other = has_other or point.uses and (point.uses[H.OTHER] or 0) > 1e-9
+    end
   end
+  if has_other then result.usage_keys[#result.usage_keys + 1] = H.OTHER end
   stock_points(result, sources, scans, sidx, key)
   return result
 end

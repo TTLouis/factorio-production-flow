@@ -61,6 +61,9 @@ end
 ---@class ProductionFlowHistoryBin
 ---@field id integer Absolute bin index, not the ring slot.
 ---@field secs number? Recorded seconds in coarse bins; absent in fine bins.
+---@field first integer? First observed second in a coarse bin.
+---@field last integer? End of the last observed second in a coarse bin.
+---@field coverage table<integer, integer[]>? Observed statistics runs as start/end pairs, with 0 for any surface.
 ---@field rec table<integer, table<string, ProductionFlowRecipeSample>> Surface -> recipe -> sample.
 ---@field stat table<integer, table<string, ProductionFlowNodeSample>> Surface -> material -> sample.
 
@@ -166,15 +169,67 @@ local function add_into(dst, src)
   end
 end
 
-local function add_to_ring(ring, source, source_seconds)
-  local id = math.floor(source.id * source_seconds / ring.secs)
+local function add_run(coverage, surface, first, last)
+  local runs = coverage[surface]
+  if not runs then
+    coverage[surface] = { first, last }
+  elseif runs[#runs] == first then
+    runs[#runs] = last
+  else
+    runs[#runs + 1], runs[#runs + 2] = first, last
+  end
+end
+
+local function add_coverage(coverage, stat, first, last)
+  if next(stat) then add_run(coverage, 0, first, last) end
+  for surface in pairs(stat) do add_run(coverage, surface, first, last) end
+end
+
+local function legacy_coverage(bin, first, last, source_width)
+  local coverage = {}
+  if source_width == 1 then
+    -- The active minute and ten-minute buckets fit in the fine ring. On the
+    -- first append after an upgrade, recover each surface's observed runs.
+    for second = first, last - 1 do
+      local fine = storage.bins[second % storage.nbins + 1]
+      if not fine or fine.id ~= second then
+        coverage = {}
+        add_coverage(coverage, bin.stat, first, last)
+        return coverage
+      end
+      add_coverage(coverage, fine.stat, second, second + 1)
+    end
+  else
+    add_coverage(coverage, bin.stat, first, last)
+  end
+  return coverage
+end
+
+local function add_to_ring(ring, source, source_width)
+  local source_end = source.last or (source.id + 1) * source_width
+  local seconds = source.secs or source_width
+  local source_start = source.first or source_end - seconds
+  local id = math.floor(source.id * source_width / ring.secs)
   local slot = id % ring.n + 1
   local bin = ring.bins[slot]
   if not bin or bin.id ~= id then
-    bin = { id = id, secs = 0, rec = {}, stat = {} }
+    bin = { id = id, secs = 0, rec = {}, stat = {}, first = source_start, coverage = {} }
     ring.bins[slot] = bin
+  elseif not bin.coverage then
+    -- An old active bin only recorded duration. Preserve its accumulated prefix
+    -- before appending observations from the new sampler.
+    bin.first = source_start - bin.secs
+    bin.coverage = legacy_coverage(bin, bin.first, source_start, source_width)
   end
-  bin.secs = bin.secs + source_seconds
+  if source.coverage then
+    for surface, runs in pairs(source.coverage) do
+      for i = 1, #runs, 2 do add_run(bin.coverage, surface, runs[i], runs[i + 1]) end
+    end
+  else
+    add_coverage(bin.coverage, source.stat, source_start, source_end)
+  end
+  bin.secs = bin.secs + seconds
+  bin.last = source_end
   add_into(bin, source)
   return bin
 end
@@ -188,11 +243,12 @@ init_rings = function()
       rings[i] = ring
       local previous = rings[i - 1]
       if previous then
-        -- Seed upgrades from completed retained bins. The current partial bin
-        -- will be sent onward by the normal rollup when it completes.
+        -- Seed upgrades from closed retained bins. The active bin will be
+        -- sent onward by the normal rollup when its interval ends.
+        local active = math.floor((storage.last_bin_id or game.tick / BIN_TICKS) / previous.secs)
         local completed = {}
         for _, bin in pairs(previous.bins) do
-          if bin.secs == previous.secs then completed[#completed + 1] = bin end
+          if bin.id < active then completed[#completed + 1] = bin end
         end
         table.sort(completed, function(a, b) return a.id < b.id end)
         for _, bin in ipairs(completed) do add_to_ring(ring, bin, previous.secs) end
@@ -201,17 +257,17 @@ init_rings = function()
   end
 end
 
-local function roll_up(b)
+local function roll_up(b, next_id)
   if not storage.rings or #storage.rings < #RING_SPECS then init_rings() end
   local rings = storage.rings
   local seconds = BIN_TICKS / 60
   add_to_ring(rings[1], b, seconds)
   local bin = add_to_ring(rings[2], b, seconds)
   -- Keep the 1h and 10h resolutions up to date as before. The longer rings
-  -- receive completed lower-resolution bins instead of processing every second.
+  -- receive each closed lower-resolution bin once, including partial bins.
   for i = 3, #rings do
     local span = rings[i - 1].secs
-    if bin.secs ~= span then break end
+    if bin.id == math.floor(next_id / span) then break end
     bin = add_to_ring(rings[i], bin, span)
   end
 end
@@ -225,7 +281,7 @@ local function cur_bin(tick)
     local pid = storage.last_bin_id
     if pid and pid < id then
       local prev = storage.bins[pid % storage.nbins + 1]
-      if prev and prev.id == pid then roll_up(prev) end
+      if prev and prev.id == pid then roll_up(prev, id) end
     end
     b = { id = id, rec = {}, stat = {} }
     storage.bins[slot] = b
@@ -445,40 +501,80 @@ end
 ---------------------------------------------------------------------------
 -- queries
 ---------------------------------------------------------------------------
-local function source_bins(bins, size, sidx, start_tick, end_tick, stats_only)
+local function source_bins(bins, size, sidx, start_tick, end_tick, stats_only, coarse_totals)
   local sources = {}
-  local width = size * 60
+  local width = size * BIN_TICKS
+  local complete_tick = math.floor(end_tick / BIN_TICKS) * BIN_TICKS
   for _, bin in pairs(bins) do
-    local first = bin.id * width
-    local last = first + width
-    if first < end_tick and last <= end_tick and last > start_tick and (size == 1 or bin.secs == size) then
-      local known = not stats_only or (sidx and bin.stat[sidx] ~= nil) or (not sidx and next(bin.stat) ~= nil)
-      sources[#sources + 1] = { first = first, last = last, bin = bin, known = known }
+    local base = bin.id * width
+    local limit = base + width
+    local first = bin.first and bin.first * BIN_TICKS or base
+    local last = bin.last and bin.last * BIN_TICKS or limit
+    if size > 1 and not bin.last and bin.secs < size then
+      -- Legacy closed partial buckets started recording late in the interval.
+      -- Use an active legacy bucket for totals only if its whole prefix exists.
+      if limit <= end_tick then
+        first = last - bin.secs * BIN_TICKS
+      elseif coarse_totals and base + bin.secs * BIN_TICKS == complete_tick then
+        last = complete_tick
+      end
+    end
+    if first < end_tick and last <= end_tick and last > start_tick then
+      local runs = bin.coverage and bin.coverage[sidx or 0]
+      local known = runs ~= nil or (not bin.coverage and
+        (sidx and bin.stat[sidx] ~= nil or not sidx and next(bin.stat) ~= nil))
+      -- Some older history contains crafts but has no production stats.
+      if not known and not stats_only and not next(bin.stat) then
+        known = (sidx and bin.rec[sidx] ~= nil) or (not sidx and next(bin.rec) ~= nil)
+      end
+      local scope_gap
+      if runs then
+        local from, to = runs[1] * BIN_TICKS, runs[#runs] * BIN_TICKS
+        scope_gap = from > first or to < last or #runs > 2
+        first, last = from, to
+      end
+      if last > start_tick then
+        sources[#sources + 1] = { base = base, limit = limit, first = first, last = last,
+          bin = bin, known = known, runs = runs, scope_gap = scope_gap }
+      end
     end
   end
-  table.sort(sources, function(a, b) return a.first < b.first end)
+  table.sort(sources, function(a, b) return a.base < b.base end)
   return sources
 end
 
--- The resolutions nest on the same absolute time grid. Use the finer bins if
--- they cover the interval, or if they record a gap the coarse total cannot locate.
-local function merge_sources(fine, coarse, start_tick)
+local function source_ticks(source, start_tick)
+  local runs = source.runs
+  if not runs or #runs == 2 then return math.max(0, source.last - math.max(source.first, start_tick)) end
+  local ticks = 0
+  for i = 1, #runs, 2 do
+    local first, last = runs[i] * BIN_TICKS, runs[i + 1] * BIN_TICKS
+    ticks = ticks + math.max(0, last - math.max(first, start_tick))
+  end
+  return ticks
+end
+
+-- The resolutions nest on the same absolute time grid. Charts prefer detail.
+-- Totals can use a whole coarse bucket unless the finer bins preserve more
+-- coverage or avoid approximating the older edge of the requested window.
+local function merge_sources(fine, coarse, start_tick, coarse_totals)
   local result, index = {}, 1
   for _, wide in ipairs(coarse) do
-    while fine[index] and fine[index].first < wide.first do
+    while fine[index] and fine[index].base < wide.base do
       result[#result + 1] = fine[index]
       index = index + 1
     end
-    local first, covered, known, missing = index, 0, false, false
-    while fine[index] and fine[index].first < wide.last do
+    local first, covered, missing = index, 0, false
+    while fine[index] and fine[index].base < wide.limit do
       local narrow = fine[index]
-      covered = covered + narrow.last - math.max(narrow.first, start_tick)
-      known = known or narrow.known
-      missing = missing or not narrow.known
+      if narrow.known then covered = covered + source_ticks(narrow, start_tick) end
+      missing = missing or not narrow.known or narrow.scope_gap
       index = index + 1
     end
-    local duration = wide.last - math.max(wide.first, start_tick)
-    if covered == duration or (wide.known and missing) or (not wide.known and known) then
+    local duration = wide.known and source_ticks(wide, start_tick) or 0
+    local need_detail = not coarse_totals or start_tick > wide.first
+    if covered > duration or (covered == duration and need_detail)
+      or (wide.known and missing and not wide.bin.coverage) then
       for i = first, index - 1 do result[#result + 1] = fine[i] end
     else
       result[#result + 1] = wide
@@ -488,13 +584,51 @@ local function merge_sources(fine, coarse, start_tick)
   return result
 end
 
-function Sm.history_sources(sidx, start_tick, end_tick, stats_only)
-  local sources = source_bins(storage.bins or {}, 1, sidx, start_tick, end_tick, stats_only)
-  for _, ring in ipairs(storage.rings or {}) do
-    local coarse = source_bins(ring.bins, ring.secs, sidx, start_tick, end_tick, stats_only)
-    sources = merge_sources(sources, coarse, start_tick)
+local function select_sources(sidx, start_tick, end_tick, stats_only, coarse_totals, fine_only)
+  local sources = source_bins(storage.bins or {}, 1, sidx, start_tick, end_tick, stats_only, coarse_totals)
+  if not fine_only then
+    for _, ring in ipairs(storage.rings or {}) do
+      local coarse = source_bins(ring.bins, ring.secs, sidx, start_tick, end_tick, stats_only, coarse_totals)
+      sources = merge_sources(sources, coarse, start_tick, coarse_totals)
+    end
   end
   return sources
+end
+
+function Sm.history_sources(sidx, start_tick, end_tick, stats_only)
+  local result = {}
+  for _, source in ipairs(select_sources(sidx, start_tick, end_tick, stats_only)) do
+    local runs = source.runs
+    if runs and #runs > 2 then
+      local duration = source_ticks(source, -math.huge)
+      for i = 1, #runs, 2 do
+        local first, last = runs[i] * BIN_TICKS, runs[i + 1] * BIN_TICKS
+        if last > start_tick then
+          result[#result + 1] = { first = first, last = last, duration = duration, bin = source.bin, known = true }
+        end
+      end
+    else
+      result[#result + 1] = source
+    end
+  end
+  return result
+end
+
+local function rate_sources(sidx, period)
+  local end_tick = math.floor(game.tick / BIN_TICKS) * BIN_TICKS
+  local fine_only = not period or period <= 0
+  local requested = fine_only and settings.global["ssk-window-seconds"].value or period
+  local start_tick = end_tick - requested * BIN_TICKS
+  return select_sources(sidx, start_tick, end_tick, false, true, fine_only), start_tick
+end
+
+function Sm.coverage(sidx, period)
+  local sources, start_tick = rate_sources(sidx, period)
+  local ticks = 0
+  for _, source in ipairs(sources) do
+    if source.known then ticks = ticks + source_ticks(source, start_tick) end
+  end
+  return ticks / BIN_TICKS
 end
 
 -- returns {recipes = {[r] = {cps, prod}}, nodes = {[key] = {prod, cons}}}, seconds
@@ -504,47 +638,37 @@ end
 ---@return ProductionFlowRates rates
 ---@return number seconds Actual recorded duration used as the denominator.
 function Sm.rates(sidx, period)
-  local now_id = math.floor(game.tick / BIN_TICKS)
   local rc, st, secs = {}, {}, 0
-  local requested = period and period > 0 and period or settings.global["ssk-window-seconds"].value
-  local first_id = now_id - requested
-  local function accumulate(bin, fraction)
-    for s, recs in pairs(bin.rec) do
-      if not sidx or s == sidx then
-        for r, a in pairs(recs) do
-          local x = rc[r]
-          if not x then x = { c = 0, p = 0 }; rc[r] = x end
-          x.c = x.c + a.c * fraction
-          x.p = x.p + a.p * fraction
-        end
-      end
-    end
-    for s, keys in pairs(bin.stat) do
-      if not sidx or s == sidx then
-        for k, a in pairs(keys) do
-          local x = st[k]
-          if not x then x = { i = 0, o = 0 }; st[k] = x end
-          x.i = x.i + a.i * fraction
-          x.o = x.o + a.o * fraction
-        end
-      end
+  local function crafts(recs, fraction)
+    for r, a in pairs(recs) do
+      local x = rc[r]
+      if not x then x = { c = 0, p = 0 }; rc[r] = x end
+      x.c = x.c + a.c * fraction
+      x.p = x.p + a.p * fraction
     end
   end
-  local bins, fine_secs = storage.bins, 0
-  for _, bin in pairs(bins) do
-    if bin.id >= first_id and bin.id < now_id then fine_secs = fine_secs + 1 end
-  end
-  if fine_secs == requested or not period or period <= 0 or not storage.rings then
-    secs = fine_secs
-    for _, bin in pairs(bins) do
-      if bin.id >= first_id and bin.id < now_id then accumulate(bin, 1) end
+  local function totals(keys, fraction)
+    for k, a in pairs(keys) do
+      local x = st[k]
+      if not x then x = { i = 0, o = 0 }; st[k] = x end
+      x.i = x.i + a.i * fraction
+      x.o = x.o + a.o * fraction
     end
-  else
-    local start_tick = first_id * BIN_TICKS
-    for _, source in ipairs(Sm.history_sources(sidx, start_tick, now_id * BIN_TICKS)) do
-      local ticks = source.last - math.max(source.first, start_tick)
-      accumulate(source.bin, ticks / (source.last - source.first))
-      secs = secs + ticks / 60
+  end
+  local sources, start_tick = rate_sources(sidx, period)
+  for _, source in ipairs(sources) do
+    if source.known then
+      local bin = source.bin
+      local ticks = source_ticks(source, start_tick)
+      local fraction = start_tick <= source.first and 1 or ticks / source_ticks(source, -math.huge)
+      if sidx then
+        if bin.rec[sidx] then crafts(bin.rec[sidx], fraction) end
+        if bin.stat[sidx] then totals(bin.stat[sidx], fraction) end
+      else
+        for _, recs in pairs(bin.rec) do crafts(recs, fraction) end
+        for _, keys in pairs(bin.stat) do totals(keys, fraction) end
+      end
+      secs = secs + ticks / BIN_TICKS
     end
   end
   local out = { recipes = {}, nodes = {} }

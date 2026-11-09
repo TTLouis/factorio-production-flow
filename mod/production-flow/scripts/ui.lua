@@ -196,7 +196,7 @@ local function update_header(player,us)
   bar.ssk_surface_picker.visible = scoped
   local label=bar.ssk_history
   if not scoped then label.visible = false; return end
-  local _,seconds=Sampler.rates(us.sidx,us.period)
+  local seconds=Sampler.coverage(us.sidx,us.period)
   local target=us.period
   label.visible=seconds<target
   label.caption="Recorded "..Sampler.duration(seconds).." / "..Sampler.duration(target)

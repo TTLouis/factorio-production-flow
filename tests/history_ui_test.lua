@@ -39,6 +39,15 @@ History.build = function(surface, period, key)
   local fluid = key:sub(1, 6) == "fluid/"
   local uses = { ["item/steel-plate"] = 6, other = 2 }
   local details = { ["item/steel-plate"] = 6, ["item/iron-gear-wheel"] = 1, other = 1 }
+  if period == 3600000 then
+    local last = period * 60
+    return { start_tick = 0, end_tick = last, seconds = 0, points = {}, usage_keys = {}, stock_supported = true,
+      stock = {
+        { tick = last / 2, count = 99, measured = true },
+        { tick = last - 1200, count = 111, measured = true },
+        { tick = last - 600, count = 222, measured = true },
+      } }
+  end
   if data_state == "flat" then
     return { start_tick = 0, end_tick = 6000, seconds = 15, bucket_seconds = 15,
       points = { { start_tick = 3000, end_tick = 3900, seconds = 15, made = 40, used = 40, net = 0, uses = {} } },
@@ -180,6 +189,14 @@ UI.refresh(player, true)
 assert(named(root, "ssk_history_controls") == controls and named(root, "ssk_history_camera") == camera)
 assert(camera.parent.ssk_history_tooltips.children[1] == rate_targets[1], "refresh must retain hover targets")
 assert(named(root, "ssk_bal_items") == items and not old[1].valid, "replace render objects while retaining GUI and scroll state")
+
+local period_picker = assert(find(root, function(e) return e.tags.ssk_ui == "period" end))
+period_picker.selected_index = 7
+assert(UI.on_selection(event(period_picker)))
+assert(stock_targets[1].tooltip:find("99 items", 1, true) and stock_targets[2].tooltip:find("222 items", 1, true)
+  and not stock_targets[3].visible, "overlapping stock markers must show the newest measurement on their shared pixels")
+period_picker.selected_index = 2
+assert(UI.on_selection(event(period_picker)))
 
 local all_height = camera.style.height
 local checkbox = named(root, "ssk_history_usage")

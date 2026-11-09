@@ -588,10 +588,11 @@ function BU.fill(player, c, us, scope, only_auto)
   for i = 1, shown do
     local r = list[i]
     local v = values(r)
-    if favs.items[r.key] then
+    local group = group_of(r.key)
+    if favs.items[r.key] or favs.groups[group.id] then
       local warning = warnings and warnings[r.key]
       if warning then v.item = { "", "[img=utility/warning_icon] ", v.item } end
-      cells[i].item.tooltip = item_tooltip(r.key, group_of(r.key), warning)
+      cells[i].item.tooltip = item_tooltip(r.key, group, warning)
     end
     for _,col in ipairs(cols) do
       if col.id~="focus" then cells[i][col.id].caption=caption(v,col) end

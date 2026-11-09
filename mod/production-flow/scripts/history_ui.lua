@@ -419,7 +419,7 @@ end
 
 local function draw_stock(painter, h, width, height, top)
   local highest = 0
-  local regions = {}
+  local hover_by_x = {}
   for _, sample in ipairs(h.stock) do highest = math.max(highest, sample.count) end
   local step = nice_step(highest, height < 100 and 2 or height < 140 and 3 or 4)
   local max_value = math.max(step, math.ceil(highest / step) * step)
@@ -445,13 +445,23 @@ local function draw_stock(painter, h, width, height, top)
     painter.rect(x1, y1, x2 - x1, bottom - y1, color(sample.measured and MEASURED or ESTIMATED))
     if x2 > x1 then
       local source = sample.measured and "Measured stock" or sample.live and "Estimated stock since last scan" or "Estimated stock"
-      regions[#regions + 1] = { left = x1, right = x2,
-        tooltip = string.format("%s\n%s  %.0f items", elapsed(h, sample.tick), source, sample.count) }
+      local tooltip = string.format("%s\n%s  %.0f items", elapsed(h, sample.tick), source, sample.count)
+      -- Stock markers can overlap after rounding. Match the painting order so
+      -- a newer bar owns the pixels it covers in the time-only hover row.
+      for pixel = x1, x2 - 1 do hover_by_x[pixel] = tooltip end
     end
     if sample.measured and center - last_label >= 56 then
       local label_x = math.min(right - 12, math.max(left + 12, center))
       painter.text(label_x, math.max(plot_top - 4, y1 - 8), number(sample.count), TICK_TEXT, "center")
       last_label = center
+    end
+  end
+  local regions, tooltip, start = {}, nil, left
+  for pixel = left, right do
+    local next_tooltip = hover_by_x[pixel]
+    if next_tooltip ~= tooltip then
+      if tooltip then regions[#regions + 1] = { left = start, right = pixel, tooltip = tooltip } end
+      tooltip, start = next_tooltip, pixel
     end
   end
   return regions
