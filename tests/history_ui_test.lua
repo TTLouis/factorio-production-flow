@@ -69,22 +69,20 @@ assert(us.bal_mode == "history" and request[1] == us.sidx and request[2] == 600 
 assert(named(root, "ssk_bal_root") == table_root and named(root, "ssk_bal_items") == items)
 local controls = named(root, "ssk_history_controls")
 local camera, stock_camera = named(root, "ssk_history_camera"), named(root, "ssk_history_stock_camera")
-local net_camera = named(root, "ssk_history_net_camera")
-assert(camera.style.width == stock_camera.style.width and camera.style.width == net_camera.style.width
-  and camera.position[1] == stock_camera.position[1] and camera.position[1] == net_camera.position[1],
-  "rate, stock and net charts must align")
-assert(stock_camera.parent.parent.children[1].name == "ssk_history_stock_title"
-  and stock_camera.position[2] < camera.position[2] and camera.position[2] < net_camera.position[2],
-  "Chest stock must be above Rate history and Net rate")
-local lower_fraction = (stock_camera.style.height + net_camera.style.height + 84) / (us.canvas_h + 100)
-assert(math.abs(lower_fraction - 1 / 3) < 0.02, "stock and net should share a third of the inspector")
+assert(camera.style.width == stock_camera.style.width and camera.position[1] == stock_camera.position[1],
+  "rate and stock charts must align")
+local sections = camera.parent.parent.children
+assert(sections[1].name == "ssk_history_rate_title" and sections[#sections].name == "ssk_history_stock_note"
+  and camera.position[2] < stock_camera.position[2],
+  "Rate history must be above Chest stock")
+local stock_fraction = (stock_camera.style.height + 48) / (us.canvas_h + 100)
+assert(math.abs(stock_fraction - 1 / 3) < 0.02, "stock should occupy about a third of the inspector")
 assert(named(root, "ssk_history_products").column_count == 4, "consumption entries must fit on one row")
 local rate_targets = camera.parent.ssk_history_tooltips.children
-local net_targets = net_camera.parent.ssk_history_tooltips.children
 local stock_targets = stock_camera.parent.ssk_history_tooltips.children
-assert(#rate_targets == 3 and #net_targets == 3, "partial or unrecorded rates have no tooltip")
+assert(#rate_targets == 3, "partial or unrecorded rates have no tooltip")
 assert(rate_targets[1].tooltip == "50s ago to 35s ago\nMade  10 items/s\nUsed  8 items/s\nNet  2 items/s")
-assert(net_targets[2].tooltip == rate_targets[2].tooltip and net_targets[2].tooltip:find("Net  -2 items/s", 1, true))
+assert(rate_targets[2].tooltip:find("Net  -2 items/s", 1, true))
 assert(stock_targets[1].tooltip == "50s ago\nMeasured stock  30 items"
   and stock_targets[2].tooltip == "35s ago\nEstimated stock  20 items")
 local polygons, rising_or_falling = 0, 0
