@@ -254,9 +254,11 @@ local function exercise_history(UI, player, root, us, case)
   local panel=tabs.ssk_history_panel
   local rate_plot=assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera").parent
   local net_plot=assert(find_named(panel,"ssk_history_net_camera"),"History needs a separate net rate plot").parent
-  local sections=rate_plot.parent.children
-  assert(sections[1]==net_plot.parent and sections[#sections].name=="ssk_history_stock_note",
-    "History must show Net rate, Rate history, then Chest stock")
+  local order={}
+  for i,section in ipairs(rate_plot.parent.children) do order[section.name]=i end
+  assert(order.ssk_history_rate_plot<order.ssk_history_net_section
+    and order.ssk_history_net_section<order.ssk_history_stock_plot,
+    "History must show Rate history, Net rate, then Chest stock")
   local rate_hover=assert(rate_plot.ssk_history_tooltips.children[1],"The rate plot needs hover targets")
   local net_hover=assert(net_plot.ssk_history_tooltips.children[1],"The net plot needs hover targets")
   assert(not rate_hover.ignored_by_interaction and rate_hover.tooltip==net_hover.tooltip

@@ -74,9 +74,9 @@ assert(camera.style.width == stock_camera.style.width and camera.style.width == 
   and camera.position[1] == stock_camera.position[1] and camera.position[1] == net_camera.position[1],
   "rate, stock and net charts must align")
 local sections = camera.parent.parent.children
-assert(sections[1].name == "ssk_history_net_section" and sections[#sections].name == "ssk_history_stock_note"
-  and net_camera.position[2] < camera.position[2] and camera.position[2] < stock_camera.position[2],
-  "History must show Net rate, Rate history, then Chest stock")
+assert(sections[1].name == "ssk_history_rate_title" and sections[#sections].name == "ssk_history_stock_note"
+  and camera.position[2] < net_camera.position[2] and net_camera.position[2] < stock_camera.position[2],
+  "History must show Rate history, Net rate, then Chest stock")
 local compact_fraction = (stock_camera.style.height + net_camera.style.height + 84) / (us.canvas_h + 100)
 assert(math.abs(compact_fraction - 1 / 3) < 0.02, "stock and net should share a third of the inspector")
 assert(named(root, "ssk_history_products").column_count == 4, "consumption entries must fit on one row")

@@ -109,20 +109,11 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
   scroll.style.width = width - 4
   scroll.style.height = scroll_height
-  local body = scroll.add { type = "flow", name = "ssk_history_body", direction = "vertical" }
+  local body = scroll.add { type = "flow", name = "ssk_history_body", direction = "vertical",
+    tags = { ssk_history_layout = "rate_net_stock" } }
   body.style.width = chart_width
   body.style.left_margin, body.style.top_margin = 8, 4
   body.style.vertical_spacing = 4
-
-  local net = body.add { type = "flow", name = "ssk_history_net_section", direction = "vertical" }
-  net.style.horizontally_stretchable = true
-  local net_title = row(net, "ssk_history_net_title")
-  label(net_title, nil, "Net rate", "caption_label")
-  spacer(net_title)
-  local legend = small(net_title, "ssk_history_net_legend", "")
-  legend.tooltip = "Made minus Used per second. Above zero is a surplus. Below zero is a deficit."
-  net.add { type = "flow", name = "ssk_history_net_plot", direction = "vertical" }
-  net.add { type = "line", direction = "horizontal" }
 
   local rate = row(body, "ssk_history_rate_title")
   label(rate, nil, "Rate history", "caption_label")
@@ -149,6 +140,16 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
     label(product, "material_name", "", nil, cell_width - rate_width - 4)
     small(product, "rate", "", rate_width).style.horizontal_align = "right"
   end
+
+  local net = body.add { type = "flow", name = "ssk_history_net_section", direction = "vertical" }
+  net.style.horizontally_stretchable = true
+  net.add { type = "line", direction = "horizontal" }
+  local net_title = row(net, "ssk_history_net_title")
+  label(net_title, nil, "Net rate", "caption_label")
+  spacer(net_title)
+  local legend = small(net_title, "ssk_history_net_legend", "")
+  legend.tooltip = "Made minus Used per second. Above zero is a surplus. Below zero is a deficit."
+  net.add { type = "flow", name = "ssk_history_net_plot", direction = "vertical" }
 
   body.add { type = "line", direction = "horizontal" }
   local stock = row(body, "ssk_history_stock_title")
@@ -437,8 +438,7 @@ function H.fill(player, panel, us, key, width, height)
   local scroll_height = math.max(72, height - toolbar_height - 56)
   local scroll = panel.ssk_history_scroll
   local body = scroll and scroll.ssk_history_body
-  local first = body and body.children[1]
-  if not first or first.name ~= "ssk_history_net_section" then
+  if not body or body.tags.ssk_history_layout ~= "rate_net_stock" then
     panel.clear()
     build(panel, width, chart_width, toolbar_height, scroll_height)
     body = panel.ssk_history_scroll.ssk_history_body
@@ -527,21 +527,21 @@ function H.fill(player, panel, us, key, width, height)
   local net_height = compact_plot_height - stock_height
   -- Leave room for the coverage message so the plot cameras keep their size.
   local rate_height = math.max(72, scroll_height - 162 - net_heading_height - compact_plot_height)
-  local rate_top = net_height + PLOT_GAP
-  local stock_top = rate_top + rate_height + PLOT_GAP
+  local net_top = rate_height + PLOT_GAP
+  local stock_top = net_top + net_height + PLOT_GAP
   local painter, stock_regions
   if rates or stock then
-    painter = Canvas.begin(player, chart_width, stock and stock_top + stock_height or rate_top + rate_height)
+    painter = Canvas.begin(player, chart_width, stock and stock_top + stock_height or net_top + net_height)
     local paths
-    if rates then paths = draw_rates(painter, h, chart_width, net_height, "net", 0) end
-    if active then draw_rates(painter, h, chart_width, rate_height, view, rate_top, paths) end
+    if active then paths = draw_rates(painter, h, chart_width, rate_height, view, 0) end
+    if rates then draw_rates(painter, h, chart_width, net_height, "net", net_top, paths) end
     if stock then stock_regions = draw_stock(painter, h, chart_width, stock_height, stock_top) end
   else
     Canvas.clear(player.index)
   end
   local buckets = rates and rate_regions(h, chart_width, units)
-  camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, 0, buckets)
-  camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, rate_top, buckets)
+  camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0, buckets)
+  camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top, buckets)
   camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top, stock_regions)
 end
 
