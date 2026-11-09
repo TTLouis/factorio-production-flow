@@ -1,53 +1,126 @@
 # Production Flow (Beta)
 
-This file supplies the Mod Portal description. The screenshots show the
-interface introduced in 0.1.3.
+This file supplies the next Mod Portal description. The screenshots are native
+Factorio 2.1.24 captures at 100% UI scale.
 
 ## Short description
-See where your factory's resources go. Spot imbalances and explore item and fluid production with interactive Sankey charts.
+
+See what your factory makes and uses, spot shortages, and explore recipes with interactive Sankey charts. In Space Age, follow cargo between surfaces.
 
 ## Mod page description
-Production Flow uses interactive Sankey charts to show where your factory's resources go and whether production is keeping up.
 
-Compare recorded item and fluid rates, then explore the recipes connecting their inputs and consumers.
+**Where did all your green circuits go?** Follow the recipes using them, see
+whether production is keeping up, and check how long your chest stock will
+last. In Space Age, follow cargo from the surface that loaded it to the one
+where it landed.
 
-**Feedback needed:** Try the beta in your factory and share what works, what is confusing, or what you would like improved. Feedback on Balance, chart readability, mod compatibility and performance is especially helpful. Leave a message in the [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion) or [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues). For bugs, include your Factorio/mod versions, what you expected, what happened and a screenshot if possible.
+### Balance production and stock
 
-**Balance is the main focus of this beta.** Compare made, used and net rates, inspect an item's inputs and consumers, and review utilisation and chest stock in an organized list. Item/fluid selection and production measurements are independent of chest storage. In-game help explains the controls, numbers and chart limits.
+Sort items and fluids by deficit or time to empty, then select one to inspect
+what makes and uses it. Star materials or groups to keep them handy, and set
+watches for a minimum production rate or time to empty.
 
-Underproducing, OK and Overproducing summaries organize the activity counts. A single fixed heading row stays aligned with the columns, including with Details enabled. A framed list and extra space before its scrollbar keep the scrolling area clear. Star an item or group to keep it at the top, and use the Refresh table icon above the list to reapply filters and sorting.
+The Underproducing, OK and Overproducing summaries help you scan the factory
+at a glance. Turn on **Details** to see utilisation and stock trends. The
+headings and filters stay visible as you scroll. Use **Refresh table** to
+reapply your filters and sort order.
 
-![Balance: aligned single-row headings, scrollbar spacing and header Refresh](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/24-balance-controls.png)
+![Balance Flow shows what makes and uses electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/30-balance-flow.png)
 
-![Balance: grouped materials and favourites](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/25-balance-groups.png)
+Click the material slot to search for an item or fluid. Browse familiar item
+categories or jump straight to the Fluids section.
 
-Click the material slot to search the item/fluid icon selector. Familiar item categories remain, with a separate Fluids section. Zoom, Fit and Show labels stay visible; the gear opens less-used chart settings.
+Switch to **History** to compare Made, Used, Net, estimated use by product and
+chest stock for the same material. Hover to line up the charts at one point in
+time. Choose a production period from one minute to 1,000 hours.
 
-![Material selector: Fluids section with restored side margins](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/26-material-picker.png)
+![Balance History aligns production rates, net rate and chest stock](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/31-balance-history.png)
 
-![Material search: scrollbar replaces the right-hand margin on longer lists](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/29-material-scroll.png)
+### Follow cargo in Space Age
 
-**Focus and Full Sankey — need more polish.** Both views are available for exploring recipe chains and broader production overviews. Charts default to individual item and fluid names. Graph grouping is optional and unfinished; its broad category labels can obscure material details. Their layout, navigation and readability still need work, especially with dense factories.
+Pick a space platform in **Transfers** to see where it loaded and unloaded
+cargo. Follow the ribbons for each route and inspect what it carried. Star
+your regular platforms to keep them at the top.
 
-Focus includes Back/Forward, a Last visits list and clickable icons for the last six materials. Clear history keeps the current selection and collected production data.
+![Transfers Flow shows Vulcanus exports to Fulgora, Gleba and Nauvis, plus iron plates made aboard](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/32-transfers-export.png)
 
-![Focus: Back/Forward, Last visits, clickable materials and Clear history](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/27-focus-navigation.png)
+![Transfers Flow shows a science-pack route from Vulcanus to Nauvis](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/33-transfers-science.png)
 
-![Full Sankey: compact controls and chart settings with a bottom inset — needs more polish](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/28-chart-settings.png)
+Switch to **History** to see when cargo arrived. Select a time bucket to narrow
+the delivery log and expand a cargo pod to see its manifest.
 
-**How the calculations work**
+![Transfers History shows the delivery timeline and an expanded cargo manifest](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/34-transfers-history.png)
 
-- **Made, Used and Net:** Made and Used are changes in Factorio's production-statistic counters on the selected surface, divided by the recorded duration. Net is Made minus Used. Rates use a 10-minute window by default; during warm-up they use the available recorded history. History survives saving and loading.
-- **Recipe connections:** The mod samples completed crafts on tracked crafting machines. Ingredient amounts and estimated product yields turn that activity into rates for each recipe link, with adjustments for productivity and expected yields for probabilistic outputs. These estimates can differ from the measured production totals.
-- **Selected-item usage:** The Uses side reports how much of the selected material each consumer takes. For example, 10 normal crafts/s of a recipe using 2 iron plates per craft represents 20 iron plates/s consumed.
-- **Utilisation and status:** Observed normal craft rates are compared with the current machines' capacity, calculated from crafting speed and recipe time. Net differences within 5% of the larger made/used rate count as roughly balanced. Utilisation warnings are diagnostic hints; they do not prove why a machine is waiting. Machine or module changes can affect comparisons with historical activity.
-- **Stock and Empty in:** Physical contents of ordinary and logistic chests on the selected surface, including requester and buffer chests, with all qualities combined. No logistic network is required. Items stored without recent activity appear as **Stock only**. Reads are spread across ticks; each completed scan is followed by a configurable wait (minimum 1 game minute, default 5) before another starts. Production rates refresh every 5 seconds. A dash means unavailable; zero means measured empty. Empty time uses the recent stock drain (up to seven completed samples: about 30 minutes at the default interval or 6 at the minimum, longer for large scans), otherwise the net production deficit, and assumes that drain continues. Items moving during a scan can affect a sample.
-- **Ribbon widths:** Proportional mode uses rate-based widths; compressed mode uses a square-root scale. Fluids have a separate visual scale and thin flows have a minimum thickness. Widths across different materials are not a conserved mass balance.
+### Explore recipes and inspect machines
 
-**Compatibility and scope**
+Use **Focus** to trace the inputs and consumers of one item or fluid. Open
+**Machine status** from Balance or Focus to check for missing inputs, blocked
+outputs or power issues, and preview a machine before jumping to it.
 
-Requires **Factorio 2.1**. Tested with **Factorio 2.1.23 and Space Age**, including planetary and local space-platform production. Broader modpack compatibility, multiplayer and large-factory performance are still under testing and polish.
+Use **Back**, **Forward** or **Last visits** to revisit materials in Focus.
+Zoom, Fit and Show labels are on the chart toolbar. Hover a ribbon to see its
+total flow and rates by recipe, or use the gear for more chart settings.
 
-Recording starts when the mod is installed; earlier recipe activity cannot be recovered. Charts describe recipe relationships. Belt/pipe routing, interplanetary shipment tracking, player/vehicle inventories, machine buffers, belts, ground items, linked/infinity chests and fluid-tank stock are outside the current beta.
+![Focus traces the recipes connected to electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/35-focus-circuit.png)
 
-Created by **TTLouis** · **MIT license** · [Source code](https://github.com/TTLouis/factorio-production-flow) · [Feedback and issues](https://github.com/TTLouis/factorio-production-flow/issues)
+![Machine status lists sampled machines that make or use electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/36-machine-status.png)
+
+**Full Sankey** gives you a broader view of recipe flows on one surface. Dense
+charts and optional grouping are still being refined.
+
+![Full Sankey shows recipe flows across Nauvis](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/37-full-sankey.png)
+
+### How the calculations work
+
+- **Made, Used and Net.** Made and Used are changes in Factorio's production
+  counters for the selected surface, divided by the recorded duration. Net is
+  Made minus Used. The default period is ten minutes. While a period fills,
+  rates use the history recorded so far. That history survives saving and loading.
+- **Recipe connections.** Production Flow samples completed crafts on tracked
+  machines. It uses ingredient amounts and expected product yields to estimate
+  rates for each recipe link, accounting for productivity and the expected yield
+  of probabilistic outputs. Recipe estimates can differ from the measured totals.
+- **Selected-material usage.** The **Uses** side shows how much of the selected
+  material each recipe consumes. A recipe running at ten normal crafts per
+  second and using two iron plates per craft consumes twenty iron plates per second.
+- **Utilisation and status.** The mod compares observed normal craft rates with
+  the capacity of the current machines, based on crafting speed and recipe time.
+  A net difference within 5% of the larger Made or Used rate counts as roughly
+  balanced. Machine, recipe or module changes can affect comparisons with
+  historical activity. Treat utilisation warnings as clues about where to look.
+- **Stock and Empty in.** Stock counts physical items in ordinary and logistic
+  chests on the selected surface, including requester and buffer chests, across
+  all qualities. Chests outside a logistic network count too. Items stored
+  without recent activity appear as **Stock only**. Production rates refresh
+  every five seconds. Chest reads are spread across ticks, with a configurable
+  wait after each completed scan of one game minute minimum and five by default.
+  A dash means stock is unavailable, and zero means measured empty. **Empty in**
+  uses the recent drain from up to seven completed scans, or the net production
+  deficit when no drain is measured. Seven scans span about 30 game minutes at
+  the default interval or six at the minimum, with longer spans on large maps.
+  Empty time assumes the current drain continues. Items moving between chests
+  during a scan can affect the sample.
+- **Ribbon widths.** Proportional mode scales widths by rate, while compressed
+  mode uses the square root of the rate. Thin flows have a minimum visible
+  width and fluids use a separate scale. Compare widths within the same material
+  because different materials can use different units.
+
+Open the **?** button in-game for help with controls, measurements and chart
+limits. See [how the calculations work](https://github.com/TTLouis/factorio-production-flow/blob/main/docs/calculations.md)
+for more detail.
+
+### Compatibility and scope
+
+Requires **Factorio 2.1**. Space Age enables Transfers. Production history and
+cargo tracking fill as the mod observes activity. Production charts show
+recipe relationships on a single surface, and Transfers records confirmed
+cargo deliveries between surfaces. Broader modpack compatibility, multiplayer
+and large-factory performance are still being tested.
+
+**Feedback welcome.** Tell us what works in your factory and where the charts
+or controls are confusing. For bugs, include your Factorio and mod versions,
+what you expected, what happened and a screenshot if possible. Share feedback in the
+[Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion)
+or [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues).
+
+Created by **TTLouis** under the **MIT license**. [Source code](https://github.com/TTLouis/factorio-production-flow)

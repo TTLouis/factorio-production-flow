@@ -1,4 +1,21 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.2.5
+  Features:
+    - Compare Made, Used, Net, estimated use by product and chest stock in Balance History.
+      Hover to highlight the same time across charts. Start the Made and Used axis at zero or fit it to the data.
+      Choose periods from one minute to 1,000 hours. Rate History uses trailing averages at one hour and above.
+    - Follow confirmed cargo loads and unloads by space platform in Space Age.
+      Inspect route manifests, browse the delivery timeline and log, and star favourite platforms.
+      Onboard production defaults to materials the platform also unloaded in the selected period.
+    - Sort Balance by deficit or time to empty and set watches for starred materials or members of starred groups.
+    - Check machine status in Balance and Focus, then preview a machine before jumping to it.
+  Gui:
+    - Hover Sankey ribbons in Balance Flow, Focus and Full Sankey for total flow and rates by recipe.
+      Transfers ribbons show cargo quantities and average rates by material.
+  Changes:
+    - Science-pack use left after recorded recipe consumption appears as Labs (estimated).
+      This can include spoilage and other untracked consumption.
+---------------------------------------------------------------------------------------------------
 Version: 0.1.4
 Date: 2026-11-08
   Bugfixes:

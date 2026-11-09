@@ -76,7 +76,7 @@ Actions, with **ModPortal: Publish Mods**, **ModPortal: Upload Mods** and
 The first run creates the listing; later releases add versions. The page comes
 from `docs/mod-portal.md`. Metadata in `tools/mod_portal.json` uses **Utilities**
 for QoL/interface functionality, with no gameplay-feature tags. The workflow
-uploads the description's six screenshots to Factorio and replaces their inline
+uploads the description's screenshots to Factorio and replaces their inline
 links with the portal-hosted URLs. It preserves additional manual gallery images.
 GitHub topics are not managed.
 
