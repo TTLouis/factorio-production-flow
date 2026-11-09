@@ -15,9 +15,9 @@ local TICK = { r = 0.75, g = 0.74, b = 0.71, a = 1 }
 local HIGHLIGHT = { r = 0.28, g = 0.24, b = 0.18, a = 1 }
 local CARD_ROW, CARD_HEADER, CARD_GAP = 25, 34, 12
 local DIRECTIONS = { "loaded", "unloaded" }
-local LAYOUT_VERSION = 5
-local PANEL_INSET, PANE_INSET, TAB_INSET = 8, 4, 8
-local HEADING_HEIGHT, TAB_HEIGHT, TAB_CHROME = 38, 36, 48
+local LAYOUT_VERSION = 6
+local SPLIT_GAP, LIST_INSET, TAB_MARGIN, TAB_INSET = 12, 4, 4, 8
+local HEADING_HEIGHT, LIST_HEADER_HEIGHT, TAB_HEIGHT, TAB_CHROME = 38, 32, 36, 48
 local GRAPH_TOP, PLATFORM_HEIGHT = 34, 124
 local SCROLLBAR_WIDTH = 12
 
@@ -115,27 +115,54 @@ local function endpoint_name(endpoint)
   return endpoint.surface.valid and name or name .. " (removed)", icon
 end
 
-local function same_choices(el, keys, names)
-  local tags = el.tags
-  if not tags.keys or #tags.keys ~= #keys then return false end
-  for i, key in ipairs(keys) do
-    if key ~= tags.keys[i] or names[i] ~= tags.names[i] then return false end
+local function add_platform_rows(pane, platforms, width, favourite)
+  for _, platform in ipairs(platforms) do
+    local line = row(pane, "platform_" .. platform.id)
+    line.style.horizontal_spacing, line.style.height = 4, 28
+    local star = line.add { type = "sprite-button", name = "star", style = "tool_button",
+      sprite = favourite and "ssk-star" or "ssk-star-off", toggled = favourite,
+      tags = { transfer_favourite = platform.id },
+      tooltip = favourite and "Remove this platform from favourites" or "Add this platform to favourites at the top" }
+    star.style.width, star.style.height = 24, 24
+    local caption = platform.icon and ("[img=" .. platform.icon .. "] " .. platform.name) or platform.name
+    local pick = line.add { type = "button", name = "pick", style = "list_box_item", caption = caption,
+      tooltip = platform.name, tags = { transfer_platform = platform.id } }
+    pick.style.width, pick.style.height = width - 28, 28
   end
-  return true
 end
 
-local function update_platforms(el, platforms, selected)
-  local keys, names, items, index = {}, {}, {}, 0
-  for i, p in ipairs(platforms) do
-    keys[i], names[i] = p.id, p.name
-    items[i] = p.icon and ("[img=" .. p.icon .. "] " .. p.name) or p.name
-    if selected and selected.id == p.id then index = i end
+local function platform_group(pane, width, caption, top_margin)
+  local heading = pane.add { type = "frame", style = "repeated_subheader_frame", direction = "horizontal" }
+  heading.style.width, heading.style.height, heading.style.left_padding = width, 28, 6
+  heading.style.top_margin, heading.style.vertical_align = top_margin, "center"
+  label(heading, nil, caption, "caption_label")
+end
+
+local function update_platforms(pane, platforms, selected, favourites)
+  local parts, pinned, others = {}, {}, {}
+  for _, platform in ipairs(platforms) do
+    local favourite = favourites and favourites[platform.id]
+    local list = favourite and pinned or others
+    list[#list + 1] = platform
+    parts[#parts + 1] = platform.id .. ":" .. (favourite and "1:" or "0:") .. platform.name
   end
-  if not same_choices(el, keys, names) then
-    el.items = items
-    el.tags = { transfer_platforms = true, keys = keys, names = names }
+  local signature = table.concat(parts, "\n")
+  local width = pane.tags.row_width
+  if pane.tags.signature ~= signature then
+    pane.clear()
+    pane.tags = { row_width = width, signature = signature }
+    if #pinned > 0 then
+      platform_group(pane, width, "[img=ssk-star] Favourites", 0)
+      add_platform_rows(pane, pinned, width, true)
+      if #others > 0 then platform_group(pane, width, "Other platforms", 8) end
+    end
+    add_platform_rows(pane, others, width, false)
   end
-  if el.selected_index ~= index then el.selected_index = index end
+  for _, platform in ipairs(platforms) do
+    local pick = pane["platform_" .. platform.id].pick
+    local toggled = selected ~= nil and selected.id == platform.id
+    if pick.toggled ~= toggled then pick.toggled = toggled end
+  end
 end
 
 local function scroll(parent, name, width, height)
@@ -146,67 +173,63 @@ local function scroll(parent, name, width, height)
 end
 
 local function build(content, width, height)
-  local panel = content.add { type = "frame", name = "ssk_transfers", style = "inside_deep_frame",
+  local panel = content.add { type = "flow", name = "ssk_transfers",
     direction = "vertical", tags = { transfers_layout = LAYOUT_VERSION } }
   panel.style.width, panel.style.height = width, height
-  panel.style.padding = PANEL_INSET
-
   local split = row(panel, "split")
-  split.style.vertical_align, split.style.horizontal_spacing = "top", PANEL_INSET
+  split.style.vertical_align, split.style.horizontal_spacing = "top", SPLIT_GAP
   local sidebar_w = math.max(116, math.min(236, math.floor(width * 0.17)))
-  local details_w = width - sidebar_w - 3 * PANEL_INSET
-  local body_h = height - 2 * PANEL_INSET
+  local details_w = width - sidebar_w - SPLIT_GAP
   local sidebar = split.add { type = "frame", name = "sidebar", style = "inside_deep_frame", direction = "vertical" }
-  sidebar.style.width, sidebar.style.height = sidebar_w, body_h
-  sidebar.style.padding = 0
-  local side_header = strip(sidebar, "heading", HEADING_HEIGHT)
+  sidebar.style.width, sidebar.style.height, sidebar.style.padding = sidebar_w, height, LIST_INSET
+  local side_header = strip(sidebar, "heading", LIST_HEADER_HEIGHT)
   label(side_header, nil, "Platforms", "subheader_caption_label")
   spacer(side_header)
   label(side_header, "count", "", "subheader_semibold_label")
-  local platforms = sidebar.add { type = "list-box", name = "ssk_transfer_platforms",
-    style = "wide_list_box_in_shallow_frame_under_subheader", items = {},
-    tags = { transfer_platforms = true }, tooltip = "Select a space platform." }
-  platforms.style.width, platforms.style.height = sidebar_w - PANE_INSET, body_h - HEADING_HEIGHT - PANE_INSET
+  local list_w = sidebar_w - 2 * LIST_INSET
+  local platform_scroll = scroll(sidebar, "platform_scroll", list_w, height - LIST_HEADER_HEIGHT - 2 * LIST_INSET)
+  local platforms = platform_scroll.add { type = "flow", name = "ssk_transfer_platforms", direction = "vertical",
+    tags = { row_width = list_w - SCROLLBAR_WIDTH - 8 } }
+  platforms.style.vertical_spacing = 0
 
-  local right = split.add { type = "frame", name = "details", style = "inside_deep_frame", direction = "vertical" }
-  right.style.width, right.style.height = details_w, body_h
-  right.style.padding = PANE_INSET
-  local heading = strip(right, "heading", HEADING_HEIGHT)
-  local icon = heading.add { type = "sprite", name = "icon", resize_to_sprite = false }
-  icon.style.width, icon.style.height = 26, 26
-  label(heading, "platform", "", "subheader_caption_label", details_w - 56)
-
-  local tab_row = row(right, "tab_row")
+  local tab_row = row(split, "tab_row")
   tab_row.style.vertical_align, tab_row.style.horizontal_spacing = "top", 0
   local tabs = tab_row.add { type = "tabbed-pane", name = "ssk_transfer_tabs",
     style = "tabbed_pane_with_no_side_padding", tags = { transfer_tabs = true } }
-  tabs.style.width = details_w - 2 * PANE_INSET
-  tabs.style.top_margin = PANE_INSET
-  local tab_w = details_w - 2 * (PANE_INSET + TAB_INSET)
-  local tab_h = body_h - 3 * PANE_INSET - HEADING_HEIGHT - TAB_CHROME - TAB_INSET
+  tabs.style.width, tabs.style.top_margin = details_w, 0
+  local tab_w, tab_h = details_w - 2 * TAB_MARGIN, height - TAB_CHROME
   for _, title in ipairs({ "Flow", "History" }) do
     local tab = tabs.add { type = "tab", caption = title }
-    local body = tabs.add { type = "flow", name = "ssk_transfer_" .. title:lower(), direction = "vertical",
-      tags = { transfer_width = tab_w, transfer_height = tab_h } }
+    local body = tabs.add { type = "frame", name = "ssk_transfer_" .. title:lower(), direction = "vertical",
+      style = "inside_deep_frame" }
     body.style.width, body.style.height = tab_w, tab_h
-    body.style.left_margin, body.style.right_margin, body.style.bottom_margin = TAB_INSET, TAB_INSET, TAB_INSET
-    body.style.vertical_spacing = 4
+    body.style.left_margin, body.style.right_margin, body.style.padding = TAB_MARGIN, TAB_MARGIN, TAB_INSET
+    local tab_content = body.add { type = "flow", name = "content", direction = "vertical",
+      tags = { transfer_width = tab_w - 2 * TAB_INSET, transfer_height = tab_h - 2 * TAB_INSET } }
+    tab_content.style.vertical_spacing = 4
     tabs.add_tab(tab, body)
   end
   tabs.selected_tab_index = 1
 
-  -- Keep the native tabs and place the Flow controls over the unused space to their right.
-  local options_w = 192
-  local options = tab_row.add { type = "flow", name = "production", direction = "vertical" }
-  options.style.width, options.style.vertical_spacing = options_w, 0
-  options.style.left_margin, options.style.right_margin = -(options_w + 12), 12
-  options.style.top_margin = PANE_INSET
-  local toggle_row = row(options, "toggle")
-  toggle_row.style.height = TAB_HEIGHT
-  toggle_row.add { type = "checkbox", name = "ssk_transfer_show_all_production", caption = "Show all onboard production",
+  -- The native tab strip leaves room for the controls and right-aligned title.
+  local header_w = details_w - 196
+  local heading = row(tab_row, "heading")
+  heading.style.width, heading.style.height = header_w, TAB_HEIGHT
+  heading.style.left_margin, heading.style.right_margin = -(header_w + 12), 12
+  heading.style.horizontal_spacing = 8
+  spacer(heading)
+  local compact = header_w < 400
+  heading.add { type = "checkbox", name = "ssk_transfer_show_all_production",
+    caption = compact and "All production" or "Show all onboard production",
     state = false, tags = { transfer_show_all_production = true },
     tooltip = "When off, Made aboard shows only items this platform made and unloaded in the selected period.\n"
       .. "Made aboard counts production. Unloaded counts confirmed deliveries." }
+  local icon = heading.add { type = "sprite", name = "icon", resize_to_sprite = false }
+  icon.style.width, icon.style.height = 24, 24
+  icon.style.left_margin = 4
+  local caption = label(heading, "platform", "", "subheader_caption_label")
+  caption.style.maximal_width = math.min(320, math.max(32, header_w - (compact and 156 or 240)))
+  caption.style.single_line = true
   return panel
 end
 
@@ -696,15 +719,16 @@ function UI.render(content, player, period, state, width, height)
   local available = Transfers.available()
   local result = available and Transfers.platform_view(force, game.tick, seconds, state)
     or { platforms = {} }
-  local sidebar, details = panel.split.sidebar, panel.split.details
-  update_platforms(sidebar.ssk_transfer_platforms, result.platforms, result.platform)
+  local sidebar, tab_row = panel.split.sidebar, panel.split.tab_row
+  local platforms = sidebar.platform_scroll.ssk_transfer_platforms
+  update_platforms(platforms, result.platforms, result.platform, state.favourites)
   sidebar.heading.count.caption = tostring(#result.platforms)
-  local tab_row, heading = details.tab_row, details.heading
-  local tabs, options = tab_row.ssk_transfer_tabs, tab_row.production
+  local tabs, heading = tab_row.ssk_transfer_tabs, tab_row.heading
+  local production = heading.ssk_transfer_show_all_production
   tabs.selected_tab_index = state.view == "history" and 2 or 1
-  options.visible = result.platform ~= nil and state.view == "flow"
-  options.toggle.ssk_transfer_show_all_production.state = state.show_all_production == true
-  local body = state.view == "history" and tabs.ssk_transfer_history or tabs.ssk_transfer_flow
+  production.visible = result.platform ~= nil and state.view == "flow"
+  production.state = state.show_all_production == true
+  local body = (state.view == "history" and tabs.ssk_transfer_history or tabs.ssk_transfer_flow).content
   heading.platform.caption = result.platform and result.platform.name or "Transfers"
   heading.platform.tooltip = result.platform and result.platform.name or nil
   local icon = result.platform and result.platform.icon
@@ -741,11 +765,6 @@ function UI.on_selection(event, state)
     state.view = el.selected_tab_index == 2 and "history" or "flow"
     return true
   end
-  if tags.transfer_platforms then
-    state.platform = tags.keys and tags.keys[el.selected_index]
-    reset_log(state)
-    return true
-  end
   return false
 end
 
@@ -760,7 +779,16 @@ function UI.on_click(event, state)
   local el = event.element
   if not (state and el and el.valid) then return false end
   local tags = el.tags
-  if tags.transfer_reset_bucket then
+  if tags.transfer_platform then
+    if state.platform ~= tags.transfer_platform then
+      state.platform = tags.transfer_platform
+      reset_log(state)
+    end
+  elseif tags.transfer_favourite then
+    local id = tags.transfer_favourite
+    state.favourites = state.favourites or {}
+    state.favourites[id] = not state.favourites[id] or nil
+  elseif tags.transfer_reset_bucket then
     reset_log(state)
   elseif tags.transfer_bucket ~= nil then
     local was_selected = state.bucket == tags.transfer_bucket

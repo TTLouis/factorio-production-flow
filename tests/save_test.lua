@@ -507,14 +507,12 @@ local function exercise_transfers(UI, player, root, us, case)
   local panel=root.ssk_inner.ssk_tabs.content_transfers
   assert(not root.ssk_window_bar.ssk_surface_picker.visible,"Transfers uses its platform list")
   local platform_list=assert(find_named(panel,"ssk_transfer_platforms"))
-  local platform_index
-  for i,choice in ipairs(platform_list.tags.keys) do
-    if choice==hub.surface.platform.index then platform_index=i; break end
-  end
+  local platform_id=hub.surface.platform.index
+  local platform_row="platform_"..platform_id
   local pane=assert(find_named(panel,"ssk_transfer_tabs"),"Missing native Transfers tabbed pane")
   assert(pane.type=="tabbed-pane" and #pane.tabs==2,"Transfers must have native Flow and History tabs")
-  platform_list.selected_index=assert(platform_index,"Missing fixture platform")
-  assert(UI.on_selection{player_index=player.index,element=platform_list},"Platform selection was not handled")
+  assert(UI.on_click{player_index=player.index,element=assert(platform_list[platform_row]).pick},
+    "Platform selection was not handled")
   pane.selected_tab_index=case.history and 2 or 1
   assert(UI.on_tab_changed{player_index=player.index,element=pane},"Transfers tab change was not handled")
   assert(us.transfers.platform==hub.surface.platform.index and pane.selected_tab_index==(case.history and 2 or 1),
@@ -523,7 +521,11 @@ local function exercise_transfers(UI, player, root, us, case)
     and not find_named(panel,"ssk_transfer_material"),"Obsolete Transfers filter controls are visible")
   local flow,history=pane.ssk_transfer_flow,pane.ssk_transfer_history
   assert(flow.style.left_margin==history.style.left_margin and flow.style.right_margin==history.style.right_margin
-    and flow.style.bottom_margin==history.style.bottom_margin,"Transfers tabs must share the same content insets")
+    and flow.style.left_padding==history.style.left_padding,"Transfers tabs must share the same content insets")
+  local heading=pane.parent.heading
+  assert(heading.platform.caption==hub.surface.platform.name
+    and heading.ssk_transfer_show_all_production.visible~=case.history,
+    "Transfers must display the selected platform on the tab row")
   if case.history then
     local result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
     local index,bucket
@@ -570,9 +572,8 @@ local function exercise_transfers(UI, player, root, us, case)
       "Default Flow must show the routes and exported onboard materials")
     local unload_count=result.unloaded.pods
     local production=assert(find_named(panel,"ssk_transfer_show_all_production"),"Missing onboard production toggle")
-    local controls=production.parent.parent
-    assert(production.type=="checkbox" and not production.state and controls.visible
-      and controls.parent==pane.parent and not controls.note and production.tooltip:find("unloaded"),
+    assert(production.type=="checkbox" and not production.state and production.visible
+      and production.parent==heading and not heading.note and production.tooltip:find("unloaded"),
       "Export-only production must be the default and explain the rule on hover")
     production.state=true
     assert(UI.on_checked{player_index=player.index,element=production},"Production checkbox was not handled")
@@ -593,9 +594,16 @@ local function exercise_transfers(UI, player, root, us, case)
     local tip=serpent.line(arrow.tooltip)
     assert(not arrow.ignored_by_interaction and tip:find("items/s",1,true) and tip:find("electronic-circuit",1,true),
       "Transfer ribbon must list the cargo and rates")
+    assert(UI.on_click{player_index=player.index,element=platform_list[platform_row].star})
+    local pinned=platform_list[platform_row]
+    assert(us.transfers.favourites[platform_id] and platform_list.children[2]==pinned
+      and pinned.star.toggled and pinned.pick.toggled,"Favourite must move to the top and retain selection")
     UI.refresh(player,true)
-    assert(platform_list.valid and pane.valid and production.valid and not production.state,
+    assert(platform_list.valid and pane.valid and production.valid and not production.state and pinned.valid,
       "Live Transfers refresh rebuilt or reset the controls")
+    assert(UI.on_click{player_index=player.index,element=pinned.star})
+    assert(not us.transfers.favourites[platform_id] and platform_list[platform_row].pick.toggled,
+      "Removing a favourite must retain the current platform")
     log("TRANSFERS FLOW NATIVE PASS native tabs, platform, production and ribbon tooltips")
   end
 end
