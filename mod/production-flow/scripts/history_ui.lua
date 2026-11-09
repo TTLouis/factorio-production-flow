@@ -421,7 +421,7 @@ function H.fill(player, panel, us, key, width, height)
       if product then
         local other = product == History.OTHER
         local caption = other and "Other uses" or material(product)
-        entry.material_name.caption = { "", mark(USES[other and 4 or i], "||"), " ", caption }
+        entry.material_name.caption = { "", mark(USES[other and 4 or i], "■"), " ", caption }
         entry.material_name.tooltip = caption
         entry.rate.caption = number((uses[product] or 0) / h.seconds) .. "/s"
         entry.rate.tooltip = other and "Measured consumption outside the top three estimated output uses."
