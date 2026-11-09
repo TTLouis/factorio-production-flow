@@ -156,7 +156,8 @@ near(stock_at(h, 30).count, 100); near(stock_at(h, 630).count, 130); near(stock_
 assert(not stock_at(h, 300).measured)
 near(stock_at(h, 300).count, 185.5)
 near(stock_at(h, 600).count, 130.5)
-assert(h.stock[#h.stock].tick == 690, "no extrapolation or partial scans")
+assert(h.stock[#h.stock].live and h.stock[#h.stock].tick == 720, "stop at the latest complete sampler bin")
+near(h.stock[#h.stock].count, 0)
 near(stock_at(H.build(2, 12, material), 300).count, 790)
 near(stock_at(H.build(nil, 12, material), 300).count, 975.5)
 assert(not H.build(1, 12, "fluid/water").stock_supported and #H.build(1, 12, "fluid/water").stock == 0)
@@ -178,6 +179,31 @@ h = H.build(1, 12, material)
 assert(stock_at(h, 30) and stock_at(h, 630) and not stock_at(h, 300), "no estimates over a missing surface scan")
 assert(not stock_at(h, 390), "unscanned surface must not appear as an empty chest scan")
 assert(not stock_at(H.build(nil, 12, material), 300), "aggregate scope changed between scans")
+
+reset(6 * 60 + 15)
+for sec = 0, 5 do fine(sec, stats(4, 1), stats(9, 2)) end
+scan(3 * 60, 20, 30)
+local last_scan = storage.stock[1]
+h = H.build(1, 20, material)
+local last = h.stock[#h.stock]
+assert(last.live and not last.measured and last.tick == 360)
+near(last.count, 29)
+near(stock_at(h, last_scan.tick).count, 20)
+near(stock_at(H.build(nil, 20, material), 360).count, 80)
+game.tick = 9 * 60
+for sec = 6, 8 do fine(sec, stats(4, 1), stats(9, 2)); storage.bins[sec].stat[3] = stats(100, 0) end
+h = H.build(1, 20, material)
+near(h.stock[#h.stock].count, 38)
+assert(h.stock[#h.stock].tick == game.tick and storage.stock[1] == last_scan and #storage.stock == 1)
+near(stock_at(H.build(nil, 20, material), game.tick).count, 110)
+local tail = H.build(1, 2, material)
+assert(tail.stock[1].tick == tail.start_tick and tail.stock[1].live,
+  "a scan before the visible range must still anchor live estimates")
+storage.bins[7] = nil
+h = H.build(1, 20, material)
+last = h.stock[#h.stock]
+assert(last.live and last.tick == 420, "stop at gaps even when there are later rates")
+near(last.count, 32)
 
 reset(6 * 60)
 for sec = 0, 5 do fine(sec, stats(sec < 3 and 0 or 100, sec < 3 and 100 or 0)) end

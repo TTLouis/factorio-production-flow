@@ -112,8 +112,52 @@ assert(Transfers.query(player, 440, 1).items == 4)
 assert(Transfers.query(player, 500, 1).items == 4)
 assert(Transfers.query(player, 501, 1).items == 0)
 
+freighter.platform.index, freighter.platform.surface = 23, freighter
+player.platforms = { [17] = { valid = true, index = 17, name = "A waiting platform" }, [23] = freighter.platform }
+prototypes = { item = { ["iron-plate"] = { weight = 1000 }, ["copper-plate"] = { weight = 500 },
+  carbon = { weight = 100 } } }
+local sampler = require("scripts.sampler")
+local original_rates = sampler.rates
+sampler.rates = function(index, period)
+  assert(index == freighter.index and period == 10)
+  return { nodes = { ["item/carbon"] = { prod = 1.5 }, ["fluid/water"] = { prod = 20 } } }, 6
+end
+storage.bins, game = {}, { forces = { player = player } }
+local view = Transfers.platform_view(player, 601, 10, { platform = 23 })
+assert(view.platforms[1].name == "A waiting platform" and view.platform.name == "Freighter")
+assert(view.loaded.pods == 1 and view.loaded.weight == 24500 and not view.loaded.unknown_weight)
+assert(view.unloaded.pods == 2 and view.unloaded.weight == 8000 and view.unloaded.unknown_weight)
+assert(view.loading[1].endpoint.id == source and view.loading[1].items[1].name == "iron-plate")
+assert(view.loading[1].items[1].count == 20 and view.loading[1].items[2].count == 9)
+assert(view.materials.carbon and not view.materials.water and view.made.items[1].count == 9)
+assert(view.made.weight == 900 and view.made.seconds == 6)
+assert(view.arrival_count == 3 and view.arrivals[1].tick == 440 and view.arrivals[1].unknown_weight)
+assert(view.arrivals[3].endpoint.id == source and view.arrivals[3].weight == 24500)
+
+local no_load = Transfers.platform_view(player, 601, 10, { platform = 23, from = destination, view = "flow" })
+assert(no_load.loaded.pods == 0 and no_load.unloaded.pods == 2 and #no_load.buckets == 0)
+assert(no_load.sources[source] and no_load.destinations[source] and no_load.materials["copper-plate"])
+local no_unload = Transfers.platform_view(player, 601, 10, { platform = 23, to = destination, view = "flow" })
+assert(no_unload.loaded.pods == 1 and no_unload.unloaded.pods == 0)
+
+local iron = Transfers.platform_view(player, 601, 10, { platform = 23, material = "iron-plate", view = "history" })
+assert(iron.loaded.count == 20 and iron.unloaded.count == 8 and iron.unloaded.weight == 8000)
+assert(iron.bucket_ticks == 60 and iron.arrival_count == 2 and #iron.loading == 0)
+assert(iron.buckets[4].start_tick == 180 and iron.buckets[4].end_tick == 240)
+assert(iron.buckets[4].loaded.count == 20 and iron.buckets[4].loaded.pods == 1)
+assert(iron.buckets[4].loaded.items[2].name == "copper-plate" and iron.buckets[4].loaded.items[2].count == 9)
+assert(iron.arrivals[2].items[2].name == "copper-plate" and iron.arrivals[2].weight == 24500)
+local selected = Transfers.platform_view(player, 611, 10, { platform = 23, bucket = 180, view = "history" })
+assert(selected.bucket == 180 and selected.arrival_count == 1 and selected.arrivals[1].id == iron.arrivals[2].id)
+local idle = Transfers.platform_view(player, 611, 10, { view = "flow" })
+assert(idle.platform.id == 17 and idle.loaded.pods == 0 and idle.made.seconds == 0)
+assert(not Transfers.platform_view(other, 611, 10).platform)
+game, storage.bins, sampler.rates = nil, nil, original_rates
+
 freighter.platform.name = "Renamed Freighter"
 assert(Transfers.describe(total.rows[1].to) == "Renamed Freighter")
+assert(Transfers.platform_view(player, 1281, 60, { platform = 23 }).platform.name == "Renamed Freighter")
+freighter.platform.valid = false
 freighter.platform = nil
 Transfers.on_surface_deleted { surface_index = freighter.index }
 freighter.valid = false
@@ -137,7 +181,13 @@ for i = 1, 32769 do
 end
 total = Transfers.query(player, 34269, 600)
 assert(total.truncated and total.arrivals == 32768 and total.items == 32768)
+replacement.platform.index, replacement.platform.surface = 24, replacement
+player.platforms[24] = replacement.platform
+local wrapped = Transfers.platform_view(player, 34269, 600, { platform = 24, view = "history", page = 999 })
+assert(wrapped.truncated and wrapped.unloaded.pods == 32768 and wrapped.unloaded.weight == 32768000)
+assert(wrapped.arrival_count == 32768 and wrapped.page == 328 and wrapped.pages == 328)
+assert(#wrapped.arrivals == 68 and wrapped.arrivals[#wrapped.arrivals].tick == 1502)
 Transfers.on_housekeeping(34269 + 10 * 3600 * 60 + 1)
 assert(storage.transfers.count == 0 and next(storage.transfers.dropped) == nil)
 
-print("TRANSFERS OK: verified arrivals, spoilage, duplicate and loss guards, filters, deleted and reused surfaces, retention")
+print("TRANSFERS OK: verified pod arrivals, loss guards, filters, retention, platform routes, weights, buckets and manifests")

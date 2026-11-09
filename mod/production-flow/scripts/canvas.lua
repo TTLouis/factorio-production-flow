@@ -116,9 +116,9 @@ function C.begin(player, W, H)
       dash_length = dashed and 5 * PX or 0, dash_offset = dashed and (offset or 0) * PX or 0 })
   end
 
-  function P.text(x, y, caption, color, alignment)
+  function P.text(x, y, caption, color, alignment, font)
     return keep(rendering.draw_text { surface = s, players = players, color = color,
-      text = caption, target = wp(x, y), font = "default-small",
+      text = caption, target = wp(x, y), font = font or "default-small",
       alignment = alignment, vertical_alignment = "middle" })
   end
 

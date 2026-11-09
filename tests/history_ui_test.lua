@@ -30,6 +30,11 @@ History.build = function(surface, period, key)
   request = { surface, period, key }
   local fluid = key:sub(1, 6) == "fluid/"
   local uses = { ["item/steel-plate"] = 6, other = 2 }
+  if data_state == "flat" then
+    return { start_tick = 0, end_tick = 6000, seconds = 15, bucket_seconds = 15,
+      points = { { start_tick = 3000, end_tick = 3900, seconds = 15, made = 40, used = 40, net = 0, uses = {} } },
+      usage_keys = {}, stock = {}, stock_supported = not fluid }
+  end
   if data_state then
     return { start_tick = 0, end_tick = 6000, seconds = data_state == "idle" and 100 or 0,
       bucket_seconds = 15, points = {}, usage_keys = {}, stock = {}, stock_supported = not fluid }
@@ -61,7 +66,8 @@ local items = named(table_root, "ssk_bal_items")
 local inspector_tabs = named(root, "ssk_balance_inspector_tabs")
 assert(inspector_tabs.type == "tabbed-pane")
 local flow_slot = named(inspector_tabs.ssk_balance_flow_panel, "ssk_material_slot")
-assert(flow_slot.locked and flow_slot.elem_value.name == "iron-plate")
+assert(flow_slot.type == "sprite-button" and flow_slot.tags.ssk_picker == "open"
+  and flow_slot.tags.current == "item/iron-plate" and flow_slot.sprite == flow_slot.tags.current)
 local function select_inspector(index)
   inspector_tabs.selected_tab_index = index
   assert(UI.on_tab_changed(event(inspector_tabs)))
@@ -71,7 +77,10 @@ assert(us.bal_mode == "history" and request[1] == us.sidx and request[2] == 600 
 assert(named(root, "ssk_bal_root") == table_root and named(root, "ssk_bal_items") == items)
 local controls = named(root, "ssk_history_controls")
 local history_slot = named(controls, "ssk_material_slot")
-assert(history_slot.locked and history_slot.elem_value.name == flow_slot.elem_value.name)
+assert(history_slot.type == flow_slot.type and history_slot.sprite == flow_slot.sprite
+  and history_slot.tags.target == flow_slot.tags.target and history_slot.tags.current == flow_slot.tags.current
+  and history_slot.style.width == flow_slot.style.width and history_slot.style.height == flow_slot.style.height,
+  "Flow and History must use the same material heading")
 assert(not find(controls, function(e) return e.type == "radiobutton" end), "all three charts are always shown")
 local camera, stock_camera = named(root, "ssk_history_camera"), named(root, "ssk_history_stock_camera")
 local net_camera = named(root, "ssk_history_net_camera")
@@ -153,6 +162,17 @@ end))
 assert(UI.on_click(event(material_cell)))
 assert(fx.focus == material_cell.tags.key and request[3] == fx.focus and material_cell.valid)
 assert(named(root, "ssk_history_controls") == controls and named(root, "ssk_bal_items") == items)
+
+data_state = "flat"
+UI.refresh(player, true)
+local y_bounds = {}
+for _, o in ipairs(objects()) do
+  if o.k == "text" and o.a.font == "heading-2" and o.a.target[2] < camera.position[2] + camera.style.height / 64 then
+    y_bounds[#y_bounds + 1] = tonumber(o.a.text)
+  end
+end
+assert(#y_bounds == 2 and y_bounds[1] > 0 and y_bounds[1] < 40 and y_bounds[2] > 40,
+  "flat nonzero rates need a fitted Y axis and prominent labels on both bounds")
 
 data_state = "warmup"
 UI.refresh(player, true)

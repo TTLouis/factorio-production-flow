@@ -79,8 +79,27 @@ for _, tab in ipairs({ "balance", "focus" }) do
   assert(not fx.settings_open and not chart.ssk_settings, "the panel close button did not close chart settings")
   if tab == "balance" then
     local slot = assert(find(main, function(e) return e.name == "ssk_material_slot" end))
-    assert(slot.locked and slot.elem_value.name == "iron-plate", "Balance heading must display a read-only item")
-    assert(not find(main, function(e) return e.tags.ssk_picker == "open" end), "Balance must use the list and graph nodes")
+    local tabs = assert(find(main, function(e) return e.name == "ssk_balance_inspector_tabs" end))
+    assert(slot.sprite == "item/iron-plate" and slot.tags.ssk_picker == "open")
+    for index, choice in ipairs({ "fluid/water", "item/wood" }) do
+      tabs.selected_tab_index = index
+      assert(UI.on_tab_changed { element = tabs, player_index = 1 })
+      local panel = index == 1 and tabs.ssk_balance_flow_panel or tabs.ssk_history_panel
+      slot = assert(find(panel, function(e) return e.name == "ssk_material_slot" end))
+      local previous = fx.focus
+      assert(slot.sprite == previous and UI.on_click { element = slot, player_index = 1 })
+      local dialog = assert(player.gui.screen.ssk_material_picker)
+      dialog.ssk_title.ssk_query.text = choice:match("/([^/]+)$")
+      UI.on_text_changed { element = dialog.ssk_title.ssk_query, player_index = 1 }
+      local chosen = assert(find(dialog, function(e) return e.tags.ssk_picker == "pick" and e.tags.key == choice end))
+      assert(UI.on_click { element = chosen, player_index = 1 })
+      assert(fx.focus == choice and fx.focus_hist[#fx.focus_hist] == previous and not dialog.valid
+        and main.valid and list.valid, "the shared Balance picker must keep the current pane, list and material trail")
+    end
+    tabs.selected_tab_index = 1
+    assert(UI.on_tab_changed { element = tabs, player_index = 1 })
+    assert(find(tabs.ssk_balance_flow_panel, function(e) return e.name == "ssk_material_slot" end).sprite == "item/wood",
+      "Flow must update its heading from the History picker")
     assert(not action(main, "f_history") and not action(main, "f_back") and not action(main, "f_clear_history"),
       "Balance must keep the Focus visit controls out of its toolbar")
   else

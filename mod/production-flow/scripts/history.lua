@@ -197,22 +197,37 @@ local function same_stock_scope(left, right)
   return true
 end
 
-local function add_stock_estimates(result, sources, left, right, old, new)
-  local from, to = left.tick, right.tick
+local function stock_net(source, scope, key)
+  if not source.known then return nil end
+  if not scope then return source.made - source.used end
+  local net = 0
+  for index in pairs(scope) do
+    local materials = source.bin.stat[index]
+    if not materials then return nil end
+    local measured = materials[key]
+    if measured then net = net + measured.i - measured.o end
+  end
+  return net
+end
+
+local function add_stock_estimates(result, sources, from, to, old, new, scope, key)
+  local live = new == nil
   local tick, net, point_index = from, 0, 1
   local estimates = {}
   for _, source in ipairs(sources) do
     if source.last > tick then
-      if not source.known or source.first > tick then return end
+      if source.first > tick then break end
+      local change = stock_net(source, scope, key)
+      if change == nil then break end
       local stop = math.min(source.last, to)
-      local net_per_tick = (source.made - source.used) / (source.last - source.first)
+      local net_per_tick = change / (source.last - source.first)
       local start = result.start_tick
       if start > from and start > tick and start <= stop and start < to then
         estimates[#estimates + 1] = { tick = start, net = net + (start - tick) * net_per_tick }
       end
       while result.points[point_index] and result.points[point_index].end_tick <= stop do
         local at = result.points[point_index].end_tick
-        if at > from and at < to then
+        if at > from and at < to and (not estimates[#estimates] or at > estimates[#estimates].tick) then
           estimates[#estimates + 1] = { tick = at, net = net + (at - tick) * net_per_tick }
         end
         point_index = point_index + 1
@@ -222,11 +237,19 @@ local function add_stock_estimates(result, sources, left, right, old, new)
       if tick == to then break end
     end
   end
-  if tick ~= to then return end
-  local residual = new - old - net
+  if live then
+    -- Finish at the latest covered sample, even inside the current plot bucket.
+    local last = estimates[#estimates]
+    if tick >= result.start_tick and tick > from and (not last or last.tick < tick) then
+      estimates[#estimates + 1] = { tick = tick, net = net }
+    end
+  elseif tick ~= to then
+    return nil
+  end
+  local residual = live and 0 or new - old - net
   for _, point in ipairs(estimates) do
     local fraction = (point.tick - from) / (to - from)
-    result.stock[#result.stock + 1] = { tick = point.tick, measured = false, joined = true,
+    result.stock[#result.stock + 1] = { tick = point.tick, measured = false, live = live or nil, joined = true,
       count = math.max(0, old + point.net + residual * fraction) }
   end
   return true
@@ -240,7 +263,7 @@ local function stock_points(result, sources, scans, sidx, key)
     if scan.tick >= result.start_tick then
       local joined
       if count ~= nil and old ~= nil and scan.tick > previous.tick and (sidx or same_stock_scope(previous, scan)) then
-        joined = add_stock_estimates(result, sources, previous, scan, old, count)
+        joined = add_stock_estimates(result, sources, previous.tick, scan.tick, old, count)
       end
       if count ~= nil then
         result.stock[#result.stock + 1] = { tick = scan.tick, count = count, measured = true, joined = joined }
@@ -248,11 +271,15 @@ local function stock_points(result, sources, scans, sidx, key)
     end
     previous, old = scan, count
   end
+  if previous and old ~= nil and previous.tick < result.end_tick then
+    local scope = not sidx and previous.s or nil
+    add_stock_estimates(result, sources, previous.tick, result.end_tick, old, nil, scope, key)
+  end
 end
 
 ---Return bounded rate buckets and chest stock for one material. Times use game
 ---ticks; made, used, net and usage bands are rates per second. A missing rate is
----a gap. A stock entry has its exact scan tick or an interior estimate tick.
+---a gap. Stock comes from scans or rate-based estimates, including after the latest scan.
 function H.build(sidx, period, key)
   local requested = period and period > 0 and period or settings.global["ssk-window-seconds"].value
   local now = game.tick
@@ -262,9 +289,9 @@ function H.build(sidx, period, key)
   local scans = result.stock_supported and storage.stock_basis == "physical-chests-v1" and storage.stock or {}
   local start_tick = result.start_tick
   -- A scan just before the visible range can still anchor estimates in it.
-  for i = #scans - 1, 1, -1 do
+  for i = #scans, 1, -1 do
     if scans[i].tick < result.start_tick then
-      if scans[i + 1].tick <= now and scans[i + 1].tick > result.start_tick then start_tick = scans[i].tick end
+      start_tick = scans[i].tick
       break
     end
   end

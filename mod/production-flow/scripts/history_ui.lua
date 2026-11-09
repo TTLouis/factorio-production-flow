@@ -209,11 +209,12 @@ local function axes(painter, h, width, height, top, minimum, maximum, step)
     painter.line(pos, plot_top, pos, bottom, GRID, 1)
     painter.text(pos, bottom + 11, ago((h.end_tick - tick) / 60), TICK_TEXT, "center")
   end
-  for i = math.ceil(minimum / step), math.floor(maximum / step + 1e-8) do
+  local first, last = math.floor(minimum / step + 0.5), math.floor(maximum / step + 0.5)
+  for i = first, last do
     local value = i * step
     local pos = y(value)
     painter.line(left, pos, right, pos, value == 0 and BASELINE or GRID, 1)
-    painter.text(left - 5, pos, number(value), TICK_TEXT, "right")
+    painter.text(left - 5, pos, number(value), TICK_TEXT, "right", (i == first or i == last) and "heading-2" or nil)
   end
   return x, y, left, right, plot_top
 end
@@ -311,18 +312,43 @@ local function trace(painter, path, y, field, line_color, dashed, zero)
   if previous_x > start_x then line(start_x, previous_y, previous_x, previous_y) end
 end
 
-local function draw_rates(painter, h, width, height, mode, top, paths)
+local function rate_bounds(h, mode, intervals)
   local net = mode == "net"
-  local highest = 0
+  local lowest, highest = math.huge, 0
   for _, p in ipairs(h.points) do
     if p.made ~= nil and not p.partial then
-      highest = net and math.max(highest, math.abs(p.net)) or math.max(highest, p.made, p.used)
+      if net then
+        highest = math.max(highest, math.abs(p.net))
+      else
+        lowest, highest = math.min(lowest, p.made, p.used), math.max(highest, p.made, p.used)
+        if mode == "breakdown" then
+          local boundary = 0
+          for _, key in ipairs(h.usage_keys) do
+            boundary = boundary + (p.uses[key] or 0)
+            if boundary > 0 then lowest = math.min(lowest, boundary) end
+          end
+        end
+      end
     end
   end
+  if net then
+    local step = nice_step(highest, math.floor(intervals / 2))
+    local bound = math.max(step, math.ceil(highest / step) * step)
+    return -bound, bound, step
+  end
+  if lowest == math.huge then lowest = 0 end
+  -- Give flat and tightly clustered rates a visible range as well.
+  local margin = math.max((highest - lowest) * 0.05, highest * 0.02)
+  local low, high = math.max(0, lowest - margin), highest + margin
+  local step = nice_step(high - low, intervals)
+  low = math.floor(low / step) * step
+  return low, math.max(low + step, math.ceil(high / step) * step), step
+end
+
+local function draw_rates(painter, h, width, height, mode, top, paths)
+  local net = mode == "net"
   local intervals = height < 100 and 2 or height < 140 and 3 or 4
-  local step = nice_step(highest, net and math.floor(intervals / 2) or intervals)
-  local max_value = math.max(step, math.ceil(highest / step) * step)
-  local min_value = net and -max_value or 0
+  local min_value, max_value, step = rate_bounds(h, mode, intervals)
   local x, y = axes(painter, h, width, height, top, min_value, max_value, step)
 
   paths = paths or rate_paths(h.points, x)
@@ -335,9 +361,9 @@ local function draw_rates(painter, h, width, height, mode, top, paths)
           local lower = base[j] or 0
           local amount = blend(sample.a.uses[key] or 0, sample.b.uses[key] or 0, sample.mix)
           local upper = lower + amount
-          vertices[#vertices + 1] = { sample.x, y(upper) }
-          vertices[#vertices + 1] = { sample.x, y(lower) }
-          visible = visible or amount > 0
+          vertices[#vertices + 1] = { sample.x, y(math.max(min_value, upper)) }
+          vertices[#vertices + 1] = { sample.x, y(math.max(min_value, lower)) }
+          visible = visible or (amount > 0 and upper > min_value)
           base[j] = upper
         end
         if visible then painter.polygon(vertices, color(USES[key == History.OTHER and 4 or i])) end
@@ -382,7 +408,7 @@ local function draw_stock(painter, h, width, height, top)
     local y1 = math.min(bottom - 1, y(sample.count))
     painter.rect(x1, y1, x2 - x1, bottom - y1, color(sample.measured and MEASURED or ESTIMATED))
     if x2 > x1 then
-      local source = sample.measured and "Measured stock" or "Estimated stock"
+      local source = sample.measured and "Measured stock" or sample.live and "Estimated stock since last scan" or "Estimated stock"
       regions[#regions + 1] = { left = x1, right = x2,
         tooltip = string.format("%s\n%s  %.0f items", elapsed(h, sample.tick), source, sample.count) }
     end
@@ -471,7 +497,7 @@ function H.fill(player, panel, us, key, width, panel_height)
   legend.caption = swatch(MADE) .. " Made   " .. swatch(USED) .. " Used   " .. units
   local rate_state = body.ssk_history_rate_state
   rate_state.visible = not active
-  rate_state.caption = not key and "Select a material from the Balance table."
+  rate_state.caption = not key and "Select a material above or from the Balance list."
     or not rates and "Collecting production history. Rates appear once sampling has recorded this surface."
     or "No recorded production or consumption for this material in the selected period."
   local coverage = body.ssk_history_coverage
@@ -512,8 +538,15 @@ function H.fill(player, panel, us, key, width, panel_height)
   local stock_note = body.ssk_history_stock_note
   stock_note.visible = stock == true
   if stock then
-    stock_note.caption = #h.stock == 1 and "One completed stock scan in this period. Estimates need two."
-      or "Dark blue bars estimate stock between completed scans."
+    local last = h.stock[#h.stock]
+    if last.live then
+      stock_note.caption = string.format("Latest estimate: %s items (%s). Updated from recorded rates.",
+        number(last.count), elapsed(h, last.tick))
+    elseif #h.stock == 1 then
+      stock_note.caption = "Stock estimates appear as rates are recorded after a scan."
+    else
+      stock_note.caption = "Dark blue bars estimate stock from recorded rates."
+    end
   end
 
   local net = body.ssk_history_net_section

@@ -198,7 +198,10 @@ elseif mode=="history-view" then
     {name="history-selected-fluid",surface="vulcanus",tab="balance",focus="fluid/water"},
   }
 elseif mode=="transfer-view" then
-  cases={{name="transfers-delivered-cargo",surface="nauvis",tab="transfers"}}
+  cases={
+    {name="transfers-flow",surface="nauvis",tab="transfers"},
+    {name="transfers-history",surface="nauvis",tab="transfers",history=true},
+  }
 end
 local after_capture, diagnostic_machine
 local stock_fixture, transfer_fixture
@@ -243,6 +246,26 @@ local function material_row(element,key)
   end
 end
 
+local function picker_item(element,key)
+  if element.tags.ssk_picker=="pick" and element.tags.key==key then return element end
+  for _,child in ipairs(element.children) do
+    local item=picker_item(child,key)
+    if item then return item end
+  end
+end
+
+local function pick_from_heading(UI,player,slot,key)
+  assert(slot.type=="sprite-button" and slot.tags.ssk_picker=="open" and slot.tags.target=="balance",
+    "Balance needs a material picker in the heading")
+  assert(UI.on_click{player_index=player.index,element=slot})
+  local dialog=assert(player.gui.screen.ssk_material_picker,"Balance material picker did not open")
+  local query=dialog.ssk_title.ssk_query
+  query.text=key:match("/(.+)$"):gsub("%-"," ")
+  assert(UI.on_text_changed{player_index=player.index,element=query})
+  assert(UI.on_click{player_index=player.index,element=assert(picker_item(dialog,key))})
+  assert(not player.gui.screen.ssk_material_picker,"Material picker stayed open after selecting an item")
+end
+
 local function exercise_history(UI, player, root, us, case)
   local split=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split
   local list=split.ssk_balance_table.ssk_bal_root
@@ -265,14 +288,25 @@ local function exercise_history(UI, player, root, us, case)
     click(find_action(flow,"node","item/copper-cable#input"))
     assert(fx.focus=="item/copper-cable" and fx.focus_hist[#fx.focus_hist]==case.focus,
       "Balance Flow node clicks must still select and record visits")
-    click(material_row(items,case.focus))
+    pick_from_heading(UI,player,assert(find_named(flow,"ssk_material_slot")),case.focus)
+    assert(fx.focus==case.focus and fx.focus_hist[#fx.focus_hist]=="item/copper-cable",
+      "The Flow picker must record the previous material")
   end
   local flow_slot=assert(find_named(flow,"ssk_material_slot"))
   select_tab(2,"history")
   local panel=tabs.ssk_history_panel
   local history_slot=assert(find_named(panel,"ssk_material_slot"))
-  assert(flow_slot.locked and history_slot.locked and flow_slot.elem_value.name==history_slot.elem_value.name,
-    "Flow and History must show the same read-only material")
+  assert(flow_slot.tags.current==case.focus and history_slot.tags.current==case.focus
+    and flow_slot.style.minimal_width==history_slot.style.minimal_width
+    and flow_slot.style.minimal_height==history_slot.style.minimal_height,
+    "Flow and History must show the same material in matching picker slots")
+  if case.name=="electronic-circuit-history" then
+    local fx=SK.balance_state(us)
+    pick_from_heading(UI,player,history_slot,"item/copper-plate")
+    assert(fx.focus=="item/copper-plate" and fx.focus_hist[#fx.focus_hist]==case.focus
+      and tabs.selected_tab_index==2 and items.valid,"The History picker lost the current tab, list, or visit")
+    pick_from_heading(UI,player,assert(find_named(panel,"ssk_material_slot")),case.focus)
+  end
   local rate_plot=assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera").parent
   local net_plot=assert(find_named(panel,"ssk_history_net_camera"),"History needs a separate net rate plot").parent
   local order={}
@@ -318,7 +352,7 @@ local function exercise_history(UI, player, root, us, case)
     if case.focus=="item/iron-plate" then
       assert(measured>=2 and (case.long_period or estimated>0),"Iron plate must render measured and estimated stock")
       if case.name=="history-rates-and-stock" then
-        assert(history.stock[#history.stock].joined,"The Iron Plate capture needs rates through the latest completed scan")
+        assert(history.stock[#history.stock].live,"The Iron Plate capture needs a live estimate after the last scan")
       end
     end
     assert(#history.usage_keys>0,"Active items must have usage history")
@@ -329,6 +363,15 @@ local function exercise_history(UI, player, root, us, case)
     assert(not history.stock_supported and #history.stock==0,"Fluid must not show measured chest stock")
   end
   after_capture=function()
+    if case.name=="history-rates-and-stock" then
+      local updated=History.build(us.sidx,us.period,case.focus)
+      local latest,previous=updated.stock[#updated.stock],history.stock[#history.stock]
+      assert(latest.live and latest.tick>previous.tick,"Chest Stock estimate did not advance between scans")
+      UI.refresh(player,true)
+      local note=assert(find_named(panel,"ssk_history_stock_note"))
+      assert(note.caption:find("Latest estimate",1,true),"Live stock estimate was not shown after refresh")
+      log("BALANCE LIVE STOCK PASS latest estimate advanced without waiting for another scan")
+    end
     if case.long_period then
       choose_period(2)
       items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
@@ -359,18 +402,71 @@ local function start_transfer_fixture()
   return fixture
 end
 
-local function exercise_transfers(UI, player, root, us)
-  local hub=transfer_fixture.hub
+local function seed_transfer_preview(fixture, force, platform_end, nauvis)
+  -- Keep the real pod records and add deterministic manifests to exercise the
+  -- native chart and expansion with two surfaces in each direction.
+  local state = storage.transfers
+  local capacity = 32768
+  local function endpoint(name)
+    local surface = assert(game.surfaces[name])
+    local existing = state.endpoints[surface.index]
+    if existing and existing.surface == surface then return existing end
+    state.serial = state.serial + 1
+    local ep = {id=state.serial, surface=surface, name=name, icon="space-location/"..name}
+    state.endpoints[surface.index] = ep
+    return ep
+  end
+  local vulcanus, fulgora, gleba = endpoint("vulcanus"), endpoint("fulgora"), endpoint("gleba")
+  local records = {}
+  for i=0,state.count-1 do
+    records[#records+1] = state.history[(state.first-1+i)%capacity+1]
+  end
+  local function add(from,to,tick,items)
+    records[#records+1] = {force=force,from=from,to=to,tick=tick,items=items}
+  end
+  local load = {
+    {nauvis,{["electronic-circuit"]=85,["iron-plate"]=55,["copper-plate"]=40,["plastic-bar"]=35,battery=20,["steel-plate"]=11}},
+    {vulcanus,{["tungsten-plate"]=25,["steel-plate"]=39,calcite=28,["copper-plate"]=16,["iron-plate"]=11,stone=7}},
+  }
+  local unload = {
+    {fulgora,{["electronic-circuit"]=60,["iron-plate"]=32,["plastic-bar"]=26,battery=18,["steel-plate"]=12,["advanced-circuit"]=6}},
+    {gleba,{["copper-plate"]=43,["electronic-circuit"]=27,["steel-plate"]=18,["rocket-fuel"]=8,carbon=12,calcite=6}},
+  }
+  local now = game.tick
+  for i=1,17 do
+    local n = i % 3 == 0 and 2 or 1
+    if i%5~=0 then add(load[n][1],platform_end,now-32000+i*1630,load[n][2]) end
+    if i%4~=0 then add(platform_end,unload[n][1],now-30000+i*1460,unload[n][2]) end
+    if i%3==0 then add(platform_end,unload[1][1],now-29900+i*1460,unload[1][2]) end
+  end
+  fixture.preview_tick = now-290
+  for _,route in ipairs(load) do add(route[1],platform_end,fixture.preview_tick,route[2]) end
+  for _,route in ipairs(unload) do add(platform_end,route[1],fixture.preview_tick,route[2]) end
+  add(platform_end,fulgora,fixture.preview_tick,unload[1][2])
+  assert(#records<=capacity,"Preview fixture exceeded transfer ledger capacity")
+  table.sort(records,function(a,b) return a.tick<b.tick end)
+  state.history, state.first, state.count = records, 1, #records
+  fixture.hub.force.get_item_production_statistics(fixture.hub.surface).on_flow("carbon",520)
+  fixture.hub.force.get_item_production_statistics(fixture.hub.surface).on_flow("calcite",320)
+end
+
+local function prepare_transfer_preview(fixture)
+  local hub=fixture.hub
   local from,to
   local amounts={}
-  for _,entry in ipairs(Transfers.query(player.force,game.tick,us.period).rows) do
+  for _,entry in ipairs(Transfers.query(hub.force,game.tick,600).rows) do
     if entry.from.surface==hub.surface and entry.to.surface==game.surfaces.nauvis then
-      from,to=entry.from.id,entry.to.id
+      from,to=entry.from,entry.to
       amounts[entry.material]=entry.count
     end
   end
   assert(from and to and amounts["copper-plate"]==50 and amounts["steel-plate"]==41,
     "Native cargo arrivals did not produce exact transfer totals")
+  seed_transfer_preview(fixture,hub.force,from,to)
+end
+
+local function exercise_transfers(UI, player, root, us, case)
+  local hub=transfer_fixture.hub
   local panel=root.ssk_inner.ssk_tabs.content_transfers
   assert(not root.ssk_window_bar.ssk_surface_picker.visible,"Transfers needs its own origin and destination scope")
   local function select(name,key)
@@ -386,18 +482,72 @@ local function exercise_transfers(UI, player, root, us)
     picker.selected_index=index
     assert(UI.on_selection{player_index=player.index,element=picker},"Transfer selection was not handled")
   end
-  select("ssk_transfer_from",from)
-  select("ssk_transfer_to",to)
-  select("ssk_transfer_material","copper-plate")
-  assert(us.transfers.from==from and us.transfers.to==to and us.transfers.material=="copper-plate",
-    "Transfer filters lost their selection")
-  local query=Transfers.query(player.force,game.tick,us.period,us.transfers)
-  assert(#query.rows==1 and query.items==50 and query.arrivals==1,"Transfer filters selected the wrong cargo")
-  local filter=assert(find_named(panel,"ssk_transfer_from"))
-  UI.refresh(player,true)
-  assert(filter.valid,"Live Transfers refresh replaced the filter")
-  select("ssk_transfer_material")
-  log("TRANSFERS NATIVE PASS two delivered pods, exact counts and all filters")
+  local pane=assert(find_named(panel,"ssk_transfer_tabs"),"Missing native Transfers tabbed pane")
+  assert(pane.type=="tabbed-pane" and #pane.tabs==2,"Transfers must have native Flow and History tabs")
+  select("ssk_transfer_platforms",hub.surface.platform.index)
+  pane.selected_tab_index=case.history and 2 or 1
+  assert(UI.on_tab_changed{player_index=player.index,element=pane},"Transfers tab change was not handled")
+  assert(us.transfers.platform==hub.surface.platform.index and pane.selected_tab_index==(case.history and 2 or 1),
+    "Transfers lost the chosen platform or tab")
+  if case.history then
+    local result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
+    local index,bucket
+    for i,bin in ipairs(result.buckets) do
+      if transfer_fixture.preview_tick>=bin.start_tick and transfer_fixture.preview_tick<bin.end_tick then
+        index,bucket=i,bin
+        break
+      end
+    end
+    assert(bucket and bucket.loaded.pods>=2 and bucket.unloaded.pods>=3,"Preview burst must include both directions")
+    local load=assert(find_named(panel,"ssk_transfer_bucket_loaded_"..index),"Missing load hover target")
+    local unload=assert(find_named(panel,"ssk_transfer_bucket_unloaded_"..index),"Missing unload hover target")
+    assert(not load.ignored_by_interaction and not unload.ignored_by_interaction
+      and serpent.line(load.tooltip):find("tungsten-plate",1,true)
+      and serpent.line(unload.tooltip):find("advanced-circuit",1,true),"History hover lost direction-specific manifests")
+    assert(UI.on_click{player_index=player.index,element=load},"History bucket selection was not handled")
+    assert(us.transfers.bucket==bucket.start_tick,"Selected History bucket did not persist")
+    result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
+    local manifest_row
+    for i,arrival in ipairs(result.arrivals) do
+      if arrival.tick==transfer_fixture.preview_tick and #arrival.items>=6 then manifest_row=i; break end
+    end
+    local expand=assert(find_named(panel,"ssk_transfer_delivery_"..assert(manifest_row)),"Missing delivery expansion")
+    assert(UI.on_click{player_index=player.index,element=expand},"Delivery expansion was not handled")
+    local manifest=assert(find_named(panel,"ssk_transfer_manifest"),"Expanded pod has no cargo manifest")
+    assert(#manifest.children==#result.arrivals[manifest_row].items,"Expanded pod hid some of its items")
+    for i,item in ipairs(result.arrivals[manifest_row].items) do
+      local tags=manifest.children[i].tags
+      assert(tags.transfer_item==item.name and tags.count==item.count,"Expanded pod changed its cargo")
+    end
+    log("TRANSFERS HISTORY NATIVE PASS direction-specific hover manifests, bucket filtering and pod expansion")
+  else
+    local result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
+    local function id_of(choices,surface)
+      for id,choice in pairs(choices) do if choice.surface==surface then return id end end
+    end
+    local from=assert(id_of(result.sources,game.surfaces.nauvis))
+    local to=assert(id_of(result.destinations,game.surfaces.fulgora))
+    select("ssk_transfer_from",from)
+    select("ssk_transfer_to",to)
+    assert(us.transfers.from==from and us.transfers.to==to,"Transfers lost directional filters")
+    result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
+    assert(#result.loading==1 and #result.unloading==1 and result.made.weight>0,
+      "Transfers should filter both directions independently and show production aboard")
+    select("ssk_transfer_from")
+    select("ssk_transfer_to")
+    select("ssk_transfer_material","copper-plate")
+    assert(us.transfers.material=="copper-plate","Transfers lost the chosen material")
+    select("ssk_transfer_material")
+    local card=assert(find_named(panel,"ssk_transfer_surface_card"),"Flow is missing ranked surface cards")
+    assert(card.tags.transfer_rank_count==5 and card.rank_5 and not card.rank_6 and card.tooltip,
+      "Flow must show the first five items with a full manifest on hover")
+    assert(find_named(panel,"ssk_transfer_platform_node") and find_named(panel,"ssk_transfer_camera"),
+      "Flow needs its platform node and native ribbon rendering")
+    local filter=assert(find_named(panel,"ssk_transfer_from"))
+    UI.refresh(player,true)
+    assert(filter.valid and pane.valid,"Live Transfers refresh rebuilt the controls")
+    log("TRANSFERS FLOW NATIVE PASS exact real pod counts, native tabs, platform, production and filters")
+  end
 end
 
 local function verify_usage(element, root, result)
@@ -553,7 +703,8 @@ function T.tick(UI, Sampler)
   end
   if mode=="transfer-view" then
     if elapsed==520 then send_fixture_cargo(transfer_fixture,"steel-plate",41,40) end
-    if elapsed<1800 then return end
+    if elapsed==1800 then prepare_transfer_preview(transfer_fixture) end
+    if elapsed<2100 then return end
     game.speed=1
   end
   if not Sampler.stock_known(game.surfaces.nauvis.index) then return end
@@ -702,7 +853,7 @@ function T.tick(UI, Sampler)
   UI.open(player)
   if c.tab~="transfers" then assert(us.sidx==game.surfaces[c.surface].index,"Wrong rendered surface") end
   if mode=="transfer-view" then
-    exercise_transfers(UI,player,player.gui.screen.ssk_main,us)
+    exercise_transfers(UI,player,player.gui.screen.ssk_main,us,c)
     capture=c.name
     return
   end
@@ -838,9 +989,8 @@ function T.tick(UI, Sampler)
     end
     if c.tab=="balance" then
       local slot=assert(find_named(bar,"ssk_material_slot"))
-      assert(slot.locked and not picker_action(bar,"open"),"Balance toolbar must be read-only")
-      assert(UI.on_click{player_index=player.index,element=assert(material_row(list_before,c.pick))})
-      assert(fx.focus==c.pick and list_before.valid,"Selecting from the Balance list must keep its scroller")
+      pick_from_heading(UI,player,slot,c.pick)
+      assert(fx.focus==c.pick and list_before.valid,"Selecting from the Balance picker must keep its scroller")
       if c.bottom then
         local items=list_before.ssk_bal_list.ssk_bal_items
         local sections=items.children

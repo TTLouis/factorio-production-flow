@@ -1,5 +1,6 @@
 -- Cargo pod arrivals. A platform's movement does not itself move cargo between
 -- surfaces. The rocket up and the pod down are independent deliveries.
+local Sampler = require("scripts.sampler")
 local Surfaces = require("scripts.surfaces")
 
 local T = {}
@@ -7,6 +8,8 @@ local HISTORY_TICKS = 10 * 3600 * 60
 local HISTORY_LIMIT = 32768
 local PENDING_TICKS = 10 * 60 * 60
 local PENDING_LIMIT = 4096
+local ARRIVALS_PER_PAGE = 100
+local BUCKET_SECONDS = { 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600 }
 
 function T.available()
   return script and script.active_mods and script.active_mods["space-age"] ~= nil
@@ -250,6 +253,232 @@ function T.query(force, tick, seconds, filters)
     end
   end
   table.sort(result.rows, row_order)
+  return result
+end
+
+local function platform_choices(force, selected_id)
+  local choices, selected = {}, nil
+  for _, platform in pairs(force.platforms or {}) do
+    if platform.valid then
+      local choice = { id = platform.index, name = platform.name,
+        icon = "item/space-platform-hub", surface = platform.surface }
+      choices[#choices + 1] = choice
+      if choice.id == selected_id then selected = choice end
+    end
+  end
+  table.sort(choices, function(a, b)
+    local left, right = a.name:lower(), b.name:lower()
+    if left ~= right then return left < right end
+    if a.name ~= b.name then return a.name < b.name end
+    return a.id < b.id
+  end)
+  return choices, selected or choices[1]
+end
+
+local function measurement()
+  return { pods = 0, count = 0, weight = 0, unknown_weight = false }
+end
+
+local function unit_weight(name, weights)
+  if weights[name] == nil then
+    local prototype = prototypes and prototypes.item and prototypes.item[name]
+    weights[name] = prototype and prototype.weight or false
+  end
+  return weights[name]
+end
+
+local function measure_item(total, name, count, weights)
+  local weight = unit_weight(name, weights)
+  if weight then
+    total.weight = total.weight + weight * count
+  else
+    total.unknown_weight = true
+  end
+end
+
+local function summarize_items(total, manifest, weights, material)
+  local items = {}
+  for name, count in pairs(manifest) do
+    items[#items + 1] = { name = name, count = count }
+    if not material or material == name then measure_item(total, name, count, weights) end
+  end
+  table.sort(items, function(a, b)
+    if a.count ~= b.count then return a.count > b.count end
+    return a.name < b.name
+  end)
+  total.items = items
+end
+
+local function sum_weights(total, detail)
+  total.weight = total.weight + detail.weight
+  total.unknown_weight = total.unknown_weight or detail.unknown_weight
+end
+
+local function made_aboard(force, surface, seconds, material, materials, weights)
+  local made, items = measurement(), {}
+  made.seconds = 0
+  -- The sampler records production for the player force only.
+  if surface and surface.valid and game and game.forces and game.forces["player"] == force and storage.bins then
+    local rates, duration = Sampler.rates(surface.index, seconds)
+    made.seconds = duration
+    for key, rate in pairs(rates.nodes) do
+      if key:sub(1, 5) == "item/" then
+        local name = key:sub(6)
+        local count = math.floor(rate.prod * duration + 0.5)
+        if count > 0 then
+          materials[name] = true
+          if not material or material == name then
+            items[name] = count
+            made.count = made.count + count
+          end
+        end
+      end
+    end
+  end
+  summarize_items(made, items, weights)
+  return made
+end
+
+local function make_buckets(result, requested, selected)
+  local step = BUCKET_SECONDS[#BUCKET_SECONDS]
+  for _, seconds in ipairs(BUCKET_SECONDS) do
+    if requested <= seconds * 15 * 60 then
+      step = seconds
+      break
+    end
+  end
+  step = step * 60
+  local first = math.floor(result.from_tick / step) * step
+  result.bucket_ticks = step
+  for start_tick = first, result.to_tick, step do
+    local bucket = { start_tick = start_tick, end_tick = start_tick + step,
+      loaded = measurement(), unloaded = measurement() }
+    bucket.loaded.manifest, bucket.unloaded.manifest = {}, {}
+    result.buckets[#result.buckets + 1] = bucket
+    if selected == start_tick then result.bucket = start_tick end
+  end
+  return first
+end
+
+local function route_for(routes, endpoint)
+  local route = routes[endpoint.id]
+  if not route then
+    route = measurement()
+    route.endpoint, route.manifest = endpoint, {}
+    routes[endpoint.id] = route
+  end
+  return route
+end
+
+local function finish_routes(target, routes, summary, weights)
+  for _, route in pairs(routes) do
+    summarize_items(route, route.manifest, weights)
+    route.manifest = nil
+    sum_weights(summary, route)
+    target[#target + 1] = route
+  end
+  table.sort(target, function(a, b)
+    if a.weight ~= b.weight then return a.weight > b.weight end
+    if a.pods ~= b.pods then return a.pods > b.pods end
+    return a.endpoint.id < b.endpoint.id
+  end)
+end
+
+local function arrival_detail(entry, weights)
+  local detail = { id = entry.id, tick = entry.record.tick, direction = entry.direction,
+    endpoint = entry.endpoint, weight = 0, unknown_weight = false }
+  summarize_items(detail, entry.record.items, weights)
+  return detail
+end
+
+-- View of a live platform. A load filter applies only to incoming legs, and an
+-- unload filter only to outgoing legs. History preserves full pod manifests.
+function T.platform_view(force, tick, seconds, filters)
+  filters = filters or {}
+  local platforms, platform = platform_choices(force, filters.platform)
+  local requested = math.min(seconds * 60, HISTORY_TICKS)
+  local result = { platforms = platforms, platform = platform, sources = {}, destinations = {}, materials = {},
+    from_tick = math.max(0, tick - requested), to_tick = tick, loading = {}, unloading = {}, buckets = {},
+    loaded = measurement(), unloaded = measurement(), arrivals = {}, arrival_count = 0, page = 1, pages = 1 }
+  local flow, history = filters.view ~= "history", filters.view ~= "flow"
+  local first_tick = history and make_buckets(result, requested, filters.bucket)
+  local surface, weights = platform and platform.surface, {}
+  local loading, unloading, arrivals = {}, {}, {}
+  local page = math.max(1, math.floor(filters.page or 1))
+  local ledger_state = storage.transfers
+  if ledger_state and surface and surface.valid then
+    local dropped = ledger_state.dropped[force.index]
+    result.truncated = dropped and dropped.force == force and dropped.tick >= result.from_tick
+    local first_arrival = (page - 1) * ARRIVALS_PER_PAGE
+    for i = ledger_state.count - 1, 0, -1 do
+      local slot = (ledger_state.first - 1 + i) % HISTORY_LIMIT + 1
+      local record = ledger_state.history[slot]
+      if record.tick < result.from_tick then break end
+      if record.force == force and record.tick <= tick then
+        local endpoint, direction, filter, routes
+        if record.to.surface == surface then
+          endpoint, direction, filter, routes = record.from, "loaded", filters.from, loading
+          result.sources[endpoint.id] = endpoint
+        elseif record.from.surface == surface then
+          endpoint, direction, filter, routes = record.to, "unloaded", filters.to, unloading
+          result.destinations[endpoint.id] = endpoint
+        end
+        if endpoint then
+          local material = filters.material
+          local matches = (not filter or filter == endpoint.id) and (not material or record.items[material])
+          local manifest, count = record.items, 0
+          local route = flow and matches and route_for(routes, endpoint)
+          local bucket = history and matches and result.buckets[math.floor((record.tick - first_tick) / result.bucket_ticks) + 1]
+          local bin = bucket and bucket[direction]
+          for name, amount in pairs(manifest) do
+            result.materials[name] = true
+            if not material or material == name then
+              count = count + amount
+              if route then route.manifest[name] = (route.manifest[name] or 0) + amount end
+            end
+            if bin then bin.manifest[name] = (bin.manifest[name] or 0) + amount end
+          end
+          if matches then
+            local total = result[direction]
+            total.pods, total.count = total.pods + 1, total.count + count
+            if route then route.pods, route.count = route.pods + 1, route.count + count end
+            if bin then
+              bin.pods, bin.count = bin.pods + 1, bin.count + count
+              if not result.bucket or result.bucket == bucket.start_tick then
+                local position = result.arrival_count
+                if position >= first_arrival and position < first_arrival + ARRIVALS_PER_PAGE then
+                  arrivals[#arrivals + 1] = { id = record.tick .. ":" .. slot,
+                    record = record, direction = direction, endpoint = endpoint }
+                end
+                result.arrival_count = position + 1
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  if flow then
+    finish_routes(result.loading, loading, result.loaded, weights)
+    finish_routes(result.unloading, unloading, result.unloaded, weights)
+    result.made = made_aboard(force, surface, seconds, filters.material, result.materials, weights)
+  end
+  if history then
+    for _, bucket in ipairs(result.buckets) do
+      for _, direction in ipairs({ "loaded", "unloaded" }) do
+        local bin = bucket[direction]
+        summarize_items(bin, bin.manifest, weights, filters.material)
+        bin.manifest = nil
+        if not flow then sum_weights(result[direction], bin) end
+      end
+    end
+    result.pages = math.max(1, math.ceil(result.arrival_count / ARRIVALS_PER_PAGE))
+    result.page = math.min(page, result.pages)
+    if page > result.pages and result.arrival_count > 0 then
+      return T.platform_view(force, tick, seconds, setmetatable({ page = result.pages }, { __index = filters }))
+    end
+    for i, entry in ipairs(arrivals) do result.arrivals[i] = arrival_detail(entry, weights) end
+  end
   return result
 end
 

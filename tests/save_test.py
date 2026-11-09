@@ -75,7 +75,8 @@ def prepare(args):
         for n in sorted(builtin | {'production-flow'})]}), encoding='utf-8')
     (stage / 'config.ini').write_text(
         f'[path]\nread-data={args.exe.parents[2].as_posix()}/data\nwrite-data={stage.as_posix()}\n'
-        '[graphics]\nfull-screen=false\n[other]\nautosave-interval=0\nhide-achievement-popups=true\n', encoding='utf-8')
+        '[graphics]\nfull-screen=false\n[other]\nautosave-interval=0\nhide-achievement-popups=true\n'
+        '[interface]\nui-scale-mode=manual-pixels\ncustom-ui-scale=1\n', encoding='utf-8')
     manifest = {'source_save': str(args.save), 'saved_mods': saved, 'engine': version,
                 'source_factorio_version': original_series, 'staged_factorio_version': series,
                 'protected_sha256': original, 'input_sha256': digest(stage / 'input.zip')}
@@ -178,6 +179,8 @@ def run(stage, args, phase):
                         result = json.loads((folder / 'gui.json').read_text())
                         if not result['captures']:
                             raise RuntimeError('No GUI views captured')
+                        if phase in ('history-view', 'transfer-view') and result['display_scale'] != 1:
+                            raise RuntimeError(f'Expected 100% GUI scale, got {result["display_scale"]:.0%}')
                         for name in result['captures']:
                             shot = folder / f'{name}.png'
                             if not shot.is_file() or shot.stat().st_mtime < started or shot.stat().st_size < 10000:

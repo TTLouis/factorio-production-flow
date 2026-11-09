@@ -26,11 +26,16 @@ local function label(key)
     proto and proto.localised_name or name:gsub("%-", " ") }
 end
 
-function P.button(row, key, target)
-  local b = row.add { type = "sprite-button", style = "slot_button", sprite = key or "utility/search",
-    tags = { ssk_picker = "open", target = target, current = key or "" },
-    tooltip = key and { "", label(key), "\nChoose an item or fluid" } or "Choose an item or fluid" }
-  b.style.width, b.style.height = 40, 40
+local function update_button(button, key, target)
+  button.sprite = key or "utility/search"
+  button.tags = { ssk_picker = "open", target = target, current = key or "" }
+  button.tooltip = key and { "", label(key), "\nChoose an item or fluid" } or "Choose an item or fluid"
+end
+
+function P.button(row, key, target, name)
+  local b = row.add { type = "sprite-button", name = name, style = "slot_button" }
+  b.style.width, b.style.height = SLOT, SLOT
+  update_button(b, key, target)
   return b
 end
 
@@ -39,9 +44,7 @@ function P.add_heading(row, width)
   heading.style.vertical_align = "center"
   heading.style.horizontal_spacing = 8
   heading.add { type = "label", caption = "Item / fluid:" }
-  local slot = heading.add { type = "choose-elem-button", name = "ssk_material_slot", elem_type = "signal" }
-  slot.style.width, slot.style.height = SLOT, SLOT
-  slot.locked = true
+  P.button(heading, nil, "balance", "ssk_material_slot")
   if width >= 680 then
     local caption = heading.add { type = "label", name = "ssk_material_name", style = "caption_label" }
     caption.style.maximal_width = 160
@@ -55,13 +58,10 @@ function P.update_heading(heading, key)
   if key then kind, name = key:match("^([^/]+)/(.+)$") end
   local proto = kind and prototypes[kind] and prototypes[kind][name]
   local caption = proto and proto.localised_name or name or "No material selected"
-  local slot = heading.ssk_material_slot
-  slot.elem_value = proto and { type = kind, name = name } or nil
-  local tooltip = { "", caption, "\nSelect a material from the Balance list or click a node in Flow." }
-  slot.tooltip = tooltip
+  update_button(heading.ssk_material_slot, proto and key, "balance")
   if heading.ssk_material_name then
     heading.ssk_material_name.caption = caption
-    heading.ssk_material_name.tooltip = tooltip
+    heading.ssk_material_name.tooltip = caption
   end
 end
 

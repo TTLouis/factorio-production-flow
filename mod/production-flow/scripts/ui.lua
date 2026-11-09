@@ -118,7 +118,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
   local inspector_height = pane_height - BALANCE_TAB_HEADER_HEIGHT
   local split = c.ssk_balance_split
   local modes = split and split.ssk_balance_focus.ssk_balance_inspector_tabs
-  if not modes or not modes.tags.ssk_balance_material_header then
+  if not modes or modes.tags.ssk_balance_material_header ~= "picker" then
     c.clear()
     split = c.add { type = "flow", name = "ssk_balance_split", direction = "horizontal" }
     split.style.horizontal_spacing = 12
@@ -133,7 +133,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     us.bal_chart_w = right_w - 8
     right.style.width, right.style.height = right_w, pane_height
     modes = right.add { type = "tabbed-pane", name = "ssk_balance_inspector_tabs",
-      style = "tabbed_pane_with_no_side_padding", tags = { ssk_balance_material_header = true } }
+      style = "tabbed_pane_with_no_side_padding", tags = { ssk_balance_material_header = "picker" } }
     modes.style.top_margin = 0
     modes.style.horizontally_stretchable = true
     local flow = modes.add { type = "tab", caption = "Flow", tooltip = "Show the selected material's inputs and uses" }
@@ -356,7 +356,7 @@ function UI.is_open(player) return player.gui.screen[WIN] ~= nil end
 function UI.on_click(e)
   local el = e.element
   local player = game.get_player(e.player_index)
-  if el.tags and el.tags.ssk_picker == "open" and el.tags.target == "focus" then
+  if el.tags and el.tags.ssk_picker == "open" and (el.tags.target == "focus" or el.tags.target == "balance") then
     close_inspectors(player)
     MaterialPicker.open(player, el.tags.target, el.tags.current)
     return true
@@ -444,7 +444,7 @@ function UI.on_selection(e)
     if key then
       local player = game.get_player(e.player_index)
       local us = ustate(e.player_index)
-      if target == "focus" and us.tab_id == "focus" then
+      if target == us.tab_id and (target == "focus" or target == "balance") then
         local chart = chart_state(us)
         local previous = chart.focus
         SK.select_focus(chart, key)
@@ -545,13 +545,19 @@ function UI.on_tab_changed(e)
     local split = c and c.ssk_balance_split
     if us.tab_id ~= "balance" or not split or f ~= split.ssk_balance_focus.ssk_balance_inspector_tabs then return false end
     us.bal_mode = f.selected_tab_index == 2 and "history" or "flow"
+    MaterialPicker.close(player)
     close_inspectors(player)
     close_chart_settings(us)
     UI.refresh(player, false, false, true)
     return true
   end
+  if us.tab_id == "transfers" and TransfersUI.on_selection(e, us.transfers) then
+    UI.refresh(player)
+    return true
+  end
   if not (f.name == "ssk_tabs" and f.parent and f.parent.parent and f.parent.parent.name == WIN) then return false end
   us.tab_id = TABS[f.selected_tab_index] or "balance"
+  MaterialPicker.close(player)
   Canvas.clear(player.index)
   close_inspectors(player)
   close_chart_settings(us)
