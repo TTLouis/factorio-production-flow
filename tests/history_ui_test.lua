@@ -69,10 +69,15 @@ assert(us.bal_mode == "history" and request[1] == us.sidx and request[2] == 600 
 assert(named(root, "ssk_bal_root") == table_root and named(root, "ssk_bal_items") == items)
 local controls = named(root, "ssk_history_controls")
 local camera, stock_camera = named(root, "ssk_history_camera"), named(root, "ssk_history_stock_camera")
-assert(camera.style.width == stock_camera.style.width and camera.position[1] == stock_camera.position[1],
-  "rate and stock charts must align")
-local stock_fraction = (stock_camera.style.height + 48) / (us.canvas_h + 100)
-assert(math.abs(stock_fraction - 1 / 3) < 0.02, "stock section should occupy about one third of the inspector")
+local net_camera = named(root, "ssk_history_net_camera")
+assert(camera.style.width == stock_camera.style.width and camera.style.width == net_camera.style.width
+  and camera.position[1] == stock_camera.position[1] and camera.position[1] == net_camera.position[1],
+  "rate, stock and net charts must align")
+assert(camera.position[2] < stock_camera.position[2] and stock_camera.position[2] < net_camera.position[2],
+  "Net rate must be below Chest stock")
+local lower_fraction = (stock_camera.style.height + net_camera.style.height + 84) / (us.canvas_h + 100)
+assert(math.abs(lower_fraction - 1 / 3) < 0.02, "stock and net should share the lower third of the inspector")
+assert(named(root, "ssk_history_products").column_count == 4, "consumption entries must fit on one row")
 local polygons, rising_or_falling = 0, 0
 local stock = {}
 for _, o in ipairs(objects()) do

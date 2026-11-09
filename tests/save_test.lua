@@ -253,6 +253,7 @@ local function exercise_history(UI, player, root, us, case)
   select_tab(2,"history")
   local panel=tabs.ssk_history_panel
   assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera")
+  assert(find_named(panel,"ssk_history_net_camera"),"History needs a separate net rate plot")
   assert(SK.balance_state(us).focus==case.focus and items.valid,"History lost the Balance selection or scroller")
   if case.name=="history-rates-and-stock" then
     local function row_for(element,key)

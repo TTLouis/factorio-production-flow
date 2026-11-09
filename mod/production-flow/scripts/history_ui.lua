@@ -18,7 +18,6 @@ local NET = { 131, 200, 242 }
 local USES = { { 202, 131, 84 }, { 191, 160, 90 }, { 157, 92, 89 }, { 99, 112, 130 } }
 local MEASURED = { 181, 203, 222 }
 local ESTIMATED = { 67, 106, 126 }
-local STRIPE = { 111, 155, 175 }
 local GRID = { 0.25, 0.25, 0.26, 1 }
 local BASELINE = { 0.56, 0.54, 0.52, 1 }
 local TICK_TEXT = { 0.78, 0.75, 0.71, 1 }
@@ -130,27 +129,37 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   spacer(heading)
   local average = small(heading, nil, "Average used")
   average.tooltip = "Estimated consumption of the selected material per second, averaged over recorded time in this period."
-  local products = uses.add { type = "table", name = "ssk_history_products", column_count = 2 }
+  local products = uses.add { type = "table", name = "ssk_history_products", column_count = 4 }
   products.style.horizontal_spacing = 8
-  products.style.vertical_spacing = 2
-  local cell_width = math.floor((chart_width - 8) / 2)
+  local cell_width = math.floor((chart_width - 24) / 4)
+  local rate_width = math.min(52, math.floor(cell_width * 0.45))
   for i = 1, 4 do
     local product = row(products, "ssk_history_use_" .. i)
-    label(product, "material_name", "", nil, cell_width - 65)
-    small(product, "rate", "", 61).style.horizontal_align = "right"
+    label(product, "material_name", "", nil, cell_width - rate_width - 4)
+    small(product, "rate", "", rate_width).style.horizontal_align = "right"
   end
 
   body.add { type = "line", direction = "horizontal" }
   local stock = row(body, "ssk_history_stock_title")
   label(stock, nil, "Chest stock", "caption_label")
   spacer(stock)
-  small(stock, "ssk_history_stock_legend", mark(MEASURED, "||") .. " Measured  " .. mark(STRIPE, "//") .. " Estimated")
+  small(stock, "ssk_history_stock_legend", mark(MEASURED, "■") .. " Measured  " .. mark(ESTIMATED, "■") .. " Estimated")
   body.add { type = "flow", name = "ssk_history_stock_plot", direction = "vertical" }
   local stock_state = small(body, "ssk_history_stock_state", "", chart_width)
   stock_state.style.single_line = false
-  local note = small(body, "ssk_history_stock_note", "Striped bars estimate stock between completed scans.", chart_width)
+  local note = small(body, "ssk_history_stock_note", "Dark blue bars estimate stock between completed scans.", chart_width)
   note.style.single_line = false
-  note.tooltip = "Estimates use the recorded Made minus Used rate and are adjusted to meet the next measured scan. Solid bars show physical chest counts at scan completion."
+  note.tooltip = "Estimates use the recorded Made minus Used rate and are adjusted to meet the next measured scan. Light blue bars show physical chest counts at scan completion."
+
+  local net = body.add { type = "flow", name = "ssk_history_net_section", direction = "vertical" }
+  net.style.horizontally_stretchable = true
+  net.add { type = "line", direction = "horizontal" }
+  local net_title = row(net, "ssk_history_net_title")
+  label(net_title, nil, "Net rate", "caption_label")
+  spacer(net_title)
+  local legend = small(net_title, "ssk_history_net_legend", "")
+  legend.tooltip = "Made minus Used per second. Above zero is a surplus. Below zero is a deficit."
+  net.add { type = "flow", name = "ssk_history_net_plot", direction = "vertical" }
 end
 
 local function averages(h)
@@ -267,7 +276,7 @@ local function trace(painter, path, y, field, line_color, dashed)
   if previous_x > start_x then line(start_x, previous_y, previous_x, previous_y) end
 end
 
-local function draw_rates(painter, h, width, height, view)
+local function draw_rates(painter, h, width, height, view, top, paths)
   local show_made = view == "all" or view == "made"
   local show_used = view == "all" or view == "used"
   local highest = 0
@@ -282,9 +291,9 @@ local function draw_rates(painter, h, width, height, view)
   local step = nice_step(highest, view == "net" and math.floor(intervals / 2) or intervals)
   local max_value = math.max(step, math.ceil(highest / step) * step)
   local min_value = view == "net" and -max_value or 0
-  local x, y = axes(painter, h, width, height, 0, min_value, max_value, step)
+  local x, y = axes(painter, h, width, height, top, min_value, max_value, step)
 
-  local paths = rate_paths(h.points, x)
+  paths = paths or rate_paths(h.points, x)
   if show_used then
     for _, path in ipairs(paths) do
       local base = {}
@@ -308,6 +317,7 @@ local function draw_rates(painter, h, width, height, view)
     if show_used then trace(painter, path, y, "used", color(USED), true) end
     if view == "net" then trace(painter, path, y, "net", color(NET), false) end
   end
+  return paths
 end
 
 local function draw_stock(painter, h, width, height, top)
@@ -335,13 +345,7 @@ local function draw_stock(painter, h, width, height, top)
     end
     local y1 = math.min(bottom - 1, y(sample.count))
     painter.rect(x1, y1, x2 - x1, bottom - y1, color(sample.measured and MEASURED or ESTIMATED))
-    if not sample.measured and x2 > x1 and bottom - y1 >= 6 then
-      local rise = math.min(3, (x2 - x1) / 4)
-      for stripe = 1, 3 do
-        local line_y = y1 + (bottom - y1) * stripe / 4
-        painter.line(x1, line_y + rise, x2, line_y, color(STRIPE), 1)
-      end
-    elseif sample.measured and center - last_label >= 56 then
+    if sample.measured and center - last_label >= 56 then
       local label_x = math.min(right - 12, math.max(left + 12, center))
       painter.text(label_x, math.max(plot_top - 4, y1 - 8), number(sample.count), TICK_TEXT, "center")
       last_label = center
@@ -367,10 +371,14 @@ function H.fill(player, panel, us, key, width, height)
   local chart_width = width - 30
   local toolbar_height = width < 620 and 116 or 92
   local scroll_height = math.max(72, height - toolbar_height - 56)
-  if not panel.ssk_history_scroll then build(panel, width, chart_width, toolbar_height, scroll_height) end
+  local scroll = panel.ssk_history_scroll
+  if not scroll or not scroll.ssk_history_body.ssk_history_net_section then
+    panel.clear()
+    build(panel, width, chart_width, toolbar_height, scroll_height)
+    scroll = panel.ssk_history_scroll
+  end
   local controls = panel.ssk_history_toolbar.ssk_history_controls
   local header = controls.ssk_history_header
-  local scroll = panel.ssk_history_scroll
   local body = scroll.ssk_history_body
   local view = us.bal_history_view or "all"
   for _, spec in ipairs(VIEWS) do
@@ -438,22 +446,32 @@ function H.fill(player, panel, us, key, width, height)
   body.ssk_history_stock_title.ssk_history_stock_legend.visible = stock == true
   body.ssk_history_stock_note.visible = stock == true
 
-  -- Stock's heading and note take about 48 px of its third of the inspector.
-  local stock_height = math.max(68, math.floor(height / 3) - 48)
+  local net = body.ssk_history_net_section
+  net.visible = rates == true
+  net.ssk_history_net_title.ssk_history_net_legend.caption = "0 = balanced   " .. units
+  -- Split the lower third between the stock and net plots, leaving room for
+  -- the stock heading and note, and the net heading and divider.
+  local stock_heading_height, net_heading_height = 48, 36
+  local lower_plot_height = math.max(136, math.floor(height / 3) - stock_heading_height - net_heading_height)
+  local stock_height = math.floor(lower_plot_height / 2)
+  local net_height = lower_plot_height - stock_height
   -- Leave room for the coverage message so the plot cameras keep their size.
-  local plot_height = scroll_height - 184
-  local rate_height = math.max(72, plot_height - stock_height)
+  local rate_height = math.max(72, scroll_height - 162 - net_heading_height - lower_plot_height)
   local stock_top = rate_height + PLOT_GAP
+  local net_top = stock_top + stock_height + PLOT_GAP
   local painter
-  if active or stock then
-    painter = Canvas.begin(player, chart_width, stock_top + stock_height)
-    if active then draw_rates(painter, h, chart_width, rate_height, view) end
+  if rates or stock then
+    painter = Canvas.begin(player, chart_width, rates and net_top + net_height or stock_top + stock_height)
+    local paths
+    if active then paths = draw_rates(painter, h, chart_width, rate_height, view, 0) end
     if stock then draw_stock(painter, h, chart_width, stock_height, stock_top) end
+    if rates then draw_rates(painter, h, chart_width, net_height, "net", net_top, paths) end
   else
     Canvas.clear(player.index)
   end
   camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0)
   camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top)
+  camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top)
 end
 
 function H.on_checked(e, us)
