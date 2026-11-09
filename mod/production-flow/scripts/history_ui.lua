@@ -25,6 +25,7 @@ local PLOT_GAP = 64
 local PLOT_LEFT, PLOT_RIGHT = 52, 24
 local PLOT_TOP, PLOT_BOTTOM = 12, 21
 local STOCK_MARKER_HALF = 3
+local PANEL_INSET, SCROLLBAR_WIDTH, BODY_MARGIN_Y = 8, 12, 4
 
 local function color(rgb)
   return { rgb[1] / 255, rgb[2] / 255, rgb[3] / 255, 1 }
@@ -79,7 +80,7 @@ local function spacer(parent, name)
 end
 
 local function build(panel, width, chart_width, toolbar_height, scroll_height)
-  panel.style.width = width
+  panel.style.padding = PANEL_INSET
   local toolbar = panel.add { type = "frame", name = "ssk_history_toolbar", style = "subheader_frame", direction = "vertical" }
   toolbar.style.height = toolbar_height
   toolbar.style.left_padding, toolbar.style.right_padding = 12, 12
@@ -107,12 +108,14 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
 
   local scroll = panel.add { type = "scroll-pane", name = "ssk_history_scroll", style = "naked_scroll_pane",
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
-  scroll.style.width = width - 4
+  scroll.style.width = width - 2 * PANEL_INSET
   scroll.style.height = scroll_height
   local body = scroll.add { type = "flow", name = "ssk_history_body", direction = "vertical",
     tags = { ssk_history_layout = "rate_net_stock" } }
   body.style.width = chart_width
-  body.style.left_margin, body.style.top_margin = 8, 4
+  -- Match the reserved scrollbar width on the left so plot gutters stay even.
+  body.style.left_margin = SCROLLBAR_WIDTH
+  body.style.top_margin, body.style.bottom_margin = BODY_MARGIN_Y, BODY_MARGIN_Y
   body.style.vertical_spacing = 4
 
   local rate = row(body, "ssk_history_rate_title")
@@ -432,10 +435,10 @@ local function camera(player, parent, name, painter, width, height, top, regions
   plot_tooltips(parent, height, regions)
 end
 
-function H.fill(player, panel, us, key, width, height)
-  local chart_width = width - 30
+function H.fill(player, panel, us, key, width, panel_height)
+  local chart_width = width - 2 * (PANEL_INSET + SCROLLBAR_WIDTH)
   local toolbar_height = width < 620 and 116 or 92
-  local scroll_height = math.max(72, height - toolbar_height - 56)
+  local scroll_height = math.max(1, panel_height - toolbar_height - 2 * PANEL_INSET)
   local scroll = panel.ssk_history_scroll
   local body = scroll and scroll.ssk_history_body
   if not body or body.tags.ssk_history_layout ~= "rate_net_stock" then
@@ -522,11 +525,11 @@ function H.fill(player, panel, us, key, width, height)
   -- Allow a third of the inspector for the stock and net sections together,
   -- including their headings, note, and divider.
   local stock_heading_height, net_heading_height = 48, 36
-  local compact_plot_height = math.max(136, math.floor(height / 3) - stock_heading_height - net_heading_height)
+  local compact_plot_height = math.max(136, math.floor(us.bal_height / 3) - stock_heading_height - net_heading_height)
   local stock_height = math.floor(compact_plot_height / 2)
   local net_height = compact_plot_height - stock_height
   -- Leave room for the coverage message so the plot cameras keep their size.
-  local rate_height = math.max(72, scroll_height - 162 - net_heading_height - compact_plot_height)
+  local rate_height = math.max(72, scroll_height - 162 - BODY_MARGIN_Y - net_heading_height - compact_plot_height)
   local net_top = rate_height + PLOT_GAP
   local stock_top = net_top + net_height + PLOT_GAP
   local painter, stock_regions

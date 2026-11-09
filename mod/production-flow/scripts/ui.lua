@@ -111,23 +111,29 @@ end
 -- tab fillers
 ---------------------------------------------------------------------------
 local fill = {}
+local BALANCE_TAB_HEADER_HEIGHT = 48 -- Vanilla tab strip and its top content padding.
 
 function fill.balance(player, c, us, only_auto, keep_balance_rows)
-  if not c.ssk_balance_split or not c.ssk_balance_split.ssk_balance_focus.ssk_balance_inspector_tabs then
+  local pane_height = us.canvas_h + 100
+  local inspector_height = pane_height - BALANCE_TAB_HEADER_HEIGHT
+  local split = c.ssk_balance_split
+  local modes = split and split.ssk_balance_focus.ssk_balance_inspector_tabs
+  if not modes or not modes.tags.ssk_balance_aligned then
     c.clear()
-    local split = c.add { type = "flow", name = "ssk_balance_split", direction = "horizontal" }
+    split = c.add { type = "flow", name = "ssk_balance_split", direction = "horizontal" }
     split.style.horizontal_spacing = 12
     split.style.width = us.canvas_w
     local left = split.add { type = "flow", name = "ssk_balance_table", direction = "vertical" }
     local left_w = math.floor(us.canvas_w * 0.44)
-    left.style.width, left.style.height = left_w, us.canvas_h + 100
+    left.style.width, left.style.height = left_w, pane_height
     us.bal_width = left_w - 24
-    us.bal_height = us.canvas_h + 100
+    us.bal_height = pane_height
     local right = split.add { type = "flow", name = "ssk_balance_focus", direction = "vertical" }
     local right_w = us.canvas_w - left_w - 12
-    us.bal_chart_w = right_w - 8 -- Vanilla tab content has 4 px of padding on each side.
-    right.style.width, right.style.height = right_w, us.canvas_h + 100
-    local modes = right.add { type = "tabbed-pane", name = "ssk_balance_inspector_tabs" }
+    us.bal_chart_w = right_w - 8
+    right.style.width, right.style.height = right_w, pane_height
+    modes = right.add { type = "tabbed-pane", name = "ssk_balance_inspector_tabs",
+      style = "tabbed_pane_with_no_side_padding", tags = { ssk_balance_aligned = true } }
     modes.style.top_margin = 0
     modes.style.horizontally_stretchable = true
     local flow = modes.add { type = "tab", caption = "Flow", tooltip = "Show the selected material's inputs and uses" }
@@ -136,20 +142,22 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     local history = modes.add { type = "tab", caption = "History", tooltip = "Show the selected material's rates and chest stock over time" }
     local history_panel = modes.add { type = "frame", name = "ssk_history_panel", style = "inside_deep_frame", direction = "vertical" }
     modes.add_tab(history, history_panel)
+    for _, panel in ipairs({ flow_panel, history_panel }) do
+      panel.style.width, panel.style.height = us.bal_chart_w, inspector_height
+      panel.style.left_margin, panel.style.right_margin = 4, 4
+    end
     modes.selected_tab_index = us.bal_mode == "history" and 2 or 1
   end
-  local split = c.ssk_balance_split
   local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto or keep_balance_rows)
   local fx = SK.balance_state(us)
   if not fx.focus then fx.focus = first end
   fx.sel = fx.focus
-  local modes = split.ssk_balance_focus.ssk_balance_inspector_tabs
   if us.bal_mode == "history" then
-    HistoryUI.fill(player, modes.ssk_history_panel, us, fx.focus, us.bal_chart_w, us.canvas_h + 100)
+    HistoryUI.fill(player, modes.ssk_history_panel, us, fx.focus, us.bal_chart_w, inspector_height)
     return
   end
   local flow = modes.ssk_balance_flow_panel
-  fx.canvas_w, fx.canvas_h = us.bal_chart_w, math.max(100,us.canvas_h+28-SK.toolbar_height(fx))
+  fx.canvas_w, fx.canvas_h = us.bal_chart_w, inspector_height - SK.toolbar_height(fx)
   if not only_auto or fx.live ~= false then
     SK.fill(player, flow, fx, fx.canvas_w, fx.canvas_h, false, only_auto)
   end

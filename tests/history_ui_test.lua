@@ -70,6 +70,15 @@ assert(named(root, "ssk_bal_root") == table_root and named(root, "ssk_bal_items"
 local controls = named(root, "ssk_history_controls")
 local camera, stock_camera = named(root, "ssk_history_camera"), named(root, "ssk_history_stock_camera")
 local net_camera = named(root, "ssk_history_net_camera")
+local history_panel = inspector_tabs.ssk_history_panel
+local history_scroll = history_panel.ssk_history_scroll
+assert(history_panel.style.height == inspector_tabs.ssk_balance_flow_panel.style.height,
+  "both inspector tabs must have the same panel height")
+assert(history_scroll.style.width + 2 * history_panel.style.padding == history_panel.style.width
+  and history_scroll.style.height + history_panel.ssk_history_toolbar.style.height + 2 * history_panel.style.padding
+    == history_panel.style.height, "History must inset its content equally on every side")
+assert(camera.style.width + 2 * history_scroll.ssk_history_body.style.left_margin == history_scroll.style.width,
+  "History plots must leave equal gutters on both sides")
 assert(camera.style.width == stock_camera.style.width and camera.style.width == net_camera.style.width
   and camera.position[1] == stock_camera.position[1] and camera.position[1] == net_camera.position[1],
   "rate, stock and net charts must align")
@@ -77,7 +86,7 @@ local sections = camera.parent.parent.children
 assert(sections[1].name == "ssk_history_rate_title" and sections[#sections].name == "ssk_history_stock_note"
   and camera.position[2] < net_camera.position[2] and net_camera.position[2] < stock_camera.position[2],
   "History must show Rate history, Net rate, then Chest stock")
-local compact_fraction = (stock_camera.style.height + net_camera.style.height + 84) / (us.canvas_h + 100)
+local compact_fraction = (stock_camera.style.height + net_camera.style.height + 84) / us.bal_height
 assert(math.abs(compact_fraction - 1 / 3) < 0.02, "stock and net should share a third of the inspector")
 assert(named(root, "ssk_history_products").column_count == 4, "consumption entries must fit on one row")
 local rate_targets = camera.parent.ssk_history_tooltips.children
