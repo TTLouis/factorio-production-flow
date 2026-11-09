@@ -5,7 +5,7 @@ Factorio 2.1.24 captures at 100% UI scale.
 
 ## Short description
 
-See what your factory makes and uses, spot shortages, and explore recipes with interactive Sankey charts. In Space Age, follow cargo between surfaces.
+Spot production shortages with interactive Sankey charts, item and fluid history, and chest stock tracking. In Space Age, follow cargo deliveries between planets and space platforms.
 
 ## Mod page description
 
@@ -13,6 +13,11 @@ See what your factory makes and uses, spot shortages, and explore recipes with i
 whether production is keeping up, and check how long your chest stock will
 last. In Space Age, follow cargo from the surface that loaded it to the one
 where it landed.
+
+This beta focuses on the new **History** tab in Balance and the **Transfers**
+tab for Space Age cargo.
+
+**Feedback needed:** Try the beta in your factory and share what works, what is confusing, or what you would like improved. Feedback on Balance, chart readability, mod compatibility and performance is especially helpful. Leave a message in the [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion) or [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues). For bugs, include your Factorio/mod versions, what you expected, what happened and a screenshot if possible.
 
 ### Balance production and stock
 
@@ -116,11 +121,5 @@ cargo tracking fill as the mod observes activity. Production charts show
 recipe relationships on a single surface, and Transfers records confirmed
 cargo deliveries between surfaces. Broader modpack compatibility, multiplayer
 and large-factory performance are still being tested.
-
-**Feedback welcome.** Tell us what works in your factory and where the charts
-or controls are confusing. For bugs, include your Factorio and mod versions,
-what you expected, what happened and a screenshot if possible. Share feedback in the
-[Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion)
-or [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues).
 
 Created by **TTLouis** under the **MIT license**. [Source code](https://github.com/TTLouis/factorio-production-flow)

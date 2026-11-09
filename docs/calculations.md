@@ -85,8 +85,9 @@ tracked crafting go into Other uses. The bands add up to measured Used.
 Solid stock bars show the counts from completed chest scans. Between adjacent
 scans, estimated bars follow the accumulated Made minus Used rate on that
 surface. The estimate distributes the difference needed to reach the next
-measured count across the interval. Estimates require rate history for the
-interval and stop at the latest completed scan.
+measured count across the interval. After the latest completed scan, the chart
+uses the recorded net rates to estimate current stock until another scan
+completes. Estimates require rate history for the interval.
 
 ## Transfers
 
@@ -96,7 +97,7 @@ qualities. Loading a platform and unloading it later are separate deliveries.
 The view counts items delivered to the destination surface, including overflow
 spilled there by a successful delivery. A station delivery whose manifest could
 have changed through spoilage is skipped. The ledger starts collecting when
-tracking is installed and retains up to ten game hours or 32,768 confirmed
+tracking is installed and retains up to 1,000 game hours or 32,768 confirmed
 arrivals, whichever limit it reaches first.
 
 ## Widths, names and grouping

@@ -3,42 +3,40 @@
 **Production balances and interactive Sankey charts for Factorio.**
 
 Production Flow shows what your factory makes, what it consumes, and how recipes
-connect on the selected surface. The current public beta is **0.1.4** by **TTLouis**.
+connect on the selected surface. In Space Age, it also tracks cargo deliveries
+between planets and space platforms.
 
 **Feedback needed:** Help shape the beta by sharing what works, what is confusing,
 and what needs improving. Report bugs or suggest improvements on
 [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues) or the
 [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion).
 
-**New in 0.1.4:** The magnifier opens the shared item and fluid picker even
-when no material is selected. This fixes the crash on first use in Focus.
-See [UI screenshots](docs/ui-preview-0.1.3.md) and [the changelog](CHANGELOG.md).
+The **0.2.5 beta** focuses on Balance History and Space Age Transfers.
+See [the changelog](CHANGELOG.md).
 
 ## Views
 
-Charts default to individual item and fluid names. Graph grouping is optional
-and unfinished. Balance is the main focus of this beta. Focus and Full Sankey still need layout,
-navigation and readability improvements, especially on dense factories.
+Charts default to individual item and fluid names. Optional grouping and
+the layout of dense charts are still being refined.
 
-- **Balance:** Made, used and net rates, chest stock, and an item/fluid inspector.
-  Uses show consumption of the selected material. Filters stay fixed while the
-  list scrolls vertically. Details stack within rows; dividers separate columns,
-  rows and item groups.
-- **Focus — needs more polish:** Upstream and downstream recipe connections around one material.
-- **Full Sankey — needs more polish:** Grouped production overview, expandable materials and presets.
+- **Balance.** Find shortages and explore what makes and uses the selected item
+  or fluid. Switch from Flow to History to compare production, use, net rate
+  and chest stock on the same timeline.
+- **Transfers.** Follow confirmed Space Age cargo deliveries by platform.
+  Explore route manifests or switch to History to see when each pod arrived.
+- **Focus.** Trace upstream and downstream recipe connections for one material.
+- **Full Sankey.** Explore the broader recipe network on the selected surface.
 
 Destination/source colors, hover highlighting, pinned selections, optional labels,
 Fit and Center help you explore the charts. Automatic updates preserve selectors and
 row positions; use the **Refresh table** icon to reapply list ordering and filters. The **?**
-button opens in-game help for controls, calculations, alerts and stock. **Recent**
-sets a short averaging period; **Auto-update chart** only controls chart redraws.
-The default measurement window is
-**10 minutes**. History survives saves; new installations show a warm-up indicator as it accumulates.
+button opens in-game help for controls, calculations, alerts and stock.
+Choose a **Period** from one minute to 1,000 hours. The default is ten minutes.
+History survives saving and loading. A warm-up indicator shows how much time
+has been recorded so far.
 
-**0.1.3 UI:**
-
-![Balance summaries, fixed headings and compact controls](docs/screenshots/24-balance-controls.png)
-![Focus navigation and material history](docs/screenshots/27-focus-navigation.png)
+![Balance History shows production rates, net rate and chest stock](docs/screenshots/31-balance-history.png)
+![Transfers shows cargo loaded and unloaded by a space platform](docs/screenshots/32-transfers-export.png)
 
 ## Install
 
@@ -46,8 +44,8 @@ Requires **Factorio 2.1**. Tested with Factorio **2.1.24** and a Space Age save,
 including planetary and local space-platform production.
 
 Install [Production Flow from the Mod Portal](https://mods.factorio.com/mod/production-flow),
-or download `production-flow_0.1.4.zip` from the
-[GitHub beta release](https://github.com/TTLouis/factorio-production-flow/releases/tag/v0.1.4)
+or download the ZIP from the
+[GitHub releases](https://github.com/TTLouis/factorio-production-flow/releases)
 and place it in your Factorio mods directory.
 Open Production Flow in-game, select a surface, and inspect a Balance row with
 its magnifier button. Expand inputs to follow its recipe chain upstream.
@@ -55,11 +53,11 @@ In Focus, use the magnifier in the toolbar to search for an item or fluid.
 
 ## What the charts measure
 
-Flows combine observed crafting activity, production statistics and recipe
-relationships. They do not trace belts, pipes or individual shipments.
-Interplanetary logistics tracking is not included. Stock covers ordinary and logistic chests on the selected surface, including
-requester and buffer chests, across all qualities. No logistic network is required;
-item/fluid selection and production measurements are independent of storage.
+Production charts show recipe relationships based on observed crafting and
+production statistics. Transfers tracks cargo delivered between surfaces.
+Stock covers ordinary and logistic chests on the selected surface, including
+requester and buffer chests, across all qualities. Chests outside a logistic
+network count too. Production measurements work independently of chest storage.
 Player/vehicle inventories, machine buffers, belts, ground items, linked/infinity
 chests and fluid tanks are excluded. Empty-time values are estimates. Large maps
 use staggered inventory scans, publishing only completed results. Each scan is
