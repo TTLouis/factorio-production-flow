@@ -16,7 +16,8 @@ local TICK = { r = 0.75, g = 0.74, b = 0.71, a = 1 }
 local HIGHLIGHT = { r = 0.28, g = 0.24, b = 0.18, a = 1 }
 local CARD_ROW, CARD_HEADER, CARD_GAP = 25, 34, 12
 local DIRECTIONS = { "loaded", "unloaded" }
-local LAYOUT_VERSION = 3
+local LAYOUT_VERSION = 4
+local TAB_HEADER_HEIGHT, PRODUCTION_NOTE_HEIGHT = 36, 36
 
 local function label(parent, name, caption, style, width)
   local el = parent.add { type = "label", name = name, caption = caption, style = style }
@@ -243,7 +244,9 @@ local function build(content, width, height)
   label(heading, "material", "", "subheader_semibold_label", math.min(142, math.floor(details_w / 4)))
     .style.horizontal_align = "right"
 
-  local tabs = right.add { type = "tabbed-pane", name = "ssk_transfer_tabs",
+  local tab_row = row(right, "tab_row")
+  tab_row.style.vertical_align, tab_row.style.horizontal_spacing = "top", 0
+  local tabs = tab_row.add { type = "tabbed-pane", name = "ssk_transfer_tabs",
     style = "tabbed_pane_with_no_side_padding", tags = { transfer_tabs = true } }
   tabs.style.width = details_w - 8
   tabs.style.top_margin = 4
@@ -258,6 +261,20 @@ local function build(content, width, height)
     tabs.add_tab(tab, body)
   end
   tabs.selected_tab_index = 1
+
+  -- Keep the native tabs and place the Flow controls over the unused space to their right.
+  local options_w = math.min(416, tab_w - 184)
+  local options = tab_row.add { type = "flow", name = "production", direction = "vertical" }
+  options.style.width, options.style.vertical_spacing = options_w, 0
+  options.style.left_margin, options.style.right_margin = -(options_w + 12), 12
+  options.style.top_margin = 4
+  local toggle_row = row(options, "toggle")
+  toggle_row.style.height = TAB_HEADER_HEIGHT
+  toggle_row.add { type = "checkbox", name = "ssk_transfer_show_all_production", caption = "Show all onboard production",
+    state = false, tags = { transfer_show_all_production = true } }
+  local hint = label(options, "note", "When off, Made aboard shows items made and unloaded in this period.", "grey_label")
+  hint.style.top_margin, hint.style.maximal_width, hint.style.single_line = 8, options_w, false
+  hint.tooltip = "Made aboard counts how much the platform produced. Unloaded counts how much it delivered."
   return panel
 end
 
@@ -462,22 +479,12 @@ local function flow_graph(player, parent, result, width, viewport)
   end
 end
 
-local function render_flow(player, body, result, note, show_all_production)
+local function render_flow(player, body, result, note)
   local width, height = body.tags.transfer_width, body.tags.transfer_height
-  local graph_height = height - 90
+  local graph_height = height - 30 - PRODUCTION_NOTE_HEIGHT
   if not body.graph then
-    local controls = strip(body, "production", 56)
-    controls.style.left_padding, controls.style.right_padding = 12, 12
-    local options = controls.add { type = "flow", name = "options", direction = "vertical" }
-    options.style.vertical_spacing = 4
-    options.add { type = "checkbox", name = "ssk_transfer_show_all_production", caption = "Show all onboard production",
-      state = false, tags = { transfer_show_all_production = true } }
-    local hint = label(options, "note",
-      "By default, Made aboard shows only materials made and unloaded by this platform in the selected period.",
-      "grey_label")
-    hint.style.maximal_width, hint.style.single_line = width - 24, false
-    hint.tooltip = "Made aboard counts how much the platform produced. Unloaded counts how much it delivered."
     local pane = scroll(body, "graph", width, graph_height)
+    pane.style.top_margin = PRODUCTION_NOTE_HEIGHT
     pane.add { type = "flow", name = "canvas", direction = "vertical" }.style.vertical_spacing = 0
     local legend = row(body, "legend")
     legend.style.width, legend.style.height = width, 26
@@ -489,7 +496,6 @@ local function render_flow(player, body, result, note, show_all_production)
     spacer(legend)
     label(legend, "note", "", "grey_label", math.max(40, width - 300)).style.horizontal_align = "right"
   end
-  body.production.options.ssk_transfer_show_all_production.state = show_all_production == true
   body.legend.note.caption = note or "Ribbon width shows known cargo mass."
   body.legend.note.tooltip = note or "Mass uses each item's Space Age rocket weight. Made aboard is sampled platform production."
   flow_graph(player, body.graph.canvas, result, width - 24, graph_height)
@@ -761,8 +767,11 @@ function UI.render(content, player, period, state, width, height)
   local sidebar, details = panel.split.sidebar, panel.split.details
   update_platforms(sidebar.ssk_transfer_platforms, result.platforms, result.platform)
   sidebar.heading.count.caption = tostring(#result.platforms)
-  local tabs, heading = details.ssk_transfer_tabs, details.heading
+  local tab_row, heading = details.tab_row, details.heading
+  local tabs, options = tab_row.ssk_transfer_tabs, tab_row.production
   tabs.selected_tab_index = state.view == "history" and 2 or 1
+  options.visible = result.platform ~= nil and state.view == "flow"
+  options.toggle.ssk_transfer_show_all_production.state = state.show_all_production == true
   local body = state.view == "history" and tabs.ssk_transfer_history or tabs.ssk_transfer_flow
   heading.platform.caption = result.platform and result.platform.name or "Transfers"
   heading.platform.tooltip = result.platform and result.platform.name or nil
@@ -788,7 +797,7 @@ function UI.render(content, player, period, state, width, height)
     state.bucket, state.page = result.bucket, result.page
     render_history(player, body, result, state, note)
   else
-    render_flow(player, body, result, note, state.show_all_production)
+    render_flow(player, body, result, note)
   end
   return result.covered_seconds
 end

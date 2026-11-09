@@ -580,7 +580,9 @@ local function exercise_transfers(UI, player, root, us, case)
     assert(#result.loading==1 and #result.unloading==1 and #result.made.items==0,
       "Export-only production must respect the unload destination filter")
     local production=assert(find_named(panel,"ssk_transfer_show_all_production"),"Missing onboard production toggle")
-    assert(production.type=="checkbox" and not production.state and production.parent.note.caption:find("unloaded"),
+    local controls=production.parent.parent
+    assert(production.type=="checkbox" and not production.state and controls.visible
+      and controls.parent==pane.parent and controls.note.caption:find("unloaded"),
       "Export-only production must be the default and have a note below the checkbox")
     production.state=true
     assert(UI.on_checked{player_index=player.index,element=production},"Production checkbox was not handled")
