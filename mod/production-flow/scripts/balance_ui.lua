@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 -- Balance presentation only. The Sankey renderers continue to use view.lua.
 local Balance = require("scripts.balance")
 local Graph = require("scripts.graph")
@@ -7,8 +8,8 @@ local Watch = require("scripts.watch")
 local BU = {}
 BU.FILTERS = { "problems", "all", "shortages", "surpluses", "capacity" }
 BU.SORTS = { "priority", "groups", "deficit", "empty" }
-local FILTER_NAMES = { "Problems only", "Everything", "Supply/activity", "Surpluses", "Spare capacity" }
-local SORT_NAMES = { "Priority", "Item groups", "Biggest deficit", "Soonest empty" }
+local FILTER_NAMES = { Loc("balance-problems-only"), Loc("balance-everything"), Loc("balance-supply-activity"), Loc("balance-surpluses"), Loc("balance-spare-capacity") }
+local SORT_NAMES = { Loc("balance-priority"), Loc("balance-item-groups"), Loc("balance-biggest-deficit"), Loc("balance-soonest-empty") }
 local SHORTAGE = { deficit = true, limited = true, starved = true }
 local LIMIT = 200
 -- The item list pane is bal_width + 24 wide and always reserves its scrollbar,
@@ -33,8 +34,8 @@ end
 
 local function fmt(x)
   local a = math.abs(x)
-  if a >= 1000000 then return string.format("%.2fM", x / 1000000) end
-  if a >= 10000 then return string.format("%.1fk", x / 1000) end
+  if a >= 1000000 then return Loc("balance-m", string.format("%.2f", x / 1000000)) end
+  if a >= 10000 then return Loc("balance-k", string.format("%.1f", x / 1000)) end
   if a >= 100 then return string.format("%.0f", x) end
   if a >= 10 then return string.format("%.1f", x) end
   if a >= 1 then return string.format("%.2f", x) end
@@ -44,14 +45,14 @@ end
 
 local function signed(x)
   if x == 0 then return "0" end
-  return (x > 0 and "+" or "−") .. fmt(math.abs(x))
+  return Loc.join((x > 0 and "+" or "−"), fmt(math.abs(x)))
 end
 
 local function time(sec)
   if not sec then return "—" end
-  if sec >= 3600 then return string.format("%.1f h", sec / 3600) end
-  if sec >= 60 then return string.format("%.0f min", sec / 60) end
-  return string.format("%.0f s", sec)
+  if sec >= 3600 then return Loc("balance-h", string.format("%.1f", sec / 3600)) end
+  if sec >= 60 then return Loc("balance-min", string.format("%.0f", sec / 60)) end
+  return Loc("balance-s", string.format("%.0f", sec))
 end
 
 local function pct(x) return x and string.format("%.0f%%", x * 100) or "—" end
@@ -68,7 +69,7 @@ local function group_name(g)
 end
 
 local function item_tooltip(key, group, warning)
-  local tooltip = { "", item_name(key), "\n", group_name(group), "\n", key, "\nClick to inspect this material." }
+  local tooltip = { "", item_name(key), "\n", group_name(group), "\n", key, Loc("balance-click-to-inspect-this-material") }
   if warning then return { "", tooltip, "\n\n", warning } end
   return tooltip
 end
@@ -85,34 +86,34 @@ end
 -- group sections. Details stack beneath the matching rate, never add columns.
 local COLUMNS = {
   { id = "focus", name = "", width = 24 },
-  { id = "item", name = "Item / fluid", width = 220 },
-  { id = "status", name = "Status", width = 145 },
-  { id = "prod", name = "Produced", width = 80, numeric = true,
-    help = "Measured production per second on the selected surface." },
-  { id = "cons", name = "Consumed", width = 80, numeric = true,
-    help = "Measured consumption per second on the selected surface." },
-  { id = "net", name = "Net /s", width = 80, numeric = true,
-    help = "Production minus consumption per second. Positive = surplus; negative = shortage." },
-  { id = "stock", name = "Stock", width = 85, numeric = true,
-    help = "Physical contents of ordinary and logistic chests on this surface, including requester and buffer chests, across all qualities. No logistic network is required. Belts, machines, vehicles, player inventories and fluid tanks are excluded. — means unavailable; 0 means measured empty." },
-  { id = "eta", name = "Empty in", width = 90, numeric = true,
-    help = "Estimated time until chest stock is empty if its current drain continues. Recent stock trend takes precedence over production minus consumption." },
-  { id = "netp", name = "Net %", width = 70, numeric = true, detail = true,
-    help = "Net rate divided by the larger of production and consumption. Differences within 5% count as balanced." },
-  { id = "pu", name = "Producers", width = 90, numeric = true, detail = true,
-    help = "Estimated producer utilisation: measured crafts / current crafting capacity. This is not a direct measurement of why a machine is idle." },
-  { id = "cu", name = "Consumers", width = 90, numeric = true, detail = true,
-    help = "Estimated consumer utilisation: measured crafts / current crafting capacity. Long periods use today's machines; values may exceed 100% after capacity changes." },
-  { id = "trend", name = "Stock /min", width = 90, numeric = true, detail = true,
-    help = "Recent change in chest stock per minute across up to seven complete scans. Its time span depends on the stock scan interval in mod settings (about 30 minutes at the 5-minute default, longer for large scans), independently of the production averaging period." },
+  { id = "item", name = Loc("balance-item-fluid"), width = 220 },
+  { id = "status", name = Loc("balance-status"), width = 145 },
+  { id = "prod", name = Loc("balance-produced"), width = 80, numeric = true,
+    help = Loc("balance-measured-production-per-second-on-the-selected") },
+  { id = "cons", name = Loc("balance-consumed"), width = 80, numeric = true,
+    help = Loc("balance-measured-consumption-per-second-on-the-selected") },
+  { id = "net", name = Loc("balance-net-s"), width = 80, numeric = true,
+    help = Loc("balance-production-minus-consumption-per-second-positive-surplus") },
+  { id = "stock", name = Loc("balance-stock"), width = 85, numeric = true,
+    help = Loc("balance-physical-contents-of-ordinary-and-logistic-chests") },
+  { id = "eta", name = Loc("balance-empty-in"), width = 90, numeric = true,
+    help = Loc("balance-estimated-time-until-chest-stock-is-empty") },
+  { id = "netp", name = Loc("balance-net"), width = 70, numeric = true, detail = true,
+    help = Loc("balance-net-rate-divided-by-the-larger-of") },
+  { id = "pu", name = Loc("balance-producers"), width = 90, numeric = true, detail = true,
+    help = Loc("balance-estimated-producer-utilisation-measured-crafts-current-crafting") },
+  { id = "cu", name = Loc("balance-consumers"), width = 90, numeric = true, detail = true,
+    help = Loc("balance-estimated-consumer-utilisation-measured-crafts-current-crafting") },
+  { id = "trend", name = Loc("balance-stock-min"), width = 90, numeric = true, detail = true,
+    help = Loc("balance-recent-change-in-chest-stock-per-minute") },
 }
 
 local function values(r)
   local st = Balance.STATUS[r.status]
   return {
-    item = item_name(r.key), status = r.inactive and "[color=0.65,0.65,0.65]Inactive[/color]" or string.format("[color=%s]%s[/color]", st.color, st.label),
+    item = item_name(r.key), status = r.inactive and Loc("balance-inactive") or Loc("balance-formatted", st.color, st.label),
     prod = fmt(r.prod), cons = fmt(r.cons), net = signed(r.net),
-    stock = r.stock and fmt(r.stock) or "—", eta = r.eta and "≈ "..time(r.eta) or "—",
+    stock = r.stock and fmt(r.stock) or "—", eta = r.eta and Loc.join("≈ ", time(r.eta)) or "—",
     netp = string.format("%+.0f%%", r.netp * 100), pu = pct(r.pu), cu = pct(r.cu),
     trend = r.trend and signed(r.trend) or "—",
   }
@@ -123,7 +124,7 @@ local function columns(details, width)
   width = width or 900
   local compact = { focus=52, status=146, prod=60, cons=60, net=62, stock=65, eta=66 }
   local detail = { prod="pu", cons="cu", net="netp", stock="trend" }
-  local subhead = { prod="Util. %", cons="Util. %", net="Net %", stock="/min" }
+  local subhead = { prod=Loc("balance-util"), cons=Loc("balance-util"), net=Loc("balance-net"), stock=Loc("balance-min-2") }
   local total = 0
   for _, col in ipairs(COLUMNS) do
     if not col.detail and not (col.id=="status" and width<680)
@@ -132,13 +133,13 @@ local function columns(details, width)
       for k,v in pairs(col) do copy[k]=v end
       copy.width = compact[col.id] or 0
       if width<550 and col.numeric then copy.width=52 end
-      if col.id=="prod" then copy.name="Made /s" end
-      if col.id=="cons" then copy.name="Used /s" end
+      if col.id=="prod" then copy.name=Loc("balance-made-s") end
+      if col.id=="cons" then copy.name=Loc("balance-used-s") end
       if details and detail[col.id] then
         copy.sub=detail[col.id]
-        copy.name=copy.name.."\n"..subhead[col.id]
+        copy.name=Loc.join(copy.name, "\n", subhead[col.id])
         for _,extra in ipairs(COLUMNS) do
-          if extra.id==copy.sub then copy.help=copy.help.."\n\n"..extra.help end
+          if extra.id==copy.sub then copy.help=Loc.join(copy.help, "\n\n", extra.help) end
         end
       end
       out[#out+1]=copy
@@ -159,12 +160,12 @@ local function caption(v, col)
   if col.id=="item" and col.narrow then
     local out={"",v.item,"\n",v.status}
     if col.stock_in_item then
-      out[#out+1]="\nStock: "..v.stock.." · Empty: "..v.eta
-      if col.details then out[#out+1]="\nStock /min: "..v.trend end
+      out[#out+1]=Loc("balance-stock-empty", v.stock, v.eta)
+      if col.details then out[#out+1]=Loc("balance-stock-min-2", v.trend) end
     end
     return out
   end
-  if col.sub then return v[col.id].."\n[color=0.65,0.65,0.65]"..v[col.sub].."[/color]" end
+  if col.sub then return Loc.join(v[col.id], "\n[color=0.65,0.65,0.65]", v[col.sub], "[/color]") end
   return v[col.id]
 end
 
@@ -201,8 +202,8 @@ end
 local function star_button(parent, set, tags, what)
   local b = parent.add { type = "sprite-button", name = "ssk_bal_fav", style = "tool_button",
     sprite = set and "ssk-star" or "ssk-star-off", tags = tags,
-    tooltip = set and "Remove " .. what .. " from favourites"
-      or "Add " .. what .. " to favourites: always listed at the top, whatever the filters" }
+    tooltip = set and Loc("balance-remove-from-favourites", what)
+      or Loc("balance-add-to-favourites-always-listed-at-the", what) }
   b.style.width, b.style.height = 24, 24
   return b
 end
@@ -214,9 +215,9 @@ local function add_row(parent, r, g, cols, fav)
     if col.id == "focus" then
       el = parent.add { type = "flow", direction = "horizontal" }
       el.style.horizontal_spacing = 4
-      star_button(el, fav, { ssk_ui = "bal_fav", key = r.key }, "this item")
+      star_button(el, fav, { ssk_ui = "bal_fav", key = r.key }, Loc("balance-this-item"))
       local spec = { type = "sprite-button", name = "ssk_bal_inspect", style = "tool_button", sprite = "utility/search",
-        tooltip = "Inspect this material on the right", tags = { ssk_ui = "focus_item", key = r.key } }
+        tooltip = Loc("balance-inspect-this-material-on-the-right"), tags = { ssk_ui = "focus_item", key = r.key } }
       local inspect = el.add(spec)
       inspect.style.width, inspect.style.height = 24, 24
     else
@@ -245,7 +246,7 @@ local function section_header(section, width, caption, star)
   header.style.width=width
   header.style.left_padding,header.style.right_padding=6,8
   header.style.vertical_align="center"
-  if star then star_button(header, star.set, star.tags, "this group") end
+  if star then star_button(header, star.set, star.tags, Loc("balance-this-group")) end
   local h=header.add{type="label",caption=caption,tooltip=caption,style="caption_label"}
   if star then h.style.left_margin=6 end
   h.style.width=width-14-(star and 30 or 0)
@@ -288,7 +289,7 @@ local function arrange(favs, rows, filtered, by_key, info, order)
       return a.key < b.key
     end)
     Balance.sort(members, order)
-    for _, r in ipairs(members) do push(r, "fg:" .. g.id) end
+    for _, r in ipairs(members) do push(r, Loc.join("fg:", g.id)) end
     if #members == 0 then empty[#empty + 1] = { group = g, before = #display + 1 } end
   end
   local nfav = #display
@@ -302,12 +303,12 @@ end
 
 -- Themes group the existing indicators; their individual meanings and help stay visible.
 local SUMMARY_GROUPS = {
-  { id = "under", label = "Underproducing", color = "1,0.45,0.4", ids = { "deficit", "limited", "starved" },
-    help = "Deficits and activity warnings. A supply warning or low activity needs investigation; it does not prove insufficient production." },
-  { id = "ok", label = "OK", color = "0.5,0.9,0.5", ids = { "ok", "source", "stored" },
-    help = "No detected rate or utilisation warning. Source / sink and stock-only materials have no machine activity assessment." },
-  { id = "over", label = "Overproducing", color = "1,0.85,0.35", ids = { "surplus", "overbuilt" },
-    help = "Measured surplus or spare producer capacity. Spare capacity alone does not mean stock is accumulating." },
+  { id = "under", label = Loc("balance-underproducing"), color = "1,0.45,0.4", ids = { "deficit", "limited", "starved" },
+    help = Loc("balance-deficits-and-activity-warnings-a-supply-warning") },
+  { id = "ok", label = Loc("balance-ok"), color = "0.5,0.9,0.5", ids = { "ok", "source", "stored" },
+    help = Loc("balance-no-detected-rate-or-utilisation-warning-source") },
+  { id = "over", label = Loc("balance-overproducing"), color = "1,0.85,0.35", ids = { "surplus", "overbuilt" },
+    help = Loc("balance-measured-surplus-or-spare-producer-capacity-spare") },
 }
 
 function BU.fill(player, c, us, scope, only_auto)
@@ -358,7 +359,7 @@ function BU.fill(player, c, us, scope, only_auto)
   local limit = math.min(#normal, us.bal_limit or LIMIT)
   for i = 1, limit do
     local r = normal[i]
-    display[#display + 1] = { row = r, section = us.bal_sort == "groups" and "g:" .. by_key[r.key].id or "all" }
+    display[#display + 1] = { row = r, section = us.bal_sort == "groups" and Loc.join("g:", by_key[r.key].id) or "all" }
   end
   if live_reuse then
     -- Keep click targets and open dropdowns alive. Explicit Refresh/filter actions
@@ -375,16 +376,16 @@ function BU.fill(player, c, us, scope, only_auto)
   local signature = { tostring(us.bal_height), tostring(us.bal_width), tostring(us.bal_details), us.bal_sort or "priority", us.bal_filter or "problems", us.bal_group or "", tostring(shown), tostring(matching_count), tostring(#rows == 0) }
   for _, g in ipairs(groups) do signature[#signature + 1] = g.id end
   local fav_keys = {}
-  for key in pairs(favs.items) do fav_keys[#fav_keys + 1] = "*" .. key end
-  for gid in pairs(favs.groups) do fav_keys[#fav_keys + 1] = "#" .. gid end
+  for key in pairs(favs.items) do fav_keys[#fav_keys + 1] = Loc.join("*", key) end
+  for gid in pairs(favs.groups) do fav_keys[#fav_keys + 1] = Loc.join("#", gid) end
   table.sort(fav_keys)
   for _, k in ipairs(fav_keys) do signature[#signature + 1] = k end
-  for _, e in ipairs(empty) do signature[#signature + 1] = "empty:" .. e.group.id end
+  for _, e in ipairs(empty) do signature[#signature + 1] = Loc.join("empty:", e.group.id) end
   for i = 1, shown do
     local r = list[i]
-    signature[#signature + 1] = r.key .. ":" .. r.status .. ":" .. (display[i].section or "")
+    signature[#signature + 1] = Loc.join(r.key, ":", r.status, ":", (display[i].section or ""))
   end
-  signature = table.concat(signature, "|")
+  signature = Loc.join_list(signature, "|")
 
   -- Reuse existing cells while the visible rows stay the same. Live sampling
   -- updates values without destroying the table, dropdowns or scroll position.
@@ -398,12 +399,12 @@ function BU.fill(player, c, us, scope, only_auto)
     refresh = root.ssk_bal_controls.ssk_bal_refresh
     summaries, summary_heads, cells = {}, {}, {}
     for _, group in ipairs(SUMMARY_GROUPS) do
-      local column = root.ssk_bal_summary["ssk_bal_" .. group.id]
+      local column = root.ssk_bal_summary[Loc.join("ssk_bal_", group.id)]
       summary_heads[group.id] = column.ssk_bal_theme
-      for _, id in ipairs(group.ids) do summaries[id] = column["ssk_bal_" .. id] end
+      for _, id in ipairs(group.ids) do summaries[id] = column[Loc.join("ssk_bal_", id)] end
     end
     for i = 1, shown do
-      local entry = root.ssk_bal_list.ssk_bal_items["ssk_bal_section_" .. i]
+      local entry = root.ssk_bal_list.ssk_bal_items[Loc.join("ssk_bal_section_", i)]
       if entry then -- Sections are named for the first row they contain.
         local t = entry.ssk_bal_table
         -- Reading children copies the whole array through the Factorio API.
@@ -411,7 +412,7 @@ function BU.fill(player, c, us, scope, only_auto)
         local children = t.children
         local offset = 0
         local j = i
-        while j <= shown and (j == i or not root.ssk_bal_list.ssk_bal_items["ssk_bal_section_" .. j]) do
+        while j <= shown and (j == i or not root.ssk_bal_list.ssk_bal_items[Loc.join("ssk_bal_section_", j)]) do
           cells[j] = {}
           for k, col in ipairs(cols) do cells[j][col.id] = children[offset + k] end
           offset = offset + #cols
@@ -445,32 +446,32 @@ function BU.fill(player, c, us, scope, only_auto)
     if show_labels then picker_budget = picker_budget - labels_width end
     local picker_width = math.max(36, math.min(134, math.floor(picker_budget / 3)))
 
-    if show_labels then text(toolbar, "Show:").style.width = show_label_width end
+    if show_labels then text(toolbar, Loc("balance-show")).style.width = show_label_width end
     local fi = 1
     for i, id in ipairs(BU.FILTERS) do if id == us.bal_filter then fi = i end end
     local filter = toolbar.add { type = "drop-down", items = FILTER_NAMES, selected_index = fi,
-      tags = { ssk_ui = "bal_filter" }, tooltip = "Show " .. FILTER_NAMES[fi] }
+      tags = { ssk_ui = "bal_filter" }, tooltip = Loc("balance-show-2", FILTER_NAMES[fi]) }
     filter.style.width = picker_width
 
-    if show_labels then text(toolbar, "Group:").style.width = group_label_width end
-    local names, gi = { "All groups" }, 1
+    if show_labels then text(toolbar, Loc("balance-group")).style.width = group_label_width end
+    local names, gi = { Loc("balance-all-groups") }, 1
     us.bal_group_ids = {}
     for i, g in ipairs(groups) do
       names[i + 1] = group_name(g); us.bal_group_ids[i + 1] = g.id
       if g.id == us.bal_group then gi = i + 1 end
     end
     local picker = toolbar.add { type = "drop-down", items = names, selected_index = gi,
-      tags = { ssk_ui = "bal_group" }, tooltip = { "", "Material group\n", names[gi] } }
+      tags = { ssk_ui = "bal_group" }, tooltip = { "", Loc("balance-material-group"), names[gi] } }
     picker.style.width = math.max(36, math.min(240, picker_budget - 2 * picker_width))
     if us.bal_group then
-      star_button(toolbar, favs.groups[us.bal_group], { ssk_ui = "bal_fav_group", gid = us.bal_group }, "this group")
+      star_button(toolbar, favs.groups[us.bal_group], { ssk_ui = "bal_fav_group", gid = us.bal_group }, Loc("balance-this-group"))
     end
 
-    if show_labels then text(toolbar, "Order:").style.width = order_label_width end
+    if show_labels then text(toolbar, Loc("balance-order")).style.width = order_label_width end
     local sort_index = 1
     for i, id in ipairs(BU.SORTS) do if id == us.bal_sort then sort_index = i end end
     toolbar.add { type = "drop-down", items = SORT_NAMES, selected_index = sort_index,
-      tags = { ssk_ui = "bal_sort" }, tooltip = "Sort by " .. SORT_NAMES[sort_index] }.style.width = picker_width
+      tags = { ssk_ui = "bal_sort" }, tooltip = Loc("balance-sort-by", SORT_NAMES[sort_index]) }.style.width = picker_width
 
     local spacer = toolbar.add { type = "empty-widget" }
     spacer.style.horizontally_stretchable = true
@@ -482,17 +483,17 @@ function BU.fill(player, c, us, scope, only_auto)
       details_row.style.vertical_align = "center"
       details_row.add { type = "empty-widget" }.style.horizontally_stretchable = true
     end
-    details_row.add { type = "checkbox", caption = "Details", state = us.bal_details == true, tags = { ssk_ui = "bal_details" },
-      tooltip = "Show net percentage, producer / consumer utilisation and recent stock trend." }
+    details_row.add { type = "checkbox", caption = Loc("balance-details"), state = us.bal_details == true, tags = { ssk_ui = "bal_details" },
+      tooltip = Loc("balance-show-net-percentage-producer-consumer-utilisation-and") }
     refresh = toolbar.add { type = "sprite-button", name = "ssk_bal_refresh", style = "tool_button", sprite = "utility/refresh",
-      tags = { ssk_ui = "bal_update" }, tooltip = "Refresh table" }
+      tags = { ssk_ui = "bal_update" }, tooltip = Loc("balance-refresh-table") }
     local summary = root.add { type = "table", name = "ssk_bal_summary", column_count = 3 }
     summary.style.horizontal_spacing = 8
     summary.vertical_centering = false
     local width = math.floor(((us.bal_width or 900) + 24 - 16) / 3)
     summaries, summary_heads = {}, {}
     for _, group in ipairs(SUMMARY_GROUPS) do
-      local column = summary.add { type = "flow", name = "ssk_bal_" .. group.id, direction = "vertical" }
+      local column = summary.add { type = "flow", name = Loc.join("ssk_bal_", group.id), direction = "vertical" }
       column.style.width = width
       column.style.vertical_spacing = 0
       local heading = column.add { type = "label", name = "ssk_bal_theme", tooltip = group.help }
@@ -501,7 +502,7 @@ function BU.fill(player, c, us, scope, only_auto)
       heading.style.single_line = true
       summary_heads[group.id] = heading
       for _, id in ipairs(group.ids) do
-        local label = column.add { type = "label", name = "ssk_bal_" .. id, tooltip = Balance.STATUS[id].help }
+        local label = column.add { type = "label", name = Loc.join("ssk_bal_", id), tooltip = Balance.STATUS[id].help }
         label.style.width = width
         label.style.font = "default-small"
         label.style.single_line = true
@@ -527,12 +528,12 @@ function BU.fill(player, c, us, scope, only_auto)
     local function empty_groups(before)
       while empty[e] and empty[e].before <= before do
         local g = empty[e].group
-        local section = items.add { type = "flow", name = "ssk_bal_empty_" .. e, direction = "vertical" }
+        local section = items.add { type = "flow", name = Loc.join("ssk_bal_empty_", e), direction = "vertical" }
         section.style.vertical_spacing = 0
         section.style.right_padding = LIST_GUTTER
         section.style.top_margin = #items.children > 1 and 8 or 0
         section_header(section, list_w, group_name(g), { set = true, tags = { ssk_ui = "bal_fav_group", gid = g.id } })
-        local note = text(section, "No items in this group right now.")
+        local note = text(section, Loc("balance-no-items-in-this-group-right-now"))
         note.style.font_color = { 0.65, 0.65, 0.65 }
         note.style.left_margin, note.style.top_margin, note.style.bottom_margin = 8, 4, 4
         e = e + 1
@@ -543,18 +544,18 @@ function BU.fill(player, c, us, scope, only_auto)
       local r, d = list[i], display[i]
       local g = group_of(r.key)
       if not t or last ~= d.section then
-        local section = items.add { type = "flow", name = "ssk_bal_section_" .. i, direction = "vertical" }
+        local section = items.add { type = "flow", name = Loc.join("ssk_bal_section_", i), direction = "vertical" }
         section.style.vertical_spacing = 0
         section.style.right_padding = LIST_GUTTER
         section.style.top_margin = #items.children > 1 and 8 or 0
         if d.section == "fav" then
-          section_header(section, list_w, "[img=ssk-star] Favourites")
+          section_header(section, list_w, Loc("balance-favourites"))
         elseif d.section:sub(1, 3) == "fg:" then
           section_header(section, list_w, group_name(g), { set = true, tags = { ssk_ui = "bal_fav_group", gid = g.id } })
         elseif d.section:sub(1, 2) == "g:" then
           section_header(section, list_w, group_name(g), { set = false, tags = { ssk_ui = "bal_fav_group", gid = g.id } })
         elseif nfav > 0 or #empty > 0 then
-          section_header(section, list_w, "All other items")
+          section_header(section, list_w, Loc("balance-all-other-items"))
         end
         t = grid(section, "ssk_bal_table", cols)
       end
@@ -563,8 +564,8 @@ function BU.fill(player, c, us, scope, only_auto)
     end
     empty_groups(math.huge)
     if #normal == 0 then
-      local note = text(items, #rows == 0 and "No measured activity or chest stock yet. Let sampling finish, then Update list."
-        or "No items match this view. Try Everything or All groups.")
+      local note = text(items, #rows == 0 and Loc("balance-no-measured-activity-or-chest-stock-yet")
+        or Loc("balance-no-items-match-this-view-try-everything"))
       if shown > 0 then note.style.top_margin = 8 end
     end
     if limit < #normal then
@@ -572,18 +573,18 @@ function BU.fill(player, c, us, scope, only_auto)
       local more = root.add { type = "flow", direction = "horizontal" }
       more.style.horizontal_align = "center"
       more.style.horizontally_stretchable = true
-      more.add { type = "button", caption = "Show 200 more", tags = { ssk_ui = "bal_more" },
-        tooltip = "Add the next 200 matching rows to the list" }
+      more.add { type = "button", caption = Loc("balance-show-200-more"), tags = { ssk_ui = "bal_more" },
+        tooltip = Loc("balance-add-the-next-200-matching-rows-to") }
     end
   end
   for _, group in ipairs(SUMMARY_GROUPS) do
     local total = 0
     for _, id in ipairs(group.ids) do total = total + (counts[id] or 0) end
-    summary_heads[group.id].caption = string.format("[color=%s]%s: %d[/color]", group.color, group.label, total)
+    summary_heads[group.id].caption = Loc("balance-formatted-2", group.color, group.label, string.format("%d", total))
   end
   for id, el in pairs(summaries) do
     local st = Balance.STATUS[id]
-    el.caption = string.format("[color=%s]%s: %d[/color]", st.color, st.label, counts[id] or 0)
+    el.caption = Loc("balance-formatted-2", st.color, st.label, string.format("%d", counts[id] or 0))
   end
   for i = 1, shown do
     local r = list[i]
@@ -598,14 +599,14 @@ function BU.fill(player, c, us, scope, only_auto)
       if col.id~="focus" then cells[i][col.id].caption=caption(v,col) end
     end
     if cells[i].status then
-      cells[i].status.tooltip=list[i].inactive and "No measured activity in the current window. Update list to reapply filters and sorting."
+      cells[i].status.tooltip=list[i].inactive and Loc("balance-no-measured-activity-in-the-current-window")
         or Balance.STATUS[list[i].status].help
     end
     local net = list[i].net
     cells[i].net.style.font_color = net < 0 and { 1, 0.45, 0.4 } or net > 0 and { 1, 0.85, 0.35 } or { 1, 1, 1 }
     cells[i].focus.ssk_bal_inspect.toggled = us.bal_fx and us.bal_fx.focus == list[i].key or false
   end
-  refresh.tooltip = "Refresh table"
+  refresh.tooltip = Loc("balance-refresh-table")
   return list[1] and list[1].key
 end
 

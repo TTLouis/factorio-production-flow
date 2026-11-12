@@ -79,22 +79,29 @@ local function headers(us, width)
   local canvas = assert(find(c, "ssk_canvas"))
   local checked = 0
   local hits, first_hit = {}
+  local function bounds(wrapper, child)
+    return { left_margin = wrapper.style.left_margin + (child.style.left_margin or 0),
+      top_margin = wrapper.style.top_margin + (child.style.top_margin or 0),
+      width = child.style.width, height = child.style.height }
+  end
   for i, wrapper in ipairs(canvas.children) do
-    if wrapper.tags.ssk_sk == "ribbon" then
-      assert(not wrapper.ignored_by_interaction and type(wrapper.tooltip) == "table", "ribbon needs a native tooltip")
-      hits[wrapper.tags.from .. ">" .. wrapper.tags.to] = true
-      first_hit = first_hit or wrapper
+    local target = wrapper.type == "flow" and wrapper.children[1] or wrapper
+    if target and target.tags.ssk_sk == "ribbon" then
+      assert(not target.ignored_by_interaction and type(target.tooltip) == "table", "ribbon needs a native tooltip")
+      hits[target.tags.from .. ">" .. target.tags.to] = true
+      first_hit = first_hit or target
     end
     local icon = wrapper.children[1]
     if icon and icon.type == "sprite-button" and icon.tags.ssk_sk == "node" then
       local n = assert(layout.nodes[icon.tags.key])
-      local pos = wrapper.style
+      local pos = bounds(wrapper, icon)
       local label_wrapper = assert(canvas.children[i + 1])
       local label = assert(label_wrapper.children[1])
       assert(label.type == "label" and label.style.single_line, "name must stay on one line")
       assert(label.style.width == label_wrapper.style.width, "name must be clipped to its reserved width")
       assert(pos.top_margin + pos.height <= G.round(n.y) - View.ICON_GAP, "icon blocks its flow bar")
-      assert(label_wrapper.style.top_margin + label_wrapper.style.height <= pos.top_margin, "name blocks icon")
+      local lp = bounds(label_wrapper, label)
+      assert(lp.top_margin + lp.height <= pos.top_margin, "name blocks icon")
       assert(label_wrapper.style.width <= math.min(260, layout.label_w[n.ci]) + 1, "long name spills into next column")
       for _, other in pairs(layout.nodes) do
         local function disjoint(x, y, w, h)
@@ -102,7 +109,6 @@ local function headers(us, width)
             or y + h <= G.round(other.y) or y >= G.round(other.y + other.h)
         end
         assert(disjoint(pos.left_margin, pos.top_margin, pos.width, pos.height), "icon overlaps another bar")
-        local lp = label_wrapper.style
         assert(disjoint(lp.left_margin, lp.top_margin, lp.width, lp.height), "name overlaps another bar")
       end
       if n.h >= 2 * View.NODE_W then thick_header_checked = true end

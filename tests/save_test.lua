@@ -1,5 +1,8 @@
 -- Injected into an isolated copy only. Never included in release packages.
 local T = {}
+local LOC = require("scripts.test_locale")
+local NativeLocale = require("scripts.test_locale_native")
+T.on_string_translated = NativeLocale.on_translated
 local mode = require("scripts.save_test_mode")
 local full_view = mode=="full" or mode=="ribbon-view"
 local SK = require("scripts.sankey_ui")
@@ -328,8 +331,8 @@ local function exercise_history(UI, player, root, us, case)
     "History must show Rate history, Net rate, then Chest stock")
   local rate_hover=assert(rate_plot.ssk_history_tooltips.children[1],"The rate plot needs hover targets")
   local net_hover=assert(net_plot.ssk_history_tooltips.children[1],"The net plot needs hover targets")
-  local rate_tip=serpent.line(rate_hover.tooltip)
-  assert(not rate_hover.ignored_by_interaction and rate_tip==serpent.line(net_hover.tooltip)
+  local rate_tip=LOC(rate_hover.tooltip)
+  assert(not rate_hover.ignored_by_interaction and rate_tip==LOC(net_hover.tooltip)
     and rate_tip:find("Made",1,true) and rate_tip:find("Used",1,true)
     and rate_tip:find("Net",1,true),"Rate and net plots must share interactive bucket values")
   if case.name=="electronic-circuit-history" then
@@ -359,17 +362,17 @@ local function exercise_history(UI, player, root, us, case)
     choose_period(7)
     assert(us.period==3600000,"History must use the selected 1000-hour period")
     local coverage=root.ssk_window_bar.ssk_history
-    assert(coverage.visible and coverage.caption:find("1000 h",1,true),"History must show incomplete long-window coverage")
+    assert(coverage.visible and LOC(coverage.caption):find("1000 h",1,true),"History must show incomplete long-window coverage")
     items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
   elseif case.rolling_period then
     choose_period(3)
     assert(us.period==3600,"Rolling average must start at the one-hour selection")
     local legend=assert(find_named(panel,"ssk_history_rate_legend"))
-    assert(legend.caption:find("Rolling avg",1,true) and legend.tooltip:find("3 min",1,true),
+    assert(LOC(legend.caption):find("Rolling avg",1,true) and LOC(legend.tooltip):find("3 min",1,true),
       "Rolling legend must show the configured averaging window")
-    local rolling_tip=serpent.line(rate_plot.ssk_history_tooltips.children[1].tooltip)
+    local rolling_tip=LOC(rate_plot.ssk_history_tooltips.children[1].tooltip)
     assert(rolling_tip:find("Rolling average over",1,true) and rolling_tip:find("Estimated usage by product",1,true)
-      and rolling_tip==serpent.line(net_plot.ssk_history_tooltips.children[1].tooltip),
+      and rolling_tip==LOC(net_plot.ssk_history_tooltips.children[1].tooltip),
       "The rate and net charts must expose the same trailing usage average")
     items=split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items
   end
@@ -391,7 +394,7 @@ local function exercise_history(UI, player, root, us, case)
     assert(#history.usage_keys>0,"Active items must have usage history")
     local stock_plot=assert(find_named(panel,"ssk_history_stock_camera"),"Item History needs a native stock plot").parent
     local stock_hover=assert(stock_plot.ssk_history_tooltips.children[1],"The stock plot needs hover targets")
-    assert(not stock_hover.ignored_by_interaction and stock_hover.tooltip:find("stock",1,true),"Stock tooltips must be interactive")
+    assert(not stock_hover.ignored_by_interaction and LOC(stock_hover.tooltip):find("stock",1,true),"Stock tooltips must be interactive")
   else
     assert(not history.stock_supported and #history.stock==0,"Fluid must not show measured chest stock")
   end
@@ -402,7 +405,7 @@ local function exercise_history(UI, player, root, us, case)
       assert(latest.live and latest.tick>previous.tick,"Chest Stock estimate did not advance between scans")
       UI.refresh(player,true)
       local note=assert(find_named(panel,"ssk_history_stock_note"))
-      assert(note.caption:find("Latest estimate",1,true),"Live stock estimate was not shown after refresh")
+      assert(LOC(note.caption):find("Latest estimate",1,true),"Live stock estimate was not shown after refresh")
       log("BALANCE LIVE STOCK PASS latest estimate advanced without waiting for another scan")
     end
     if case.long_period or case.rolling_period then
@@ -541,7 +544,7 @@ local function exercise_transfers(UI, player, root, us, case)
     assert(not load.ignored_by_interaction and not unload.ignored_by_interaction
       and serpent.line(load.tooltip):find("tungsten-plate",1,true)
       and serpent.line(unload.tooltip):find("advanced-circuit",1,true)
-      and serpent.line(unload.tooltip):find("items/s",1,true),"History hover lost direction-specific manifests or rates")
+      and LOC(unload.tooltip):find("items/s",1,true),"History hover lost direction-specific manifests or rates")
     assert(UI.on_click{player_index=player.index,element=load},"History bucket selection was not handled")
     assert(us.transfers.bucket==bucket.start_tick,"Selected History bucket did not persist")
     result=Transfers.platform_view(player.force,game.tick,us.period,us.transfers)
@@ -562,7 +565,7 @@ local function exercise_transfers(UI, player, root, us, case)
       period.selected_index=7
       assert(UI.on_selection{player_index=player.index,element=period} and us.period==3600000)
       local coverage=root.ssk_window_bar.ssk_history
-      assert(coverage.visible and coverage.caption:find("1000 h",1,true),"Transfers must show the retained cargo coverage")
+      assert(coverage.visible and LOC(coverage.caption):find("1000 h",1,true),"Transfers must show the retained cargo coverage")
       log("TRANSFERS LONG WINDOW PASS 1000-hour period and cargo coverage")
     end
     log("TRANSFERS HISTORY NATIVE PASS direction-specific hover manifests, bucket filtering and pod expansion")
@@ -573,7 +576,7 @@ local function exercise_transfers(UI, player, root, us, case)
     local unload_count=result.unloaded.pods
     local production=assert(find_named(panel,"ssk_transfer_show_all_production"),"Missing onboard production toggle")
     assert(production.type=="checkbox" and not production.state and production.visible
-      and production.parent==heading and not heading.note and production.tooltip:find("unloaded"),
+      and production.parent==heading and not heading.note and LOC(production.tooltip):find("unloaded"),
       "Export-only production must be the default and explain the rule on hover")
     production.state=true
     assert(UI.on_checked{player_index=player.index,element=production},"Production checkbox was not handled")
@@ -591,7 +594,7 @@ local function exercise_transfers(UI, player, root, us, case)
     assert(find_named(panel,"ssk_transfer_platform_node") and find_named(panel,"ssk_transfer_camera"),
       "Flow needs its platform node and native ribbon rendering")
     local arrow=assert(find_named(panel,"ssk_transfer_ribbon_loaded_1_1"),"Transfers is missing its ribbon hover target")
-    local tip=serpent.line(arrow.tooltip)
+    local tip=LOC(arrow.tooltip)
     assert(not arrow.ignored_by_interaction and tip:find("items/s",1,true) and tip:find("electronic-circuit",1,true),
       "Transfer ribbon must list the cargo and rates")
     assert(UI.on_click{player_index=player.index,element=platform_list[platform_row].star})
@@ -601,6 +604,7 @@ local function exercise_transfers(UI, player, root, us, case)
     UI.refresh(player,true)
     assert(platform_list.valid and pane.valid and production.valid and not production.state and pinned.valid,
       "Live Transfers refresh rebuilt or reset the controls")
+    assert(arrow.valid, "Localized cargo labels must not invalidate the flow cache on every refresh")
     assert(UI.on_click{player_index=player.index,element=pinned.star})
     assert(not us.transfers.favourites[platform_id] and platform_list[platform_row].pick.toggled,
       "Removing a favourite must retain the current platform")
@@ -612,8 +616,8 @@ local function verify_usage(element, root, result)
   local key=element.tags and element.tags.ssk_rate
   if key and key:match("#use$") then
     local node=find_action(root,"node",key)
-    assert(node.tooltip[9]==" consumed", "Uses tooltip lost selected material")
-    assert(element.caption==node.tooltip[6], "Uses label still shows consumer output")
+    assert(LOC(node.tooltip[7]):find(" consumed",1,true), "Uses tooltip lost selected material")
+    assert(LOC(element.caption)==LOC(node.tooltip[6]), "Uses label still shows consumer output")
     result[key]=element.caption
   end
   for _,child in pairs(element.children) do verify_usage(child,root,result) end
@@ -672,7 +676,7 @@ local function exercise_diagnostics(UI, player, root, us, case)
     click(find_ui(root,"machine_status"))
     local status=assert(player.gui.screen.ssk_machine_status,"Machine status did not open")
     local target=assert(find_ui(status,"preview",machine_action),"No action for the sampled fixture machine")
-    assert(target.enabled and target.parent.ssk_machine_count.caption=="1" and target.tags.recipe=="iron-gear-wheel",
+    assert(target.enabled and LOC(target.parent.ssk_machine_count.caption) == "1" and target.tags.recipe=="iron-gear-wheel",
       "Wrong stalled recipe or count")
     local age=assert(find_ui(status,"iron-gear-wheel","ssk_machine_age"),"Sample age is missing")
     assert(age.tags.sample_tick<=game.tick and age.tags.sample_tick>=game.tick-600,"Fixture sample is stale")
@@ -770,6 +774,10 @@ function T.tick(UI, Sampler)
     seed_transfer_preview(transfer_fixture,transfer_fixture.hub.force)
   end
   if not Sampler.stock_known(game.surfaces.nauvis.index) then return end
+  -- The native client reports its initial display dimensions after the first
+  -- simulation tick. Let that event settle before opening dialogs: the normal
+  -- display-change handler rebuilds the main window and closes its inspectors.
+  if elapsed < 60 then return end
   local next_case=not capture and cases[step+1]
   if mode=="ribbon-view" and next_case and next_case.tab=="transfers" and elapsed<190 then return end
   if mode=="history-view" and not stock_fixture and next_case and next_case.focus=="item/iron-plate" then
@@ -809,6 +817,7 @@ function T.tick(UI, Sampler)
   if elapsed % capture_interval ~= 0 then return end
   local player = game.connected_players[1]
   assert(player, "Graphical test has no connected player")
+  NativeLocale.start(player)
   if capture then
     assert(player.gui.screen.ssk_main, "Missing native GUI")
     if player.gui.screen.ssk_help then player.gui.screen.ssk_help.bring_to_front()
@@ -841,7 +850,7 @@ function T.tick(UI, Sampler)
         or case.name=="full-nauvis-proportional" or case.name=="full-nauvis-sprites" then
       local root=player.gui.screen.ssk_main.ssk_inner.ssk_tabs["content_"..case.tab]
       local ribbon=assert(find_action(root,"ribbon"),"Rendered Sankey has no ribbon hover target")
-      local tip=serpent.line(ribbon.tooltip)
+      local tip=LOC(ribbon.tooltip)
       assert(not ribbon.ignored_by_interaction and tip:find("Flow by recipe",1,true) and tip:find("Total flow",1,true),
         "Sankey ribbon is missing its item and rate breakdown")
       assert(UI.on_hover({element=ribbon, player_index=player.index},true))
@@ -873,8 +882,9 @@ function T.tick(UI, Sampler)
   local c = cases[step]
   if not c then
     if step == #cases+1 then
+      assert(NativeLocale.ready(), "Native locale probes did not finish")
       Diag.export(player, "save-test")
-      helpers.write_file("save-test/gui.json", helpers.table_to_json({captures=captures, skipped=skipped, products=products, usage_labels=usage_labels, display_scale=player.display_scale, display_resolution=player.display_resolution, upgrade=storage.ssk_save_test_upgrade}), false)
+      helpers.write_file("save-test/gui.json", helpers.table_to_json({captures=captures, skipped=skipped, products=products, usage_labels=usage_labels, display_scale=player.display_scale, display_resolution=player.display_resolution, locale=player.locale, upgrade=storage.ssk_save_test_upgrade}), false)
       log("SANKEY SAVE GUI OK")
     end
     return
@@ -1183,7 +1193,8 @@ function T.tick(UI, Sampler)
     end
     if c.recent then
       local period=find_ui(root,"period");period.selected_index=1
-      assert(table.concat(period.items," ")=="1m 10m 1H 10H 50H 250H 1000H","Incorrect Period options")
+      local names={};for i,item in ipairs(period.items) do names[i]=LOC(item) end
+      assert(table.concat(names," ")=="1m 10m 1H 10H 50H 250H 1000H","Incorrect Period options")
       UI.on_selection({player_index=player.index,element=period})
       assert(us.period==60,"One-minute period action failed")
     end

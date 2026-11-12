@@ -29,7 +29,7 @@ assert(not evaluate(2500, 60), "a gap must restart a pending breach")
 us.period = 120
 assert(not evaluate(2800, 120), "changing period must restart a pending breach")
 local warning = evaluate(3100, 120)
-assert(warning and warning:find("Made 0") and not warning:find("Chest stock"), "idle material has measured zero Made but unknown stock")
+assert(warning and LOC(warning):find("Made 0") and not LOC(warning):find("Chest stock"), "idle material has measured zero Made but unknown stock")
 assert(not evaluate(3400, 119), "unready data must hide a latched warning")
 assert(evaluate(3700, 120), "temporary unknown data must preserve the latch")
 assert(not evaluate(4000, 120, nil, false, 2.5), "a measured recovery clears the latch")
@@ -37,11 +37,11 @@ assert(not evaluate(4300, 120), "a new breach must wait for its second observati
 
 assert(not evaluate(4600, 120, {}, true, 3), "known zero stock starts a breach")
 warning = evaluate(4900, 120, {}, true, 3)
-assert(warning and warning:find("empty in 0 min"), "completed stock sample can measure zero")
+assert(warning and LOC(warning):find("empty in 0 min"), "completed stock sample can measure zero")
 assert(not evaluate(5200, 120, { [key] = { count = 200 } }, true, 3), "stock without a drain recovers")
 assert(not evaluate(5500, 120, { [key] = { count = 100, per_min = -50 } }, true, 3), "a measured drain starts a breach")
 warning = evaluate(5800, 120, { [key] = { count = 100, per_min = -50 } }, true, 3)
-assert(warning and warning:find("empty in 2 min"), "reuse the Balance stock drain estimate")
+assert(warning and LOC(warning):find("empty in 2 min"), "reuse the Balance stock drain estimate")
 us.sidx = 2
 assert(not evaluate(6100, 120, {}, true, 3), "watches apply only to their configured surface")
 us.sidx = 1

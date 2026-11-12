@@ -18,12 +18,7 @@ end
 local function event(element)
   return { element = element, player_index = player.index }
 end
-local function tooltip_text(tooltip)
-  if type(tooltip) ~= "table" then return tooltip end
-  local text = {}
-  for i, part in ipairs(tooltip) do text[i] = tooltip_text(part) end
-  return table.concat(text)
-end
+local tooltip_text = LOC
 local function objects()
   return storage.canvas[player.index].objs
 end
@@ -143,8 +138,8 @@ assert(net_tooltip == tooltip_text(rate_targets[2].tooltip) and net_tooltip:find
 local other_tooltip = tooltip_text(named(root, "ssk_history_use_2").rate.tooltip)
 assert(other_tooltip:find("iron-gear-wheel", 1, true) and other_tooltip:find("0.85 items/s", 1, true)
   and not other_tooltip:find("steel-plate", 1, true), "Other must list hidden product uses and rates")
-assert(stock_targets[1].tooltip == "50s ago\nMeasured stock  30 items"
-  and stock_targets[2].tooltip == "35s ago\nEstimated stock  20 items")
+assert(LOC(stock_targets[1].tooltip) == "50s ago\nMeasured stock  30 items"
+  and LOC(stock_targets[2].tooltip) == "35s ago\nEstimated stock  20 items")
 local function hover_bands()
   local bands = {}
   for _, object in ipairs(objects()) do
@@ -183,7 +178,7 @@ assert(positive > 0 and negative > 0, "Net must show green surplus and red defic
 assert(#stock == 4 and stock[1].right_bottom[1] == stock[2].left_top[1]
   and stock[2].right_bottom[1] == stock[3].left_top[1]
   and stock[3].right_bottom[1] < stock[4].left_top[1], "stock bars share edges only where a rate estimate is available")
-assert(named(root, "ssk_history_use_1").rate.caption == "5.1/s" and named(root, "ssk_history_use_2").rate.caption == "1.7/s")
+assert(LOC(named(root, "ssk_history_use_1").rate.caption) == "5.1/s" and LOC(named(root, "ssk_history_use_2").rate.caption) == "1.7/s")
 local old = objects()
 UI.refresh(player, true)
 assert(named(root, "ssk_history_controls") == controls and named(root, "ssk_history_camera") == camera)
@@ -193,7 +188,7 @@ assert(named(root, "ssk_bal_items") == items and not old[1].valid, "replace rend
 local period_picker = assert(find(root, function(e) return e.tags.ssk_ui == "period" end))
 period_picker.selected_index = 7
 assert(UI.on_selection(event(period_picker)))
-assert(stock_targets[1].tooltip:find("99 items", 1, true) and stock_targets[2].tooltip:find("222 items", 1, true)
+assert(LOC(stock_targets[1].tooltip):find("99 items", 1, true) and LOC(stock_targets[2].tooltip):find("222 items", 1, true)
   and not stock_targets[3].visible, "overlapping stock markers must show the newest measurement on their shared pixels")
 period_picker.selected_index = 2
 assert(UI.on_selection(event(period_picker)))
@@ -242,14 +237,14 @@ assert(named(root, "ssk_bal_items") == items and start_zero.valid)
 data_state = "warmup"
 UI.refresh(player, true)
 local rate_state = named(root, "ssk_history_rate_state")
-assert(rate_state.visible and rate_state.caption:find("Collecting", 1, true) and not camera.parent.visible)
+assert(rate_state.visible and LOC(rate_state.caption):find("Collecting", 1, true) and not camera.parent.visible)
 data_state = "idle"
 UI.refresh(player, true)
-assert(rate_state.visible and rate_state.caption:find("No recorded", 1, true))
+assert(rate_state.visible and LOC(rate_state.caption):find("No recorded", 1, true))
 data_state = nil
 
 assert(UI.on_click(event({ tags = { ssk_ui = "focus_item", key = "fluid/water" } })))
-assert(not stock_camera.parent.visible and named(root, "ssk_history_stock_state").caption:find("Fluid tanks", 1, true))
+assert(not stock_camera.parent.visible and LOC(named(root, "ssk_history_stock_state").caption):find("Fluid tanks", 1, true))
 select_inspector(1)
 assert(us.bal_mode == "flow" and named(inspector_tabs, "ssk_balance_flow_panel").ssk_sp)
 assert(fx.focus == "fluid/water" and named(root, "ssk_bal_items") == items)

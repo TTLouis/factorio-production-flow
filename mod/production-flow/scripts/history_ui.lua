@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 -- Balance's single-material time series. The cameras share one plot width and
 -- clock; the surrounding controls and legends remain ordinary Factorio GUI.
 local Canvas = require("scripts.canvas")
@@ -25,7 +26,7 @@ local PLOT_TOP, PLOT_BOTTOM = 12, 21
 local STOCK_MARKER_HALF = 3
 local SCROLL_INSET, SCROLLBAR_WIDTH, BODY_MARGIN_Y = 8, 12, 4
 local hover_views = {}
-local LAB_NOTE = "Lab use is estimated from measured science-pack consumption after recipe use. It may include spoilage or other untracked consumption."
+local LAB_NOTE = Loc("history-lab-use-is-estimated-from-measured-science")
 
 local function color(rgb)
   return { rgb[1] / 255, rgb[2] / 255, rgb[3] / 255, 1 }
@@ -37,16 +38,16 @@ end
 
 local function number(n)
   local a = math.abs(n)
-  if a >= 1000000000 then return string.format("%.3gG", n / 1000000000) end
-  if a >= 1000000 then return string.format("%.3gM", n / 1000000) end
-  if a >= 1000 then return string.format("%.3gk", n / 1000) end
+  if a >= 1000000000 then return Loc("history-g", string.format("%.3g", n / 1000000000)) end
+  if a >= 1000000 then return Loc("balance-m", string.format("%.3g", n / 1000000)) end
+  if a >= 1000 then return Loc("balance-k", string.format("%.3g", n / 1000)) end
   if a > 0 and a < 0.001 then return string.format("%.1g", n) end
   return string.format("%.3g", n)
 end
 
 local function material(key)
-  if not key then return "No material selected" end
-  if key == History.LABS then return "Labs (estimated)" end
+  if not key then return Loc("history-no-material-selected") end
+  if key == History.LABS then return Loc("history-labs-estimated") end
   local kind, name = key:match("^([^/]+)/(.+)$")
   local proto = kind and prototypes[kind] and prototypes[kind][name]
   return proto and { "", Graph.rt(key), " ", proto.localised_name } or name or key
@@ -65,12 +66,12 @@ local function usage_tooltip(header, totals, seconds, units, skip)
     return totals[a] > totals[b]
   end)
   local show_labs = totals[History.LABS] and totals[History.LABS] > 0 and not (skip and skip[History.LABS])
-  parts[#parts + 1] = show_labs and "\n\nEstimated usage breakdown" or "\n\nEstimated usage by product"
+  parts[#parts + 1] = show_labs and Loc("history-estimated-usage-breakdown") or Loc("history-estimated-usage-by-product")
   for _, key in ipairs(keys) do
-    parts[#parts + 1] = { "", "\n", key == History.OTHER and "Unattributed use" or material(key),
-      string.format("  %.5g %s", totals[key] / seconds, units) }
+    parts[#parts + 1] = { "", "\n", key == History.OTHER and Loc("history-unattributed-use") or material(key),
+      Loc.join("  ", Loc("history-formatted", string.format("%.5g", totals[key] / seconds), units)) }
   end
-  if show_labs then parts[#parts + 1] = "\n\n" .. LAB_NOTE end
+  if show_labs then parts[#parts + 1] = Loc.join("\n\n", LAB_NOTE) end
   return Tooltip.lines(parts)
 end
 
@@ -115,11 +116,11 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   header.style.height = 40
   MaterialPicker.add_heading(header, width)
   spacer(header)
-  header.add { type = "checkbox", name = "ssk_history_from_zero", state = false, caption = "Start from 0",
-    tooltip = "Fix the bottom of the Made and Used rate chart at zero. Uncheck to fit the axis to the recorded rates.",
+  header.add { type = "checkbox", name = "ssk_history_from_zero", state = false, caption = Loc("history-start-from-0"),
+    tooltip = Loc("history-fix-the-bottom-of-the-made-and"),
     tags = { ssk_ui = "history_zero" } }
-  header.add { type = "checkbox", name = "ssk_history_usage", state = true, caption = "Usage breakdown",
-    tooltip = "Show estimated uses alongside the total Used rate.", tags = { ssk_ui = "history_usage" } }
+  header.add { type = "checkbox", name = "ssk_history_usage", state = true, caption = Loc("history-usage-breakdown"),
+    tooltip = Loc("history-show-estimated-uses-alongside-the-total-used"), tags = { ssk_ui = "history_usage" } }
 
   local scroll = panel.add { type = "scroll-pane", name = "ssk_history_scroll", style = "naked_scroll_pane",
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
@@ -135,7 +136,7 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   body.style.vertical_spacing = 4
 
   local rate = row(body, "ssk_history_rate_title")
-  label(rate, nil, "Rate history", "caption_label")
+  label(rate, nil, Loc("history-rate-history"), "caption_label")
   spacer(rate)
   small(rate, "ssk_history_rate_legend", "")
   body.add { type = "flow", name = "ssk_history_rate_plot", direction = "vertical" }
@@ -149,15 +150,15 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   local uses = body.add { type = "flow", name = "ssk_history_uses", direction = "vertical" }
   uses.style.vertical_spacing = 2
   local heading = row(uses, "ssk_history_usage_heading")
-  label(heading, "ssk_history_usage_title", "Where it goes", "caption_label")
+  label(heading, "ssk_history_usage_title", Loc("history-where-it-goes"), "caption_label")
   spacer(heading)
-  small(heading, "ssk_history_usage_average", "Average used")
+  small(heading, "ssk_history_usage_average", Loc("history-average-used"))
   local products = uses.add { type = "table", name = "ssk_history_products", column_count = 4 }
   products.style.horizontal_spacing = 8
   local cell_width = math.floor((chart_width - 24) / 4)
   local rate_width = math.min(52, math.floor(cell_width * 0.45))
   for i = 1, 4 do
-    local product = row(products, "ssk_history_use_" .. i)
+    local product = row(products, Loc.join("ssk_history_use_", i))
     label(product, "material_name", "", nil, cell_width - rate_width - 4)
     small(product, "rate", "", rate_width).style.horizontal_align = "right"
   end
@@ -166,22 +167,22 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   net.style.horizontally_stretchable = true
   net.add { type = "line", direction = "horizontal" }
   local net_title = row(net, "ssk_history_net_title")
-  label(net_title, nil, "Net rate", "caption_label")
+  label(net_title, nil, Loc("history-net-rate"), "caption_label")
   spacer(net_title)
   small(net_title, "ssk_history_net_legend", "")
   net.add { type = "flow", name = "ssk_history_net_plot", direction = "vertical" }
 
   body.add { type = "line", direction = "horizontal" }
   local stock = row(body, "ssk_history_stock_title")
-  label(stock, nil, "Chest stock", "caption_label")
+  label(stock, nil, Loc("help-chest-stock"), "caption_label")
   spacer(stock)
-  small(stock, "ssk_history_stock_legend", swatch(MEASURED) .. " Measured  " .. swatch(ESTIMATED) .. " Estimated")
+  small(stock, "ssk_history_stock_legend", Loc("history-measured-estimated", swatch(MEASURED), swatch(ESTIMATED)))
   body.add { type = "flow", name = "ssk_history_stock_plot", direction = "vertical" }
   local stock_state = small(body, "ssk_history_stock_state", "", chart_width)
   stock_state.style.single_line = false
   local note = small(body, "ssk_history_stock_note", "", chart_width)
   note.style.single_line = false
-  note.tooltip = "Estimates use the recorded Made minus Used rate and are adjusted to meet the next measured scan. Light blue bars show physical chest counts at scan completion."
+  note.tooltip = Loc("history-estimates-use-the-recorded-made-minus-used")
 end
 
 local function averages(h)
@@ -208,10 +209,10 @@ local function nice_step(maximum, intervals)
 end
 
 local function ago(seconds)
-  if seconds == 0 then return "Now" end
-  if seconds >= 3600 then return "-" .. number(seconds / 3600) .. "h" end
-  if seconds >= 60 then return "-" .. number(seconds / 60) .. "m" end
-  return "-" .. number(seconds) .. "s"
+  if seconds == 0 then return Loc("history-now") end
+  if seconds >= 3600 then return Loc("history-h", number(seconds / 3600)) end
+  if seconds >= 60 then return Loc("history-m", number(seconds / 60)) end
+  return Loc("history-s", number(seconds))
 end
 
 local function time_x(h, width, tick)
@@ -248,10 +249,10 @@ end
 
 local function elapsed(h, tick)
   local seconds = math.floor((h.end_tick - tick) / 60 + 0.5)
-  if seconds == 0 then return "Now" end
-  if seconds < 60 then return string.format("%ds ago", seconds) end
-  if seconds < 3600 then return string.format("%dm %02ds ago", math.floor(seconds / 60), seconds % 60) end
-  return string.format("%dh %02dm %02ds ago", math.floor(seconds / 3600), math.floor(seconds / 60) % 60, seconds % 60)
+  if seconds == 0 then return Loc("history-now") end
+  if seconds < 60 then return Loc("history-s-ago", string.format("%d", seconds)) end
+  if seconds < 3600 then return Loc("history-m-s-ago", string.format("%d", math.floor(seconds / 60)), string.format("%02d", seconds % 60)) end
+  return Loc("history-h-m-s-ago", string.format("%d", math.floor(seconds / 3600)), string.format("%02d", math.floor(seconds / 60) % 60), string.format("%02d", seconds % 60))
 end
 
 local function rate_regions(h, width, units)
@@ -262,11 +263,10 @@ local function rate_regions(h, width, units)
       local right = Geometry.round(time_x(h, width, p.end_tick))
       if right > left then
         local start_tick = p.average_start_tick or p.start_tick
-        local tooltip = string.format("%s to %s\nMade  %.5g %s\nUsed  %.5g %s\nNet  %.5g %s",
-          elapsed(h, start_tick), elapsed(h, p.end_tick), p.made, units, p.used, units, p.net, units)
+        local tooltip = Loc("history-to-made-used-net", elapsed(h, start_tick), elapsed(h, p.end_tick), string.format("%.5g", p.made), units, string.format("%.5g", p.used), units, string.format("%.5g", p.net), units)
         if p.average_start_tick then
           local duration = Sampler.duration((p.end_tick - start_tick) / 60)
-          tooltip = "Rolling average over " .. duration .. "\n" .. tooltip
+          tooltip = Loc("history-rolling-average-over", duration, tooltip)
         end
         tooltip = usage_tooltip(tooltip, p.usage_detail or {}, 1, units)
         regions[#regions + 1] = { left = left, right = right, tooltip = tooltip }
@@ -444,8 +444,8 @@ local function draw_stock(painter, h, width, height, top)
     local y1 = math.min(bottom - 1, y(sample.count))
     painter.rect(x1, y1, x2 - x1, bottom - y1, color(sample.measured and MEASURED or ESTIMATED))
     if x2 > x1 then
-      local source = sample.measured and "Measured stock" or sample.live and "Estimated stock since last scan" or "Estimated stock"
-      local tooltip = string.format("%s\n%s  %.0f items", elapsed(h, sample.tick), source, sample.count)
+      local source = sample.measured and Loc("history-measured-stock") or sample.live and Loc("history-estimated-stock-since-last-scan") or Loc("history-estimated-stock")
+      local tooltip = Loc("history-items", elapsed(h, sample.tick), source, string.format("%.0f", sample.count))
       -- Stock markers can overlap after rounding. Match the painting order so
       -- a newer bar owns the pixels it covers in the time-only hover row.
       for pixel = x1, x2 - 1 do hover_by_x[pixel] = tooltip end
@@ -572,33 +572,31 @@ function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
   if rates then made, used, uses, partial = averages(h) end
   local active = rates and (made > 0 or used > 0)
   local stock = h and #h.stock > 0
-  summary.caption = rates and string.format("Made %s/s   Used %s/s   Net %s%s/s",
-    number(made), number(used), made > used and "+" or "", number(made - used)) or ""
+  summary.caption = rates and Loc("history-made-s-used-s-net-s", number(made), number(used), made > used and "+" or "", number(made - used)) or ""
   summary.visible = rates == true
   local legend = body.ssk_history_rate_title.ssk_history_rate_legend
-  local units = key and key:sub(1, 6) == "fluid/" and "fluid/s" or "items/s"
-  local period_tip = usage_tooltip("Average over recorded time in the selected period.",
+  local units = key and key:sub(1, 6) == "fluid/" and Loc("unit-fluid-rate") or Loc("history-items-s")
+  local period_tip = usage_tooltip(Loc("history-average-over-recorded-time-in-the-selected"),
     rates and (h.usage_totals or {}) or {}, rates and h.seconds or 1, units)
   summary.tooltip = period_tip
   local rolling = h and h.rolling_seconds
-  local rate_prefix = rolling and "Rolling avg   " or ""
-  local rolling_tip = rolling and ("Trailing average over up to " .. Sampler.duration(rolling)
-    .. ". The window starts again after a gap. Hover a point to see the recorded time it uses.")
-  legend.caption = rate_prefix .. swatch(MADE) .. " Made   " .. swatch(USED) .. " Used   " .. units
-  legend.tooltip = rolling_tip or "Rates per recorded chart bucket."
+  local rate_prefix = rolling and Loc.join(Loc("history-rolling-avg"), "   ") or ""
+  local rolling_tip = rolling and (Loc("history-trailing-average-over-up-to-the-window", Sampler.duration(rolling)))
+  legend.caption = Loc("history-made-used", rate_prefix, swatch(MADE), swatch(USED), units)
+  legend.tooltip = rolling_tip or Loc("history-rates-per-recorded-chart-bucket")
   local rate_state = body.ssk_history_rate_state
   rate_state.visible = not active
-  rate_state.caption = not key and "Select a material above or from the Balance list."
-    or not rates and "Collecting production history. Rates appear once sampling has recorded this surface."
-    or "No recorded production or consumption for this material in the selected period."
+  rate_state.caption = not key and Loc("history-select-a-material-above-or-from-the")
+    or not rates and Loc("history-collecting-production-history-rates-appear-once-sampling")
+    or Loc("history-no-recorded-production-or-consumption-for-this")
   local coverage = readout.ssk_history_coverage
   local duration = h and (h.end_tick - h.start_tick) / 60
   local missing = rates and duration - h.seconds or 0
   coverage.visible = missing >= 1 or partial == true
   if coverage.visible then
-    coverage.caption = missing >= 1 and ("Recorded " .. Sampler.duration(h.seconds) .. " of " .. Sampler.duration(duration) .. ".")
-      or "Some buckets have missing samples."
-    coverage.tooltip = "The chart leaves gaps where a time bucket has missing samples. Period averages still use the recorded portions."
+    coverage.caption = missing >= 1 and (Loc("history-recorded-of", Sampler.duration(h.seconds), Sampler.duration(duration)))
+      or Loc("history-some-buckets-have-missing-samples")
+    coverage.tooltip = Loc("history-the-chart-leaves-gaps-where-a-time")
   end
   readout.visible = summary.visible or coverage.visible
 
@@ -609,20 +607,19 @@ function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
     usage.ssk_history_usage_heading.ssk_history_usage_average.tooltip = period_tip
     local named = {}
     for _, product in ipairs(h.usage_keys) do if product ~= History.OTHER then named[product] = true end end
-    local other_tip = usage_tooltip("Usage outside the three products shown on the chart.", h.usage_totals or {},
+    local other_tip = usage_tooltip(Loc("history-usage-outside-the-three-products-shown-on"), h.usage_totals or {},
       h.seconds, units, named)
     for i = 1, 4 do
-      local entry = usage.ssk_history_products["ssk_history_use_" .. i]
+      local entry = usage.ssk_history_products[Loc.join("ssk_history_use_", i)]
       local product = h.usage_keys[i]
       entry.visible = product ~= nil
       if product then
         local other = product == History.OTHER
-        local caption = other and "Other uses" or material(product)
+        local caption = other and Loc("history-other-uses") or material(product)
         entry.material_name.caption = { "", swatch(USES[other and 4 or i]), " ", caption }
-        entry.rate.caption = number((uses[product] or 0) / h.seconds) .. "/s"
-        local tip = other and other_tip or { "", caption, string.format("\nEstimated usage  %.5g %s",
-          (uses[product] or 0) / h.seconds, units) }
-        if product == History.LABS then tip[#tip + 1] = "\n" .. LAB_NOTE end
+        entry.rate.caption = Loc("rate-per-second", number((uses[product] or 0) / h.seconds))
+        local tip = other and other_tip or { "", caption, Loc("history-estimated-usage", string.format("%.5g", (uses[product] or 0) / h.seconds), units) }
+        if product == History.LABS then tip[#tip + 1] = Loc.join("\n", LAB_NOTE) end
         entry.material_name.tooltip, entry.rate.tooltip = tip, tip
       end
     end
@@ -630,30 +627,28 @@ function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
 
   local stock_state = body.ssk_history_stock_state
   stock_state.visible = not stock
-  stock_state.caption = not key and "Select an item to view chest stock history."
-    or h and not h.stock_supported and "Chest stock history is available for items. Fluid tanks are outside chest scans."
-    or "No completed chest stock scan in the selected period."
+  stock_state.caption = not key and Loc("history-select-an-item-to-view-chest-stock")
+    or h and not h.stock_supported and Loc("history-chest-stock-history-is-available-for-items")
+    or Loc("history-no-completed-chest-stock-scan-in-the")
   body.ssk_history_stock_title.ssk_history_stock_legend.visible = stock == true
   local stock_note = body.ssk_history_stock_note
   stock_note.visible = stock == true
   if stock then
     local last = h.stock[#h.stock]
     if last.live then
-      stock_note.caption = string.format("Latest estimate: %s items (%s). Updated from recorded rates.",
-        number(last.count), elapsed(h, last.tick))
+      stock_note.caption = Loc("history-latest-estimate-items-updated-from-recorded-rates", number(last.count), elapsed(h, last.tick))
     elseif #h.stock == 1 then
-      stock_note.caption = "Stock estimates appear as rates are recorded after a scan."
+      stock_note.caption = Loc("history-stock-estimates-appear-as-rates-are-recorded")
     else
-      stock_note.caption = "Dark blue bars estimate stock from recorded rates."
+      stock_note.caption = Loc("history-dark-blue-bars-estimate-stock-from-recorded")
     end
   end
 
   local net = body.ssk_history_net_section
   net.visible = rates == true
   local net_legend = net.ssk_history_net_title.ssk_history_net_legend
-  net_legend.caption = rate_prefix .. swatch(NET_POSITIVE) .. " Surplus   " .. swatch(USED) .. " Deficit   " .. units
-  net_legend.tooltip = (rolling_tip and rolling_tip .. "\n" or "")
-    .. "Made minus Used per second. Green shows a surplus. Red shows a deficit. Zero means production matches consumption."
+  net_legend.caption = Loc("history-surplus-deficit", rate_prefix, swatch(NET_POSITIVE), swatch(USED), units)
+  net_legend.tooltip = Loc("history-made-minus-used-per-second-green-shows", (rolling_tip and Loc.join(rolling_tip, "\n") or ""))
   -- Allow a third of the inspector for the stock and net sections together,
   -- including their headings, note, and divider.
   local stock_heading_height, net_heading_height = 48, 36

@@ -37,6 +37,14 @@ candidate archive. These helpers and test hooks are excluded from release ZIPs.
 GUI changes follow the vanilla button, frame and label rules in
 [ui-style.md](ui-style.md).
 
+Player-facing text follows [localization.md](localization.md). The normal Lua
+runner also validates locale keys, parameters and catalog coverage, runs the
+validator's Python regression tests, and exercises native LocalisedString shapes
+in the Lua UI tests. Native graphical save phases additionally translate every
+key and plural test case through Factorio itself. Use `--language zh-CN` with a
+fresh stage to validate Simplified Chinese; the default is English. The runner
+records the actual client locale and preserves phase-specific screenshots.
+
 The prototype rename to production-flow makes it a separate mod from the old
 unpublished signal-sankey experiments. Do not enable both in the same test.
 History from the experimental mod is not migrated; the beta collects new history.

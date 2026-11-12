@@ -38,7 +38,7 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
     assert(icon.raise_hover_events and bar.raise_hover_events, "both hit areas must highlight")
     assert(type(icon.tooltip) == "table" and icon.tooltip == bar.tooltip, "one native hover card on either target")
     assert(icon.tooltip[5] == "\n" and (#icon.tooltip == 6
-      or (#icon.tooltip == 7 and icon.tooltip[7]:find("Labs (estimated)", 1, true))),
+      or (#icon.tooltip == 7 and LOC(icon.tooltip[7]):find("Labs (estimated)", 1, true))),
       "compact name and rate on separate lines with a lab estimate for science packs")
     if renderer == "poly" then assert(bar.sprite == "ssk-node-hit", "polygon hit area must be transparent") end
   end
@@ -60,7 +60,7 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
   -- Live redraw retains pinned state and updates native tooltip data.
   SK.fill(player, c, us, 1000, 700, false)
   elements = collect(c)
-  assert(elements.labels[key].visible and elements.bars[key].tooltip[6]:find("items/s", 1, true))
+  assert(elements.labels[key].visible and LOC(elements.bars[key].tooltip[6]):find("items/s", 1, true))
   assert(SK.on_click(event(elements.icons[key]), us) == "rebuild" and not us.sel)
   SK.fill(player, c, us, 1000, 700, false)
   assert(not collect(c).labels[key].visible, "second click must unpin")

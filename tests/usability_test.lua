@@ -11,15 +11,16 @@ end
 local root=player.gui.screen.ssk_main
 UI.on_click({element=find(root,function(e)return e.tags.ssk_sk=="chart_settings" end),player_index=1})
 local live=find(root,function(e)return e.tags.ssk_sk=="live" end)
-assert(live.caption=="Auto-update chart","update control must name its scope")
+assert(LOC(live.caption) == "Auto-update chart","update control must name its scope")
 local period=find(root,function(e)return e.tags.ssk_ui=="period" end)
-assert(table.concat(period.items, " ")=="1m 10m 1H 10H 50H 250H 1000H","Period must match the fixed production scopes")
+local period_names={};for i,item in ipairs(period.items) do period_names[i]=LOC(item) end
+assert(table.concat(period_names, " ")=="1m 10m 1H 10H 50H 250H 1000H","Period must match the fixed production scopes")
 local uses=find(root,function(e)return e.tags.ssk_column=="uses" end)
-assert(type(uses.caption)=="table" and uses.caption[2]:find("consumed"),"Uses must identify selected-material consumption")
+assert(type(uses.caption)=="table" and LOC(uses.caption):find("consumed"),"Uses must identify selected-material consumption")
 local saved_coverage=Sm.coverage
 Sm.coverage=function() return 42 end
 UI.refresh(player,true)
-assert(root.ssk_window_bar.ssk_history.visible and root.ssk_window_bar.ssk_history.caption:find("42 s / 10 min",1,true),"warm-up must show available history")
+assert(root.ssk_window_bar.ssk_history.visible and LOC(root.ssk_window_bar.ssk_history.caption):find("42 s / 10 min",1,true),"warm-up must show available history")
 Sm.coverage=saved_coverage
 local help=find(root,function(e)return e.tags.ssk_ui=="help" end)
 assert(help.type=="sprite-button" and help.sprite=="utility/questionmark","Help must use the built-in question-mark frame action icon")
@@ -43,5 +44,5 @@ local list=root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance
 local update=find(root,function(e)return e.tags.ssk_ui=="bal_update" end)
 UI.on_click({element=update,player_index=1})
 assert(root.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table.ssk_bal_root~=list and fx.focus==focus,"Update list must reapply membership without changing inspected material")
-assert(B.STATUS.starved.label=="Low activity" and B.STATUS.limited.label=="Possible supply limit","activity alerts must avoid claiming a confirmed cause")
+assert(LOC(B.STATUS.starved.label)=="Low activity" and LOC(B.STATUS.limited.label)=="Possible supply limit","activity alerts must avoid claiming a confirmed cause")
 print("USABILITY OK: physical stock, controls, help and explicit list refresh")

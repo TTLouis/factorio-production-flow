@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 -- Production Flow — control stage entry point (event wiring only)
 
 local Graph = require("scripts.graph")
@@ -117,7 +118,7 @@ script.on_event(defines.events.on_player_changed_surface, function(e) UI.on_surf
 ---------------------------------------------------------------------------
 -- commands
 ---------------------------------------------------------------------------
-commands.add_command("sankey", "Toggle the Production Flow window.", function(cmd)
+commands.add_command("sankey", Loc("control-toggle-the-production-flow-window"), function(cmd)
   local p = game.get_player(cmd.player_index)
   if p then UI.toggle(p) end
 end)

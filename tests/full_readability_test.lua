@@ -40,6 +40,35 @@ for _,renderer in ipairs({"poly","sprites"}) do
   SK.on_selection(event(colors),us); SK.fill(player,c,us,1600,850,false)
   for _,r in ipairs(storage.sk_render[1].ribbons) do assert(r.color==P.material(r.from)) end
 end
+-- Native GUI lengths are rounded separately after scaling. Every overlay must
+-- leave the next sibling at the canvas origin, including transparent ribbon hits.
+-- The old top + height - (top + height) cancellation drifts at 125%.
+local original_scale=player.display_scale
+local function pixels(value,scale)
+  local n=(value or 0)*scale
+  return n<0 and math.ceil(n) or math.floor(n)
+end
+for _,scale in ipairs({1,1.25}) do
+  player.display_scale=scale
+  for _,renderer in ipairs({"poly","sprites"}) do
+    local us={view="detail",layout="clean",renderer=renderer,period=600,show_labels=true}
+    SK.fill(player,c,us,1600,850,true)
+    local advance=0
+    local overlays=c.ssk_sp.ssk_canvas.children
+    assert(#overlays>20,"scaling regression needs multiple overlays")
+    for _,overlay in ipairs(overlays) do
+      local s=overlay.style
+      advance=advance+pixels(s.top_margin,scale)+pixels(s.height,scale)+pixels(s.bottom_margin,scale)
+      assert(advance==0,"scaled overlays move subsequent icons, bars or ribbon hover targets")
+      if overlay.type=="flow" then
+        local child=assert(overlay.children[1])
+        assert((child.style.top_margin or 0)+(child.style.height or 0)<=s.height,
+          "overlay wrapper would cull its child")
+      end
+    end
+  end
+end
+player.display_scale=original_scale
 -- Regression: dense columns must not fall back to scale=1 and giant ribbons.
 local us={view="detail",layout="clean",lines="curves",heights="linear",period=600}
 SK.defaults(us)
@@ -88,10 +117,10 @@ local checked=0
 for k,n in pairs(material.nodes) do
   if n.selected_usage then
     local target=find(c,"node",k)
-    assert(target.tooltip[9]==" consumed", "consumer tooltip must identify selected material usage")
-    assert(target.tooltip[6]:find(focus:sub(1,5)=="fluid" and "fluid/s" or "items/s",1,true))
+    assert(LOC(target.tooltip[7]):find(" consumed", 1, true), "consumer tooltip must identify selected material usage")
+    assert(LOC(target.tooltip[6]):find(focus:sub(1,5)=="fluid" and "fluid/s" or "items/s",1,true))
     assert(find_rate(c,k).caption==target.tooltip[6],"visible uses label must match selected-material consumption")
-    if n.kind~="recipe" then assert(target.tooltip[10]:find("Consumer production:",1,true)) end
+    if n.kind~="recipe" then assert(LOC(target.tooltip[8]):find("Consumer production:",1,true)) end
     checked=checked+1
   end
 end

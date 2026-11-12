@@ -16,6 +16,7 @@ __pycache__/
 # Development history and review drafts remain local
 /docs/*
 !/docs/development.md
+!/docs/localization.md
 !/docs/validation.md
 !/docs/calculations.md
 !/docs/mod-portal.md

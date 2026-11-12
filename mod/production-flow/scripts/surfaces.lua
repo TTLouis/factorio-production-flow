@@ -1,5 +1,5 @@
--- Human names for surfaces: space platforms show the name the player gave the ship,
--- planets their capitalised name. Plain strings (safe for sorting, export and GUI).
+local Loc = require("scripts.locale")
+-- Plain names for sorting/exports; native localized names for the interface.
 local Su = {}
 
 function Su.platform_name(sf)
@@ -14,17 +14,29 @@ end
 function Su.label(sf)
   if not (sf and sf.valid) then return "?" end
   local pn = Su.platform_name(sf)
-  if pn then return "Platform: " .. pn end
+  if pn then return pn end
   local n = sf.name
   return (string.gsub(n, "^%l", string.upper))
+end
+
+function Su.localised(sf)
+  if not (sf and sf.valid) then return "?" end
+  local pn = Su.platform_name(sf)
+  if pn then return Loc("surfaces-platform", pn) end
+  local ok, planet = pcall(function() return sf.planet end)
+  if ok and planet then
+    return { "?", planet.prototype and planet.prototype.localised_name
+      or { "space-location-name." .. planet.name }, Su.label(sf) }
+  end
+  return Su.label(sf)
 end
 
 -- rich-text icon in front of the label (planet icon / platform hub icon)
 function Su.rich(sf)
   if not (sf and sf.valid) then return "?" end
-  if Su.platform_name(sf) then return "[img=item/space-platform-hub] " .. Su.label(sf) end
+  if Su.platform_name(sf) then return Loc.join("[img=item/space-platform-hub] ", Su.localised(sf)) end
   local ok, planet = pcall(function() return sf.planet end)
-  if ok and planet then return "[planet=" .. planet.name .. "] " .. Su.label(sf) end
+  if ok and planet then return Loc.join("[planet=" .. planet.name .. "] ", Su.localised(sf)) end
   return Su.label(sf)
 end
 

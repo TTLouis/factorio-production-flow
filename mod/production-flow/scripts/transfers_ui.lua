@@ -1,9 +1,11 @@
+local Loc = require("scripts.locale")
 local Canvas = require("scripts.canvas")
 local Graph = require("scripts.graph")
 local Sampler = require("scripts.sampler")
 local Sprites = require("shared.sprites")
 local Transfers = require("scripts.transfers")
 local Tooltip = require("scripts.tooltip")
+local Surfaces = require("scripts.surfaces")
 
 local UI = {}
 local LOADED = { r = 0.28, g = 0.59, b = 0.73, a = 1 }
@@ -51,7 +53,7 @@ local function sprite(parent, path, size)
 end
 
 local function action(parent, name, icon, tooltip, tags)
-  return parent.add { type = "sprite-button", name = name, sprite = "utility/" .. icon,
+  return parent.add { type = "sprite-button", name = name, sprite = Loc.join("utility/", icon),
     style = "tool_button", tooltip = tooltip, tags = tags }
 end
 
@@ -70,14 +72,14 @@ end
 
 local function mass(data)
   local grams = data.weight or 0
-  if data.unknown_weight and grams == 0 then return "Unknown" end
-  local unit, value = "g", number(grams)
+  if data.unknown_weight and grams == 0 then return Loc("transfers-unknown") end
+  local unit, value = Loc("transfers-g"), number(grams)
   if grams >= 1000000 then
-    unit, value = "t", string.format("%.2f", grams / 1000000)
+    unit, value = Loc("transfers-t"), string.format("%.2f", grams / 1000000)
   elseif grams >= 1000 then
-    unit, value = "kg", string.format("%.1f", grams / 1000)
+    unit, value = Loc("transfers-kg"), string.format("%.1f", grams / 1000)
   end
-  return (data.unknown_weight and "≥" or "") .. value .. " " .. unit
+  return Loc.join((data.unknown_weight and "≥" or ""), value, " ", unit)
 end
 
 local function clock(tick, seconds)
@@ -89,22 +91,22 @@ end
 
 local function range(from, to)
   local seconds = to - from < 3600
-  return clock(from, seconds) .. " – " .. clock(to, seconds)
+  return Loc.join(clock(from, seconds), " – ", clock(to, seconds))
 end
 
 local function item_name(name, with_icon)
   local prototype = prototypes.item[name]
   if not prototype then return (name:gsub("-", " ")) end
-  if with_icon then return { "", Graph.rt("item/" .. name), " ", prototype.localised_name } end
+  if with_icon then return { "", Graph.rt(Loc.join("item/", name)), " ", prototype.localised_name } end
   return prototype.localised_name
 end
 
 local function manifest_tooltip(header, detail, items, seconds)
   local parts = { header, "\n", detail }
-  if seconds and seconds > 0 and #items > 0 then parts[#parts + 1] = "\nAverage rate over recorded time" end
+  if seconds and seconds > 0 and #items > 0 then parts[#parts + 1] = Loc("transfers-average-rate-over-recorded-time") end
   for _, item in ipairs(items) do
     local entry = { "", "\n", item_name(item.name, true), "  ", number(item.count) }
-    if seconds and seconds > 0 then entry[#entry + 1] = string.format("  ·  %.5g items/s", item.count / seconds) end
+    if seconds and seconds > 0 then entry[#entry + 1] = Loc.join("  ", Loc("transfers-items-s", string.format("%.5g", item.count / seconds))) end
     parts[#parts + 1] = entry
   end
   return Tooltip.lines(parts)
@@ -112,7 +114,12 @@ end
 
 local function endpoint_name(endpoint)
   local name, icon = Transfers.describe(endpoint)
-  return endpoint.surface.valid and name or name .. " (removed)", icon
+  if endpoint.surface.valid then
+    name = Surfaces.platform_name(endpoint.surface) or Surfaces.localised(endpoint.surface)
+  elseif icon and icon:match("^space%-location/") then
+    name = { "?", { "space-location-name." .. icon:sub(16) }, name }
+  end
+  return endpoint.surface.valid and name or Loc("removed-surface", name), icon
 end
 
 local function platform_hub(force, id)
@@ -128,14 +135,14 @@ end
 
 local function add_platform_rows(pane, platforms, width, favourite)
   for _, platform in ipairs(platforms) do
-    local line = row(pane, "platform_" .. platform.id)
+    local line = row(pane, Loc.join("platform_", platform.id))
     line.style.horizontal_spacing, line.style.height = 4, 28
     local star = line.add { type = "sprite-button", name = "star", style = "tool_button",
       sprite = favourite and "ssk-star" or "ssk-star-off", toggled = favourite,
       tags = { transfer_favourite = platform.id },
-      tooltip = favourite and "Remove this platform from favourites" or "Add this platform to favourites at the top" }
+      tooltip = favourite and Loc("transfers-remove-this-platform-from-favourites") or Loc("transfers-add-this-platform-to-favourites-at-the") }
     star.style.width, star.style.height = 24, 24
-    local caption = platform.icon and ("[img=" .. platform.icon .. "] " .. platform.name) or platform.name
+    local caption = platform.icon and (Loc.join("[img=", platform.icon, "] ", platform.name)) or platform.name
     local pick = line.add { type = "button", name = "pick", style = "list_box_item", caption = caption,
       tooltip = platform.name, tags = { transfer_platform = platform.id } }
     pick.style.width, pick.style.height = width - 28, 28
@@ -155,22 +162,22 @@ local function update_platforms(pane, platforms, selected, favourites)
     local favourite = favourites and favourites[platform.id]
     local list = favourite and pinned or others
     list[#list + 1] = platform
-    parts[#parts + 1] = platform.id .. ":" .. (favourite and "1:" or "0:") .. platform.name
+    parts[#parts + 1] = Loc.join(platform.id, ":", (favourite and "1:" or "0:"), platform.name)
   end
-  local signature = table.concat(parts, "\n")
+  local signature = Loc.join_list(parts, "\n")
   local width = pane.tags.row_width
   if pane.tags.signature ~= signature then
     pane.clear()
     pane.tags = { row_width = width, signature = signature }
     if #pinned > 0 then
-      platform_group(pane, width, "[img=ssk-star] Favourites", 0)
+      platform_group(pane, width, Loc("balance-favourites"), 0)
       add_platform_rows(pane, pinned, width, true)
-      if #others > 0 then platform_group(pane, width, "Other platforms", 8) end
+      if #others > 0 then platform_group(pane, width, Loc("transfers-other-platforms"), 8) end
     end
     add_platform_rows(pane, others, width, false)
   end
   for _, platform in ipairs(platforms) do
-    local pick = pane["platform_" .. platform.id].pick
+    local pick = pane[Loc.join("platform_", platform.id)].pick
     local toggled = selected ~= nil and selected.id == platform.id
     if pick.toggled ~= toggled then pick.toggled = toggled end
   end
@@ -194,7 +201,7 @@ local function build(content, width, height)
   local sidebar = split.add { type = "frame", name = "sidebar", style = "inside_deep_frame", direction = "vertical" }
   sidebar.style.width, sidebar.style.height, sidebar.style.padding = sidebar_w, height, LIST_INSET
   local side_header = strip(sidebar, "heading", LIST_HEADER_HEIGHT)
-  label(side_header, nil, "Platforms", "subheader_caption_label")
+  label(side_header, nil, Loc("transfers-platforms"), "subheader_caption_label")
   spacer(side_header)
   label(side_header, "count", "", "subheader_semibold_label")
   local list_w = sidebar_w - 2 * LIST_INSET
@@ -209,9 +216,9 @@ local function build(content, width, height)
     style = "tabbed_pane_with_no_side_padding", tags = { transfer_tabs = true } }
   tabs.style.width, tabs.style.top_margin = details_w, 0
   local tab_w, tab_h = details_w - 2 * TAB_MARGIN, height - TAB_CHROME
-  for _, title in ipairs({ "Flow", "History" }) do
-    local tab = tabs.add { type = "tab", caption = title }
-    local body = tabs.add { type = "frame", name = "ssk_transfer_" .. title:lower(), direction = "vertical",
+  for _, view in ipairs({ { "flow", Loc("help-flow") }, { "history", Loc("help-history") } }) do
+    local tab = tabs.add { type = "tab", caption = view[2] }
+    local body = tabs.add { type = "frame", name = "ssk_transfer_" .. view[1], direction = "vertical",
       style = "inside_deep_frame" }
     body.style.width, body.style.height = tab_w, tab_h
     body.style.left_margin, body.style.right_margin, body.style.padding = TAB_MARGIN, TAB_MARGIN, TAB_INSET
@@ -231,10 +238,9 @@ local function build(content, width, height)
   spacer(heading)
   local compact = header_w < 400
   heading.add { type = "checkbox", name = "ssk_transfer_show_all_production",
-    caption = compact and "All production" or "Show all onboard production",
+    caption = compact and Loc("transfers-all-production") or Loc("transfers-show-all-onboard-production"),
     state = false, tags = { transfer_show_all_production = true },
-    tooltip = "When off, Made aboard shows only items this platform made and unloaded in the selected period.\n"
-      .. "Made aboard counts production. Unloaded counts confirmed deliveries." }
+    tooltip = Loc("transfers-when-off-made-aboard-shows-only-items") }
   local icon = heading.add { type = "sprite", name = "icon", resize_to_sprite = false }
   icon.style.width, icon.style.height = 24, 24
   icon.style.left_margin = 4
@@ -242,7 +248,7 @@ local function build(content, width, height)
   caption.style.maximal_width = math.min(320, math.max(32, header_w - (compact and 156 or 240) - 36))
   caption.style.single_line = true
   heading.add { type = "sprite-button", name = "ssk_transfer_jump", style = "tool_button",
-    sprite = "utility/go_to_arrow", tooltip = "Jump to this platform in remote view" }
+    sprite = "utility/go_to_arrow", tooltip = Loc("transfers-jump-to-this-platform-in-remote-view") }
   return panel
 end
 
@@ -280,7 +286,7 @@ local function card_height(items)
 end
 
 local function ranking(parent, name, icon, data, x, y, width, colour)
-  local tip = manifest_tooltip(name, "Cargo mass: " .. mass(data), data.items)
+  local tip = manifest_tooltip(name, Loc("transfers-cargo-mass", mass(data)), data.items)
   local wrapper = parent.add { type = "flow", direction = "horizontal" }
   place(wrapper, x, y, width, card_height(data.items))
   local card = wrapper.add { type = "frame", name = "ssk_transfer_surface_card", style = "inside_deep_frame",
@@ -296,12 +302,12 @@ local function ranking(parent, name, icon, data, x, y, width, colour)
 
   for i = 1, math.min(5, #data.items) do
     local item = data.items[i]
-    local line = row(card, "rank_" .. i)
+    local line = row(card, Loc.join("rank_", i))
     line.tags = { transfer_rank = item.name, count = item.count }
     line.style.height, line.style.horizontal_spacing = CARD_ROW, 4
     line.style.left_padding, line.style.right_padding = 6, 6
     line.tooltip = tip
-    sprite(line, "item/" .. item.name, 19)
+    sprite(line, Loc.join("item/", item.name), 19)
     local bar_w = width >= 180 and math.min(48, math.floor(width / 6)) or 0
     local name_w = width - bar_w - (bar_w > 0 and 95 or 92)
     label(line, nil, item_name(item.name), nil, name_w).tooltip = tip
@@ -316,7 +322,7 @@ local function ranking(parent, name, icon, data, x, y, width, colour)
     count.style.horizontal_align, count.tooltip = "right", tip
   end
   if #data.items > 5 then
-    local foot = label(card, nil, "+" .. (#data.items - 5) .. " more · Hover for all items", "grey_label", width - 8)
+    local foot = label(card, nil, Loc("transfers-more-hover-for-all-items", (#data.items - 5)), "grey_label", width - 8)
     foot.style.left_margin, foot.tooltip = 4, tip
   end
 end
@@ -340,7 +346,9 @@ end
 local function flow_signature(result)
   local parts = { result.platform.id, result.platform.name, result.made.seconds or 0 }
   local function manifest(data)
-    parts[#parts + 1] = mass(data)
+    -- Cache identities depend on raw data, never a per-player LocalisedString.
+    parts[#parts + 1] = data.weight or 0
+    parts[#parts + 1] = tostring(data.unknown_weight == true)
     for _, item in ipairs(data.items) do
       parts[#parts + 1], parts[#parts + 2] = item.name, item.count
     end
@@ -348,7 +356,8 @@ local function flow_signature(result)
   for _, routes in ipairs({ result.loading, result.unloading }) do
     parts[#parts + 1] = #routes
     for _, route in ipairs(routes) do
-      parts[#parts + 1], parts[#parts + 2] = route.endpoint.id, endpoint_name(route.endpoint)
+      parts[#parts + 1], parts[#parts + 2] = route.endpoint.id, Transfers.describe(route.endpoint)
+      parts[#parts + 1] = tostring(route.endpoint.surface.valid)
       manifest(route)
     end
   end
@@ -397,41 +406,41 @@ local function flow_graph(player, parent, result, width, viewport)
   camera(parent, player, painter, width, height)
   local platform_name = result.platform.name
   local function route_hover(shape, caption, route, direction, index)
-    local tip = manifest_tooltip(caption, "Cargo mass: " .. mass(route), route.items, result.covered_seconds)
+    local tip = manifest_tooltip(caption, Loc("transfers-cargo-mass", mass(route)), route.items, result.covered_seconds)
     Tooltip.ribbon(parent, { shape }, tip, { transfer_ribbon = direction },
-      "ssk_transfer_ribbon_" .. direction .. "_" .. index .. "_")
+      Loc.join("ssk_transfer_ribbon_", direction, "_", index, "_"))
   end
   for i, cell in ipairs(left) do
     local offset = (i / (#left + 1) - 0.5) * 34
     local shape = draw_ribbon(painter, x_left + card_w, left_top + cell.center, x_center, middle + offset, cell.route, highest, LOADED)
-    route_hover(shape, endpoint_name(cell.route.endpoint) .. " → " .. platform_name, cell.route, "loaded", i)
+    route_hover(shape, Loc.join(endpoint_name(cell.route.endpoint), " → ", platform_name), cell.route, "loaded", i)
   end
   for i, cell in ipairs(right) do
     local offset = (i / (#right + 1) - 0.5) * 34
     local shape = draw_ribbon(painter, x_center + center_w, middle + offset, x_right, right_top + cell.center, cell.route, highest, UNLOADED)
-    route_hover(shape, platform_name .. " → " .. endpoint_name(cell.route.endpoint), cell.route, "unloaded", i)
+    route_hover(shape, Loc.join(platform_name, " → ", endpoint_name(cell.route.endpoint)), cell.route, "unloaded", i)
   end
   if made then
     local x, y = x_left + card_w, made_y + made_height / 2
     painter.line(x, y, x_center, center_y + 94, MADE, 2, true)
     local shape = ribbon_shape(x, y, x_center, center_y + 94, 2, true)
-    local tip = manifest_tooltip("Made aboard " .. platform_name, "Recorded platform production", result.made.items, result.made.seconds)
+    local tip = manifest_tooltip(Loc("transfers-made-aboard", platform_name), Loc("transfers-recorded-platform-production"), result.made.items, result.made.seconds)
     Tooltip.ribbon(parent, { shape }, tip, { transfer_ribbon = "made" }, "ssk_transfer_ribbon_made_")
   end
   if not update then return end
   parent.tags = { transfer_graph = signature }
-  canvas_label(parent, "Loading surfaces", "heading_2_label", x_left, 2, card_w)
-  canvas_label(parent, "Selected platform", "heading_2_label", x_center, 2, center_w, "center")
-  canvas_label(parent, "Unloading surfaces", "heading_2_label", x_right, 2, card_w)
-  if #left == 0 then canvas_label(parent, "No recorded loads", "grey_label", x_left, empty_y, card_w) end
-  if #right == 0 then canvas_label(parent, "No recorded unloads", "grey_label", x_right, empty_y, card_w) end
+  canvas_label(parent, Loc("transfers-loading-surfaces"), "heading_2_label", x_left, 2, card_w)
+  canvas_label(parent, Loc("transfers-selected-platform"), "heading_2_label", x_center, 2, center_w, "center")
+  canvas_label(parent, Loc("transfers-unloading-surfaces"), "heading_2_label", x_right, 2, card_w)
+  if #left == 0 then canvas_label(parent, Loc("transfers-no-recorded-loads"), "grey_label", x_left, empty_y, card_w) end
+  if #right == 0 then canvas_label(parent, Loc("transfers-no-recorded-unloads"), "grey_label", x_right, empty_y, card_w) end
   for _, entry in ipairs({ { left, x_left, 7, left_top }, { right, x_right, 5, right_top } }) do
     for _, cell in ipairs(entry[1]) do
       local name, icon = endpoint_name(cell.route.endpoint)
       ranking(parent, name, icon, cell.route, entry[2], math.floor(entry[4] + cell.y + 0.5), card_w, entry[3])
     end
   end
-  if made then ranking(parent, "Made aboard", nil, result.made, x_left, math.floor(made_y + 0.5), card_w, 15) end
+  if made then ranking(parent, Loc("transfers-made-aboard-2"), nil, result.made, x_left, math.floor(made_y + 0.5), card_w, 15) end
 
   local wrapper = parent.add { type = "flow", direction = "horizontal" }
   place(wrapper, x_center, center_y, center_w, PLATFORM_HEIGHT)
@@ -441,16 +450,16 @@ local function flow_graph(player, parent, result, width, viewport)
   local header = strip(platform, "heading", 34)
   sprite(header, result.platform.icon, 23)
   label(header, nil, result.platform.name, "subheader_semibold_label", center_w - 44).tooltip = result.platform.name
-  for _, stat in ipairs({ { "Loaded", result.loaded, 7 }, { "Unloaded", result.unloaded, 5 },
-      { "Made", result.made, 15 } }) do
+  for _, stat in ipairs({ { Loc("transfers-loaded"), result.loaded, 7 }, { Loc("transfers-unloaded"), result.unloaded, 5 },
+      { Loc("transfers-made"), result.made, 15 } }) do
     local line = row(platform)
     line.style.height, line.style.left_padding, line.style.right_padding = 25, 8, 8
     sprite(line, Sprites.bar(stat[3]), 7)
     label(line, nil, stat[1])
     spacer(line)
-    local unavailable = stat[1] == "Made" and result.made.seconds == 0
+    local unavailable = stat[1] == Loc("transfers-made") and result.made.seconds == 0
     local weight = label(line, nil, unavailable and "—" or mass(stat[2]), "bold_label")
-    if unavailable then weight.tooltip = "No production history is available for this platform and period." end
+    if unavailable then weight.tooltip = Loc("transfers-no-production-history-is-available-for-this") end
   end
 end
 
@@ -465,24 +474,23 @@ local function render_flow(player, body, result, note)
     local legend = row(body, "legend")
     legend.style.width, legend.style.height = width, 26
     legend.style.left_padding, legend.style.right_padding = 8, 8
-    for _, key in ipairs({ { "Loaded", 7 }, { "Unloaded", 5 }, { "Made aboard", 15 } }) do
+    for _, key in ipairs({ { Loc("transfers-loaded"), 7 }, { Loc("transfers-unloaded"), 5 }, { Loc("transfers-made-aboard-2"), 15 } }) do
       sprite(legend, Sprites.bar(key[2]), 8)
       label(legend, nil, key[1], "grey_label").style.right_margin = 8
     end
     spacer(legend)
     label(legend, "note", "", "grey_label", math.max(40, width - 300)).style.horizontal_align = "right"
   end
-  body.legend.note.caption = note or "Ribbon width shows known cargo mass."
-  body.legend.note.tooltip = note or "Mass uses each item's Space Age rocket weight. Made aboard is sampled platform production."
+  body.legend.note.caption = note or Loc("transfers-ribbon-width-shows-known-cargo-mass")
+  body.legend.note.tooltip = note or Loc("transfers-mass-uses-each-item-s-space-age")
   flow_graph(player, body.graph.canvas, result, width, graph_height)
 end
 
 local function bucket_tooltip(bucket, direction, start_tick, end_tick, recorded_from)
   local cargo = bucket[direction]
-  local title = (direction == "loaded" and "Loaded onto platform" or "Unloaded to surface")
-    .. " · " .. range(start_tick, end_tick)
-  local detail = number(cargo.pods) .. (cargo.pods == 1 and " pod" or " pods")
-  if cargo.pods > 0 then detail = detail .. " · " .. mass(cargo) end
+  local title = Loc.join((direction == "loaded" and Loc("transfers-loaded-onto-platform") or Loc("transfers-unloaded-to-surface")), " · ", range(start_tick, end_tick))
+  local detail = Loc("cargo-pod-count", cargo.pods, number(cargo.pods))
+  if cargo.pods > 0 then detail = Loc.join(detail, " · ", mass(cargo)) end
   local seconds = math.max(0, end_tick - math.max(start_tick, recorded_from)) / 60
   return manifest_tooltip(title, detail, cargo.items, seconds)
 end
@@ -534,8 +542,8 @@ local function timeline(player, chart, result, width, height)
   end
   local middle_top = math.floor((top + mid) / 2)
   local middle_bottom = math.floor((mid + bottom) / 2)
-  for _, lane in ipairs({ { middle_top, LOADED, "Loaded onto", "the platform" },
-      { middle_bottom, UNLOADED, "Unloaded to", "a surface" } }) do
+  for _, lane in ipairs({ { middle_top, LOADED, Loc("transfers-loaded-onto"), Loc("transfers-the-platform") },
+      { middle_bottom, UNLOADED, Loc("transfers-unloaded-to"), Loc("transfers-a-surface") } }) do
     painter.rect(8, lane[1] - 8, 8, 8, lane[2])
     painter.text(22, lane[1] - 4, lane[3], TICK, "left")
     painter.text(22, lane[1] + 12, lane[4], TICK, "left")
@@ -557,7 +565,7 @@ local function timeline(player, chart, result, width, height)
         end
       end
 
-      local name = "ssk_transfer_bucket_" .. direction .. "_" .. i
+      local name = Loc.join("ssk_transfer_bucket_", direction, "_", i)
       local hit = chart[name] or chart.add { type = "sprite", name = name, sprite = "ssk-node-hit",
         resize_to_sprite = false }
       hit.tooltip = bucket_tooltip(bucket, direction, start_tick, end_tick, recorded_from)
@@ -567,7 +575,7 @@ local function timeline(player, chart, result, width, height)
     end
   end
   for i = #result.buckets + 1, chart.tags.bucket_count or 0 do
-    for _, direction in ipairs(DIRECTIONS) do chart["ssk_transfer_bucket_" .. direction .. "_" .. i].visible = false end
+    for _, direction in ipairs(DIRECTIONS) do chart[Loc.join("ssk_transfer_bucket_", direction, "_", i)].visible = false end
   end
   chart.tags = { bucket_count = math.max(#result.buckets, chart.tags.bucket_count or 0) }
 end
@@ -598,7 +606,7 @@ local function detail_row(parent, items, width)
       tags = { transfer_item = item.name, count = item.count } }
     cell.style.width, cell.style.height, cell.style.padding = cell_w, 27, 2
     cell.style.vertical_align = "center"
-    sprite(cell, "item/" .. item.name, 18)
+    sprite(cell, Loc.join("item/", item.name), 18)
     local count = number(item.count)
     local cap = label(cell, nil, item_name(item.name), nil, math.max(24, cell_w - 48 - #count * 6))
     cap.tooltip = item_name(item.name, true)
@@ -614,30 +622,29 @@ local function render_log(body, result, state, width)
     if bucket.start_tick == result.bucket then selected = bucket; break end
   end
   local interval = selected and range(math.max(selected.start_tick, result.from_tick),
-    math.min(selected.end_tick, result.to_tick)) or "Selected period"
-  header.range.caption = interval .. "  ·  " .. number(result.arrival_count)
-    .. (result.arrival_count == 1 and " confirmed pod" or " confirmed pods")
-  header.range.tooltip = "Arrival time is shown as elapsed simulation time."
+    math.min(selected.end_tick, result.to_tick)) or Loc("transfers-selected-period")
+  header.range.caption = Loc("confirmed-pod-count", interval, result.arrival_count, number(result.arrival_count))
+  header.range.tooltip = Loc("transfers-arrival-time-is-shown-as-elapsed-simulation")
   header.reset_bucket.visible = selected ~= nil
   header.previous.visible, header.next.visible, header.pages.visible = result.pages > 1, result.pages > 1, result.pages > 1
   header.previous.enabled, header.next.enabled = result.page > 1, result.page < result.pages
-  header.pages.caption = result.page .. " / " .. result.pages
+  header.pages.caption = Loc.join(result.page, " / ", result.pages)
   local keys = {}
   for i, pod in ipairs(result.arrivals) do keys[i] = tostring(pod.id) end
-  local signature = (state.expanded and tostring(state.expanded) or "-") .. ":" .. table.concat(keys, ",")
+  local signature = Loc.join((state.expanded and tostring(state.expanded) or "-"), ":", Loc.join_list(keys, ","))
   if pane.tags.log == signature then return end
   pane.tags = { log = signature }
   pane.clear()
   if #result.arrivals == 0 then
-    label(pane, nil, "No confirmed deliveries in this range.", "grey_label").style.left_margin = 8
+    label(pane, nil, Loc("transfers-no-confirmed-deliveries-in-this-range"), "grey_label").style.left_margin = 8
     return
   end
   local columns = log_widths(width - 24)
   for i, pod in ipairs(result.arrivals) do
     local line = log_row(pane)
     local expanded = state.expanded == pod.id
-    local expand = action(line, "ssk_transfer_delivery_" .. i, expanded and "collapse" or "expand",
-      expanded and "Collapse cargo manifest" or "Expand cargo manifest", { transfer_delivery = pod.id })
+    local expand = action(line, Loc.join("ssk_transfer_delivery_", i), expanded and "collapse" or "expand",
+      expanded and Loc("transfers-collapse-cargo-manifest") or Loc("transfers-expand-cargo-manifest"), { transfer_delivery = pod.id })
     expand.style.width, expand.style.height = 24, 24
     expand.toggled = expanded
     label(line, nil, clock(pod.tick, true), nil, columns[1])
@@ -645,7 +652,7 @@ local function render_log(body, result, state, width)
     direction.style.width = columns[2]
     local loaded = pod.direction == "loaded"
     sprite(direction, Sprites.bar(loaded and 7 or 5), 8)
-    label(direction, nil, loaded and "Loaded" or "Unloaded", "bold_label")
+    label(direction, nil, loaded and Loc("transfers-loaded") or Loc("transfers-unloaded"), "bold_label")
     local endpoint = row(line)
     endpoint.style.width = columns[3]
     local name, icon = endpoint_name(pod.endpoint)
@@ -655,11 +662,11 @@ local function render_log(body, result, state, width)
     cargo.style.width = columns[4]
     cargo.tooltip = manifest_tooltip(name, mass(pod), pod.items)
     local shown = math.min(#pod.items, math.max(0, math.min(5, math.floor((columns[4] - 32) / 23))))
-    for j = 1, shown do sprite(cargo, "item/" .. pod.items[j].name, 19) end
-    if shown < #pod.items then label(cargo, nil, "+" .. (#pod.items - shown), "grey_label") end
+    for j = 1, shown do sprite(cargo, Loc.join("item/", pod.items[j].name), 19) end
+    if shown < #pod.items then label(cargo, nil, Loc.join("+", (#pod.items - shown)), "grey_label") end
     local weight = label(line, nil, mass(pod), "caption_label", columns[5])
     weight.style.horizontal_align = "right"
-    weight.tooltip = "Full cargo pod mass."
+    weight.tooltip = Loc("transfers-full-cargo-pod-mass")
     if expanded then detail_row(pane, pod.items, width - 24) end
   end
 end
@@ -669,25 +676,25 @@ local function render_history(player, body, result, state, note)
   local chart_height = math.max(116, math.min(228, math.floor(height * 0.43)))
   if not body.chart then
     local heading = strip(body, "timeline_heading", HEADING_HEIGHT)
-    label(heading, nil, "Cargo timeline", "subheader_caption_label")
+    label(heading, nil, Loc("transfers-cargo-timeline"), "subheader_caption_label")
     label(heading, "units", "", "grey_label")
     spacer(heading)
     label(heading, "counts", "", "subheader_semibold_label")
     local chart = body.add { type = "flow", name = "chart", direction = "vertical" }
     chart.style.width, chart.style.height, chart.style.vertical_spacing = width, chart_height, 0
     local delivered = strip(body, "delivered", HEADING_HEIGHT)
-    label(delivered, nil, "Delivered cargo", "subheader_caption_label")
+    label(delivered, nil, Loc("transfers-delivered-cargo"), "subheader_caption_label")
     spacer(delivered)
     label(delivered, "range", "", "subheader_semibold_label")
-    action(delivered, "reset_bucket", "reset", "Clear selected time bucket", { transfer_reset_bucket = true })
-    action(delivered, "previous", "left_arrow", "Previous page", { transfer_page = -1 })
+    action(delivered, "reset_bucket", "reset", Loc("transfers-clear-selected-time-bucket"), { transfer_reset_bucket = true })
+    action(delivered, "previous", "left_arrow", Loc("transfers-previous-page"), { transfer_page = -1 })
     label(delivered, "pages", "", "grey_label")
-    action(delivered, "next", "right_arrow", "Next page", { transfer_page = 1 })
+    action(delivered, "next", "right_arrow", Loc("transfers-next-page"), { transfer_page = 1 })
     local headers = log_row(body)
     local gutter = headers.add { type = "empty-widget" }
     gutter.style.width = 24
     local columns = log_widths(width - 24)
-    for i, title in ipairs({ "Arrival", "Direction", "Surface", "Cargo", "Mass" }) do
+    for i, title in ipairs({ Loc("transfers-arrival"), Loc("transfers-direction"), Loc("transfers-surface"), Loc("transfers-cargo"), Loc("transfers-mass") }) do
       local cell = label(headers, nil, title, "caption_label", columns[i])
       if i == 5 then cell.style.horizontal_align = "right" end
     end
@@ -697,9 +704,9 @@ local function render_history(player, body, result, state, note)
   local seconds = result.bucket_ticks / 60
   local period = Sampler.duration(seconds)
   local heading = body.timeline_heading
-  heading.units.caption = "Confirmed pods / " .. period
-  heading.units.tooltip = note or "Select a time bucket to filter delivered cargo. Hover either lane for its complete manifest."
-  heading.counts.caption = "Loaded " .. number(result.loaded.pods) .. "  ·  Unloaded " .. number(result.unloaded.pods)
+  heading.units.caption = Loc("transfers-confirmed-pods-2", period)
+  heading.units.tooltip = note or Loc("transfers-select-a-time-bucket-to-filter-delivered")
+  heading.counts.caption = Loc("transfers-loaded-unloaded", number(result.loaded.pods), number(result.unloaded.pods))
   timeline(player, body.chart, result, width, chart_height)
   render_log(body, result, state, width)
 end
@@ -746,7 +753,7 @@ function UI.render(content, player, period, state, width, height)
   production.visible = result.platform ~= nil and state.view == "flow"
   production.state = state.show_all_production == true
   local body = (state.view == "history" and tabs.ssk_transfer_history or tabs.ssk_transfer_flow).content
-  heading.platform.caption = result.platform and result.platform.name or "Transfers"
+  heading.platform.caption = result.platform and result.platform.name or Loc("help-transfers")
   heading.platform.tooltip = result.platform and result.platform.name or nil
   local icon = result.platform and result.platform.icon
   heading.icon.visible = icon ~= nil and helpers.is_valid_sprite_path(icon)
@@ -759,12 +766,12 @@ function UI.render(content, player, period, state, width, height)
       body.clear()
       label(body, "empty", "", "grey_label").style.left_margin = 8
     end
-    body.empty.caption = available and "No space platforms on this force." or "Transfers are available with Space Age enabled."
+    body.empty.caption = available and Loc("transfers-no-space-platforms-on-this-force") or Loc("transfers-transfers-are-available-with-space-age-enabled")
     return result.covered_seconds
   end
   state.platform = result.platform.id
   if body.empty then body.empty.destroy() end
-  local note = result.truncated and "Some deliveries are outside the retained history." or nil
+  local note = result.truncated and Loc("transfers-some-deliveries-are-outside-the-retained-history") or nil
   if state.view == "history" then
     state.bucket, state.page = result.bucket, result.page
     render_history(player, body, result, state, note)

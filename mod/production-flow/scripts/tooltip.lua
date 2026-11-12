@@ -15,7 +15,7 @@ function Tooltip.lines(parts)
   return { "", table.unpack(parts) }
 end
 
-function Tooltip.ribbon(canvas, pieces, caption, tags, prefix)
+function Tooltip.ribbon(canvas, pieces, caption, tags, prefix, add_hit)
   local index = 0
   Geometry.hover_regions(pieces, function(x, y, width, height)
     index = index + 1
@@ -25,8 +25,13 @@ function Tooltip.ribbon(canvas, pieces, caption, tags, prefix)
       hit.tooltip = caption
       return
     end
-    hit = canvas.add { type = "sprite", name = name, sprite = "ssk-node-hit", resize_to_sprite = false,
+    local spec = { type = "sprite", name = name, sprite = "ssk-node-hit", resize_to_sprite = false,
       tooltip = caption, tags = tags }
+    if add_hit then
+      add_hit(spec, x, y, width, height)
+      return
+    end
+    hit = canvas.add(spec)
     local style = hit.style
     style.width, style.height = width, height
     style.left_margin, style.top_margin, style.bottom_margin = x, y, -(y + height)

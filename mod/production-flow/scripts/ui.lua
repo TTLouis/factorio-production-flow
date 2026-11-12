@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 -- Top-left toolbar button + main window.
 -- Tabs: Balance · Focus · Full Sankey · Transfers.
 
@@ -16,7 +17,7 @@ local TransfersUI = require("scripts.transfers_ui")
 local Transfers = require("scripts.transfers")
 
 local UI = {}
-local TAB_CAPTIONS = { balance = "Balance", focus = "Focus", sankey = "Full Sankey", transfers = "Transfers" }
+local TAB_CAPTIONS = { balance = Loc("ui-balance"), focus = Loc("ui-focus"), sankey = Loc("ui-full-sankey"), transfers = Loc("help-transfers") }
 local WIN = "ssk_main"
 
 local function visible_tabs()
@@ -65,7 +66,7 @@ function UI.ensure_button(player)
   local flow = mod_gui.get_button_flow(player)
   if flow.ssk_toggle then flow.ssk_toggle.destroy() end
   flow.add { type = "sprite-button", name = "ssk_toggle", sprite = "ssk-icon",
-             style = mod_gui.button_style, tooltip = "Production Flow" }
+             style = mod_gui.button_style, tooltip = Loc("ui-production-flow") }
 end
 
 ---------------------------------------------------------------------------
@@ -143,10 +144,10 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
       style = "tabbed_pane_with_no_side_padding", tags = { ssk_balance_material_header = "flush" } }
     modes.style.top_margin = 0
     modes.style.horizontally_stretchable = true
-    local flow = modes.add { type = "tab", caption = "Flow", tooltip = "Show the selected material's inputs and uses" }
+    local flow = modes.add { type = "tab", caption = Loc("help-flow"), tooltip = Loc("ui-show-the-selected-material-s-inputs-and") }
     local flow_panel = modes.add { type = "frame", name = "ssk_balance_flow_panel", style = "inside_deep_frame", direction = "vertical" }
     modes.add_tab(flow, flow_panel)
-    local history = modes.add { type = "tab", caption = "History", tooltip = "Show the selected material's rates and chest stock over time" }
+    local history = modes.add { type = "tab", caption = Loc("help-history"), tooltip = Loc("ui-show-the-selected-material-s-rates-and") }
     local history_panel = modes.add { type = "frame", name = "ssk_history_panel", style = "inside_deep_frame", direction = "vertical" }
     modes.add_tab(history, history_panel)
     for _, panel in ipairs({ flow_panel, history_panel }) do
@@ -178,8 +179,8 @@ function fill.transfers(player, c, us)
   if seconds and seconds < us.period then
     local label = player.gui.screen[WIN].ssk_window_bar.ssk_history
     label.visible = true
-    label.caption = "Recorded " .. Sampler.duration(seconds) .. " / " .. Sampler.duration(us.period)
-    label.tooltip = "This period includes time before cargo recording began or deliveries aged out of the retained log. Totals use available deliveries."
+    label.caption = Loc("ui-recorded", Sampler.duration(seconds), Sampler.duration(us.period))
+    label.tooltip = Loc("ui-this-period-includes-time-before-cargo-recording")
   end
 end
 
@@ -190,7 +191,7 @@ local function content(player, id)
   local f = player.gui.screen[WIN]
   local inner = f and f.ssk_inner
   local tabs = inner and inner.ssk_tabs
-  return tabs and tabs["content_" .. id]
+  return tabs and tabs[Loc.join("content_", id)]
 end
 
 local function update_header(player,us)
@@ -205,8 +206,8 @@ local function update_header(player,us)
   local seconds=Sampler.coverage(us.sidx,us.period)
   local target=us.period
   label.visible=seconds<target
-  label.caption="Recorded "..Sampler.duration(seconds).." / "..Sampler.duration(target)
-  label.tooltip="The selected period is still filling. Rates use the recorded history available so far, not an assumed full window. Recording continues while the factory runs."
+  label.caption=Loc("ui-recorded", Sampler.duration(seconds), Sampler.duration(target))
+  label.tooltip=Loc("ui-the-selected-period-is-still-filling-rates")
 end
 
 -- Focus and Full Sankey draw into one vanilla panel: toolbar strip on top, chart below.
@@ -281,7 +282,7 @@ function UI.open(player)
 
   local tb = f.add { type = "flow", name="ssk_window_bar", direction = "horizontal" }
   tb.drag_target = f
-  tb.add { type = "label", caption = "Production Flow", style = "frame_title", ignored_by_interaction = true }
+  tb.add { type = "label", caption = Loc("ui-production-flow"), style = "frame_title", ignored_by_interaction = true }
   local drag = tb.add { type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true }
   drag.style.horizontally_stretchable = true
   drag.style.height = 24
@@ -290,8 +291,8 @@ function UI.open(player)
       tooltip = tooltip, tags = { ssk_ui = tag } }
   end
   tb.style.vertical_align = "center"
-  tb.add { type = "label", name = "ssk_surface_label", caption = "Surface:" }
-  local sitems, ssel = { "Where I am (" .. Su.rich(player.surface) .. ")" }, 1
+  tb.add { type = "label", name = "ssk_surface_label", caption = Loc("ui-surface") }
+  local sitems, ssel = { Loc("ui-where-i-am", Su.rich(player.surface)) }, 1
   us.surface_names = {}
   for i, x in ipairs(surface_choices(us.surface)) do
     sitems[#sitems + 1] = x.label
@@ -299,20 +300,20 @@ function UI.open(player)
     if us.surface == x.name then ssel = i + 1 end
   end
   local surface_picker = tb.add { type = "drop-down", name = "ssk_surface_picker", items = sitems, selected_index = ssel,
-           tags = { ssk_ui = "surface" }, tooltip = "Surface for Balance, Focus and Full Sankey." }
+           tags = { ssk_ui = "surface" }, tooltip = Loc("ui-surface-for-balance-focus-and-full-sankey") }
   surface_picker.style.width = math.min(240, math.floor(W * 0.22))
-  local pl = tb.add { type = "label", caption = "Period:" }
+  local pl = tb.add { type = "label", caption = Loc("ui-period") }
   pl.style.left_margin = 12
   local psel = 2
   for i, v in ipairs(Sampler.PERIODS) do if us.period == v then psel = i end end
   tb.add { type = "drop-down", items = Sampler.PERIOD_CAPTIONS, selected_index = psel, tags = { ssk_ui = "period" },
-           tooltip = "How far back rates and transfers are counted. Longer periods smooth out bursts; history builds up while the factory runs." }
+           tooltip = Loc("ui-how-far-back-rates-and-transfers-are") }
   local history=tb.add{type="label",name="ssk_history"}
   history.style.font="default-small-bold";history.style.font_color={1,0.82,0.35}
   history.style.maximal_width=190
-  action_button("utility/questionmark", "Help: controls, calculations, stock, alerts and chart limits", "help")
-  action_button("utility/refresh", "Refresh", "refresh")
-  action_button("utility/close", "Close", "close")
+  action_button("utility/questionmark", Loc("ui-help-controls-calculations-stock-alerts-and-chart"), "help")
+  action_button("utility/refresh", Loc("ui-refresh"), "refresh")
+  action_button("utility/close", Loc("help-close"), "close")
 
   local inner = f.add { type = "frame", name = "ssk_inner", style = "inside_deep_frame", direction = "vertical" }
   inner.style.horizontally_stretchable = true
@@ -326,7 +327,7 @@ function UI.open(player)
   us.tab_id = list[sel]
   for _, id in ipairs(list) do
     local tab = tabs.add { type = "tab", caption = TAB_CAPTIONS[id] }
-    local c = tabs.add { type = "flow", name = "content_" .. id, direction = "vertical" }
+    local c = tabs.add { type = "flow", name = Loc.join("content_", id), direction = "vertical" }
     c.style.horizontally_stretchable = true
     c.style.vertically_stretchable = true
     c.style.padding = 12

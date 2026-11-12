@@ -21,7 +21,7 @@ for _, mode in ipairs({"flow", "history"}) do
   UI.open(player)
   local jump = button()
   assert(jump.visible and jump.enabled and jump.spec.style == "tool_button"
-    and jump.sprite == "utility/go_to_arrow" and jump.tooltip:find("remote view",1,true))
+    and jump.sprite == "utility/go_to_arrow" and LOC(jump.tooltip):find("remote view",1,true))
   assert(click(jump) and player.centered_on == a.hub and not UI.is_open(player))
   assert(us.transfers.platform == a.index and us.transfers.view == mode, "Jump lost Transfers selection")
 end

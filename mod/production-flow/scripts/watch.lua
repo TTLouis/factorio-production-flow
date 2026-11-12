@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 -- Personal Balance thresholds. Evaluation uses the current Balance data only.
 local Balance = require("scripts.balance")
 local Groups = require("scripts.groups")
@@ -125,13 +126,13 @@ function Watch.evaluate(player, us, seconds, stock, stock_known, nodes)
       local low_made = observe(watch, "made_since", "made_latched", made_breach, tick)
       local low_empty = observe(watch, "empty_since", "empty_latched", empty_breach, tick)
       if low_made or low_empty then
-        local warning = "Watch warning"
+        local warning = Loc("watch-watch-warning")
         if low_made then
-          local unit = key:sub(1, 6) == "fluid/" and "fluid/s" or "items/s"
-          warning = warning .. string.format("\nMade %.4g %s, below %.4g %s.", produced, unit, watch.made, unit)
+          local unit = key:sub(1, 6) == "fluid/" and Loc("unit-fluid-rate") or Loc("history-items-s")
+          warning = Loc.join(warning, Loc("watch-made-below", string.format("%.4g", produced), unit, string.format("%.4g", watch.made), unit))
         end
         if low_empty then
-          warning = warning .. string.format("\nChest stock empty in %.4g min, below %.4g min.", minutes, watch.empty)
+          warning = Loc.join(warning, Loc("watch-chest-stock-empty-in-min-below-min", string.format("%.4g", minutes), string.format("%.4g", watch.empty)))
         end
         warnings[key] = warning
       end
@@ -167,37 +168,37 @@ function Watch.open(player, us, surface, key)
     tags = { surface = surface, key = key } }
   local title = f.add { type = "flow", direction = "horizontal" }
   title.style.vertical_align = "center"
-  title.add { type = "label", caption = "Material watch", style = "frame_title", ignored_by_interaction = true }
+  title.add { type = "label", caption = Loc("watch-material-watch"), style = "frame_title", ignored_by_interaction = true }
   local drag = title.add { type = "empty-widget", style = "draggable_space_header" }
   drag.style.horizontally_stretchable = true
   drag.style.height = 24
   drag.drag_target = f
   title.add { type = "sprite-button", sprite = "utility/close", style = "frame_action_button",
-    tags = { ssk_ui = "watch_close" }, tooltip = "Close material watch" }
+    tags = { ssk_ui = "watch_close" }, tooltip = Loc("watch-close-material-watch") }
 
   local body = f.add { type = "frame", name = "ssk_watch_body", direction = "vertical",
     style = "inside_shallow_frame_with_padding" }
-  local caption = { "", "[img=" .. key .. "] ", proto.localised_name or name, " on ", Surfaces.rich(game.surfaces[surface]) }
+  local caption = Loc("material-on-surface", Loc.join("[img=" .. key .. "] ", proto.localised_name or name), Surfaces.rich(game.surfaces[surface]))
   local material_label = body.add { type = "label", caption = caption, style = "caption_label" }
   material_label.style.maximal_width = 430
   material_label.style.single_line = false
   local fields = body.add { type = "table", name = "ssk_watch_fields", column_count = 2 }
-  local made = number_field(fields, "ssk_watch_made", kind == "fluid" and "Minimum made (fluid/s)" or "Minimum made (items/s)",
+  local made = number_field(fields, "ssk_watch_made", kind == "fluid" and Loc("watch-minimum-made-fluid-s") or Loc("watch-minimum-made-items-s"),
     watch.made, true)
-  local empty = number_field(fields, "ssk_watch_empty", "Minimum time to empty (minutes)", watch.empty, kind == "item")
-  empty.tooltip = kind == "item" and "Uses completed chest stock scans and the estimated drain."
-    or "Chest stock is unavailable for fluids."
-  local hint = body.add { type = "label", style = "grey_label", caption = "Leave a field blank to turn off that threshold." }
+  local empty = number_field(fields, "ssk_watch_empty", Loc("watch-minimum-time-to-empty-minutes"), watch.empty, kind == "item")
+  empty.tooltip = kind == "item" and Loc("watch-uses-completed-chest-stock-scans-and-the")
+    or Loc("watch-chest-stock-is-unavailable-for-fluids")
+  local hint = body.add { type = "label", style = "grey_label", caption = Loc("watch-leave-a-field-blank-to-turn-off") }
   hint.style.single_line = false
   local error_label = body.add { type = "label", name = "ssk_watch_error", style = "red_label" }
   error_label.visible = false
 
   local actions = f.add { type = "flow", direction = "horizontal", style = "dialog_buttons_horizontal_flow" }
-  local remove = actions.add { type = "button", caption = "Remove", style = "red_back_button", tags = { ssk_ui = "watch_remove" } }
+  local remove = actions.add { type = "button", caption = Loc("watch-remove"), style = "red_back_button", tags = { ssk_ui = "watch_remove" } }
   remove.enabled = watch.made ~= nil or watch.empty ~= nil
   local space = actions.add { type = "empty-widget", style = "draggable_space" }
   space.style.horizontally_stretchable = true
-  actions.add { type = "button", caption = "Apply", style = "confirm_button", tags = { ssk_ui = "watch_apply" } }
+  actions.add { type = "button", caption = Loc("watch-apply"), style = "confirm_button", tags = { ssk_ui = "watch_apply" } }
 
   f.auto_center = true
   -- The main frame stays opened so Esc can close this dialog first.
@@ -227,7 +228,7 @@ function Watch.apply(player, us, surface, key, remove)
     local fields = body.ssk_watch_fields
     local made, empty = threshold(fields.ssk_watch_made), threshold(fields.ssk_watch_empty)
     if made == false or empty == false then
-      body.ssk_watch_error.caption = "Enter a number greater than zero, or leave it blank."
+      body.ssk_watch_error.caption = Loc("watch-enter-a-number-greater-than-zero-or")
       body.ssk_watch_error.visible = true
       return false
     end

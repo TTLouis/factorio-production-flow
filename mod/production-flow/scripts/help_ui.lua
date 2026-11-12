@@ -1,39 +1,40 @@
+local Loc = require("scripts.locale")
 -- Stable, player-local help; sampling and automatic refresh do not rebuild it.
 local H={}
 local NAME="ssk_help"
 local topics={
-  {name="Start here",sections={
-    {"Open and inspect", "Open Production Flow with its flow-chart button at the top left. Balance compares items and fluids on the selected surface. Click a material name or its magnifier to select it in the inspector. Use Flow to inspect its inputs and consumers, or History to see how its rates and chest stock changed during the period. Expand inputs in Flow follows the chain upstream."},
-    {"Periods and updates", "Choose 1m, 10m, 1H, 10H, 50H, 250H or 1000H. The default is 10m. Longer production periods use coarser samples, and only recorded time counts. Auto-update chart controls automatic chart redraws. Sampling and Balance values keep updating when it is off."},
-    {"Material selection and navigation", "In Balance and Focus, click the material slot to browse or search the item and fluid catalog. In Balance, you can also select a material from the list or a node in Flow. Flow and History share that selection. In Focus, Back and Forward retrace the last six materials you viewed. Last visits and the icons beside it jump to an earlier material. Choosing a new material after going Back starts a new trail. The red trash button clears Last visits while keeping the current material and collected production data. The gear opens Chart settings over the chart. Click it again or press Esc to close the settings."},
-    {"A stable item list", "Rows stay in place while values change, so updates do not interrupt selection. Use the Refresh table icon above the list to reapply filtering and sorting, including new, balanced or inactive materials. Sort by Biggest deficit to find the biggest measured shortages or by Soonest empty to compare estimated stock drain times. Items stored without recent production appear as Stock only under Everything."},
-    {"Favourites", "Click the star beside a row's magnifier to keep that item at the top of the Balance list. A group's star, on its header in Item groups order or next to the Group filter, keeps the whole group at the top. Favourites stay listed whatever the Show and Group filters, do not count towards the 200-row limit, and are saved with your game."},
-    {"Material names and recipes", "Chart nodes use item and fluid names. A Copper plate node can be made by smelting or casting. Simple recipes are drawn as connections; recipes with several outputs may have their own node."},
-    {"Work in progress", "Balance is the main focus of this beta. Focus, Full Sankey and optional graph grouping need more polish. A category such as Vulcanus in the unfinished grouped view is not a recipe name or a production location."},
+  {name=Loc("help-start-here"),sections={
+    {Loc("help-open-and-inspect"), Loc("help-open-production-flow-with-its-flow-chart")},
+    {Loc("help-periods-and-updates"), Loc("help-choose-1m-10m-1h-10h-50h-250h")},
+    {Loc("help-material-selection-and-navigation"), Loc("help-in-balance-and-focus-click-the-material")},
+    {Loc("help-a-stable-item-list"), Loc("help-rows-stay-in-place-while-values-change")},
+    {Loc("help-favourites"), Loc("help-click-the-star-beside-a-row-s")},
+    {Loc("help-material-names-and-recipes"), Loc("help-chart-nodes-use-item-and-fluid-names")},
+    {Loc("help-work-in-progress"), Loc("help-balance-is-the-main-focus-of-this")},
   }},
-  {name="Numbers & stock",sections={
-    {"History warm-up", "Recording begins when the mod is installed. History collected shows how much of your selected period is available. During warm-up, rates use the recorded time so far. Recorded history survives saving and loading; earlier recipe activity cannot be reconstructed."},
-    {"Made, used and net", "Made and Used are measured changes in Factorio's production statistics divided by the recorded time. Net = Made - Used. Positive net means more was made than used during that period; negative net means more was used."},
-    {"Reading a material's History", "Rate History shows the green Made line and the dashed red Used total. At 1H and longer, Rate History and Net rate use trailing averages. Hover a rate bucket for its time range and itemised rates. Turn on Usage breakdown to see the three largest estimated product uses and Other uses. Hover Average used for the full period or Other uses for the smaller uses grouped there. Unattributed use covers consumption without a unique product. Net rate is Made minus Used per second. Green shows a surplus and red shows a deficit. Hover a stock bar for its timestamp and count. Rate charts leave gaps where samples are missing. Period averages use the recorded portions."},
-    {"Selected-material consumption", "The Uses heading names the selected material. Every consumer rate underneath is consumption of that material, not the consumer's output. With Water selected, a Concrete node showing 18 fluid/s means it consumed 18 water/s."},
-    {"Chest stock", "Stock reads physical contents of ordinary and logistic chests belonging to the player force on the selected surface. This includes requester and buffer chests, without needing a logistic network. All qualities are combined, once per chest. A dash means unavailable (including fluids or an unfinished first scan); zero means measured empty."},
-    {"Sampling and scope", "Chest reads are spread across ticks. Only completed scans replace the previous result. After each complete scan, the sampler waits for the Chest stock scan interval in Mod settings / Map: default 5 minutes, minimum 1. Very large scans add to that interval. Balance shows the stock sample age; production rates still refresh every 5 seconds. Moving items between chests during a scan can affect a sample. Player and vehicle inventories, machine buffers, belts, ground items, linked/infinity chests and fluid tanks are excluded."},
-    {"Stock changes and empty time", "Stock trend uses up to seven completed samples (about 30 minutes at the default interval, about 6 minutes at the minimum, longer for large scans), separately from the production period. Approximate empty time divides stored stock by its recent drain; a production deficit is used when no recent stock drain is measured. It assumes the drain continues. Physical chest counts do not subtract robot reservations and cannot become negative availability balances."},
-    {"Chest stock in History", "Light blue bars show completed chest scans. Dark blue bars estimate stock from recorded net rates and update every 5 game seconds as new rates arrive. The next scan reconciles those estimates with measured stock. All three charts share the same time axis. Chest scans cover items."},
+  {name=Loc("help-numbers-stock"),sections={
+    {Loc("help-history-warm-up"), Loc("help-recording-begins-when-the-mod-is-installed")},
+    {Loc("help-made-used-and-net"), Loc("help-made-and-used-are-measured-changes-in")},
+    {Loc("help-reading-a-material-s-history"), Loc("help-rate-history-shows-the-green-made-line")},
+    {Loc("help-selected-material-consumption"), Loc("help-the-uses-heading-names-the-selected-material")},
+    {Loc("help-chest-stock"), Loc("help-stock-reads-physical-contents-of-ordinary-and")},
+    {Loc("help-sampling-and-scope"), Loc("help-chest-reads-are-spread-across-ticks-only")},
+    {Loc("help-stock-changes-and-empty-time"), Loc("help-stock-trend-uses-up-to-seven-completed")},
+    {Loc("help-chest-stock-in-history"), Loc("help-light-blue-bars-show-completed-chest-scans")},
   }},
-  {name="Alerts & charts",sections={
-    {"Material watches", "Star a material or its group and select the material in Balance. In Flow, the warning icon opens its watch for the selected surface. Set a minimum made rate, a minimum estimated time to empty chest stock, or both. Fluids support only a made rate. A saved watch pauses when both the material and its group are unstarred. While Balance is open, values are checked every 5 game seconds. A row warning appears after two below-threshold checks at least 5 seconds apart and clears when the measurement recovers. Checks wait for the selected period to fill and use the latest completed chest scan for stock. A measured empty chest stock counts as zero minutes. Watches are private to you and show warnings in Balance."},
-    {"Machine status", "Use the map icon in Focus or Balance's Flow inspector to see machines that make or use the selected material. Open a machine preview from a status row and adjust the camera with the Zoom slider. Use the preview's jump arrow to close Production Flow and go to the machine in remote view."},
-    {"Alerts are hints", "Balance groups activity counts under Underproducing, OK and Overproducing; the individual statuses distinguish measured rates from hints. Deficit and Surplus mean measured rates differ by more than 5% of the larger rate. Low activity means both producer and consumer utilisation are below 85%; it does not prove missing inputs. Possible supply limit compares waiting consumers with producers at least 95% busy. Spare capacity is also an estimate, not a confirmed cause."},
-    {"Utilisation", "Estimated utilisation compares recorded normal crafts with current crafting capacity from machine speed and recipe time. Changing machines, recipes or modules can make historical utilisation exceed 100%. Check inputs, power, transport, output space and demand before treating an alert as a diagnosis."},
-    {"Links versus totals", "Recipe links are estimated from completed crafts, ingredients, productivity and expected product yields. They can differ from production-statistic totals. Grey ends represent sources or uses outside the drawn connections, such as mining, fuel, labs or filtered activity."},
-    {"Widths, colors and navigation", "Compressed widths use a square-root scale. Proportional uses rate-based widths. Fluids have a separate visual scale and thin flows have a minimum thickness. Widths across materials reflect the displayed units. Colors can follow destinations or sources. Hover a ribbon for its material and recipe rates. Hover a node to highlight connections. Click to inspect or select, and Shift-click pins a Balance chain. Use Fit and Center to navigate. Dense charts still scroll."},
-    {"Scope", "Balance, Focus and Full Sankey each cover one surface. Transfers shows delivered cargo between surfaces. Production charts show recipe relationships."},
+  {name=Loc("help-alerts-charts"),sections={
+    {Loc("help-material-watches"), Loc("help-star-a-material-or-its-group-and")},
+    {Loc("help-machine-status"), Loc("help-use-the-map-icon-in-focus-or")},
+    {Loc("help-alerts-are-hints"), Loc("help-balance-groups-activity-counts-under-underproducing-ok")},
+    {Loc("help-utilisation"), Loc("help-estimated-utilisation-compares-recorded-normal-crafts-with")},
+    {Loc("help-links-versus-totals"), Loc("help-recipe-links-are-estimated-from-completed-crafts")},
+    {Loc("help-widths-colors-and-navigation"), Loc("help-compressed-widths-use-a-square-root-scale")},
+    {Loc("help-scope"), Loc("help-balance-focus-and-full-sankey-each-cover")},
   }},
-  {name="Transfers",sections={
-    {"Flow", "Select a space platform to see where it loads and unloads cargo. Ribbon width uses the weight of delivered cargo. Each surface lists up to five materials by quantity. Hover a surface to see the full list, or a ribbon to see cargo amounts and average rates per material. Made aboard shows recorded platform production separately."},
-    {"History", "The upper lane shows pods delivered to the platform and the lower lane shows pods delivered to other surfaces. Select a material to chart its item count. Hover either lane for cargo amounts and rates per item. Click a time bucket to filter the deliveries and expand a pod to see what it carried."},
-    {"Recording limits", "Transfers retains observed deliveries for up to 1000 game hours, with a cap of 32,768 deliveries across all platforms. Verified cargo spilled at a successful landing counts as delivered. Lost pods and unverified cargo are skipped."},
+  {name=Loc("help-transfers"),sections={
+    {Loc("help-flow"), Loc("help-select-a-space-platform-to-see-where")},
+    {Loc("help-history"), Loc("help-the-upper-lane-shows-pods-delivered-to")},
+    {Loc("help-recording-limits"), Loc("help-transfers-retains-observed-deliveries-for-up-to")},
   }},
 }
 function H.close(player)
@@ -50,18 +51,18 @@ function H.open(player)
   local header=f.add{type="flow",direction="horizontal"}
   header.drag_target=f
   header.style.vertical_align="center"
-  header.add{type="label",caption="Production Flow help",style="frame_title",ignored_by_interaction=true}
+  header.add{type="label",caption=Loc("help-production-flow-help"),style="frame_title",ignored_by_interaction=true}
   local drag=header.add{type="empty-widget",style="draggable_space_header",ignored_by_interaction=true}
   drag.style.horizontally_stretchable=true;drag.style.height=24
   -- Same close control as the main window's title bar.
-  header.add{type="sprite-button",style="frame_action_button",sprite="utility/close",tooltip="Close",tags={ssk_ui="help_close"}}
+  header.add{type="sprite-button",style="frame_action_button",sprite="utility/close",tooltip=Loc("help-close"),tags={ssk_ui="help_close"}}
   local inner=f.add{type="frame",name="ssk_help_inner",style="inside_deep_frame",direction="vertical"}
   inner.style.horizontally_stretchable=true;inner.style.vertically_stretchable=true
   local tabs=inner.add{type="tabbed-pane",name="ssk_help_tabs"}
   tabs.style.horizontally_stretchable=true;tabs.style.vertically_stretchable=true
   for i,topic in ipairs(topics) do
     local tab=tabs.add{type="tab",caption=topic.name}
-    local scroll=tabs.add{type="scroll-pane",name="ssk_help_topic_"..i,
+    local scroll=tabs.add{type="scroll-pane",name=Loc.join("ssk_help_topic_", i),
       horizontal_scroll_policy="never",vertical_scroll_policy="auto"}
     scroll.style.width=W-36;scroll.style.height=height-110
     local body=scroll.add{type="flow",direction="vertical"}

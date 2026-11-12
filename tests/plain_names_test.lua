@@ -6,7 +6,7 @@ local function find(e,action)
   for _,c in ipairs(e.children) do local x=find(c,action); if x then return x end end
 end
 local copper_preset=false
-for _,preset in ipairs(V.presets()) do if preset.id=="roots:item/copper-plate" then copper_preset=preset.name=="Copper chain" end end
+for _,preset in ipairs(V.presets()) do if preset.id=="roots:item/copper-plate" then copper_preset=LOC(preset.name)=="Copper chain" end end
 assert(copper_preset,"copper-chain filtering must identify itself in the preset picker")
 local defaults={}; SK.defaults(defaults)
 assert(defaults.view=="detail","new charts must use material names")
@@ -17,7 +17,7 @@ assert(us.view=="detail" and next(us.collapsed)==nil,"old grouped default must m
 local chart=V.build(p,us,us.canvas_w,us.canvas_h)
 for _,n in pairs(chart.nodes) do assert(n.kind~="group","plain view must not replace materials with categories") end
 local picker=find(p.gui.screen.ssk_main,"view")
-assert(picker.selected_index==2 and picker.items[1]:find("unfinished"),"grouping must be optional and marked unfinished")
+assert(picker.selected_index==2 and LOC(picker.items[1]):find("unfinished"),"grouping must be optional and marked unfinished")
 picker.selected_index=1
 UI.on_selection({player_index=1,element=picker})
 UI.open(p)

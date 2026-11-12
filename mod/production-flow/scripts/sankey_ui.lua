@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 -- M4–M7 Sankey tab: toolbar (presets, scope, tiers, zoom, live), selection toolbar
 -- (▲/▼, hide, group/collapse), and the canvas drawn with stretched ribbon sprites.
 
@@ -50,8 +51,8 @@ end
 -- Same rate formatting as the Balance table, so a value reads identically in both.
 local function fmt(x)
   local a = math.abs(x)
-  if a >= 1000000 then return string.format("%.2fM", x / 1000000) end
-  if a >= 10000 then return string.format("%.1fk", x / 1000) end
+  if a >= 1000000 then return Loc("balance-m", string.format("%.2f", x / 1000000)) end
+  if a >= 10000 then return Loc("balance-k", string.format("%.1f", x / 1000)) end
   if a >= 100 then return string.format("%.0f", x) end
   if a >= 10 then return string.format("%.1f", x) end
   if a >= 1 then return string.format("%.2f", x) end
@@ -62,25 +63,27 @@ end
 local function rt(key)
   local t, n = string.match(key, "^(%a+)/(.+)$")
   if t == "group" then return "▣" end
-  return "[" .. t .. "=" .. n .. "]"
+  return Loc.join("[", t, "=", n, "]")
 end
 
 local function base_key(key) return (string.gsub(key, "#.*$", "")) end
 
 local function display_name(n)
-  if n.kind == "group" then return n.ginfo.name .. " (" .. #n.members .. (n.flow_kind == "fluid" and " fluids)" or " items)") end
-  return string.match(base_key(n.key), "/(.+)$")
+  if n.kind == "group" then return Loc(n.flow_kind == "fluid" and "group-fluid-count" or "group-item-count", n.ginfo.localised_name or n.ginfo.name, #n.members) end
+  local kind, name = base_key(n.key):match("^(%a+)/(.+)$")
+  local proto = prototypes[kind] and prototypes[kind][name]
+  return proto and proto.localised_name or (name or n.key):gsub("%-", " ")
 end
 
 local function units(n)
-  return (n.kind == "fluid" or n.flow_kind == "fluid") and "fluid/s"
-    or n.kind == "recipe" and "crafts/s" or "items/s"
+  return (n.kind == "fluid" or n.flow_kind == "fluid") and Loc("unit-fluid-rate")
+    or n.kind == "recipe" and Loc("sankey-crafts-s") or Loc("history-items-s")
 end
 
 local function sprite_for(n)
   if n.kind == "group" then
     local t, name = string.match(n.members[1], "^(%a+)/(.+)$")
-    return t .. "/" .. name
+    return Loc.join(t, "/", name)
   end
   return base_key(n.key)
 end
@@ -98,7 +101,7 @@ local function ribbon_tooltip(link)
   end
   local material = link.a.kind == "recipe" and link.b or link.a
   local parts = { name(link.a), " → ", name(link.b),
-    string.format("\nTotal flow  %.5g %s", link.rate, units(material)), "\n\nFlow by recipe" }
+    Loc("sankey-total-flow", string.format("%.5g", link.rate), units(material)), Loc("sankey-flow-by-recipe") }
   table.sort(link.details, function(a, b)
     if a.rate ~= b.rate then return a.rate > b.rate end
     if a.from ~= b.from then return a.from < b.from end
@@ -109,38 +112,42 @@ local function ribbon_tooltip(link)
     local from = { key = detail.from, kind = detail.from:match("^(%a+)/") }
     local to = { key = detail.to, kind = detail.to:match("^(%a+)/") }
     local row = { "", "\n", name(from), " → ", name(to),
-      string.format("  %.5g %s", detail.rate, units(from.kind == "recipe" and to or from)) }
+      Loc.join("  ", Loc("history-formatted", string.format("%.5g", detail.rate), units(from.kind == "recipe" and to or from))) }
     if detail.recipe ~= detail.from and detail.recipe ~= detail.to then
-      row[#row + 1] = { "", " via ", localised_name({ key = detail.recipe }) }
+      row[#row + 1] = Loc.join(" ", Loc("flow-via-recipe", localised_name({ key = detail.recipe })))
     end
     parts[#parts + 1] = row
   end
-  if link.note then parts[#parts + 1] = "\n" .. link.note end
+  if link.note then parts[#parts + 1] = Loc.join("\n", link.note) end
   return Tooltip.lines(parts)
 end
 
 local function label_toggle(row, us)
-  row.add { type = "checkbox", caption = "Show labels", state = us.show_labels == true,
+  row.add { type = "checkbox", caption = Loc("sankey-show-labels"), state = us.show_labels == true,
     tags = { ssk_sk = "show_labels" },
-    tooltip = "Keep all names and rates visible. Otherwise hover an icon or bar; selected items keep their label. Hover a visible label for detailed flow information." }
+    tooltip = Loc("sankey-keep-all-names-and-rates-visible-otherwise") }
 end
 
 local function live_toggle(row, us)
-  return row.add { type = "checkbox", caption = "Auto-update chart", state = us.live, tags = { ssk_sk = "live" },
-    tooltip = "Redraw this chart every 5 seconds. Sampling and Balance values continue when this is off." }
+  return row.add { type = "checkbox", caption = Loc("sankey-auto-update-chart"), state = us.live, tags = { ssk_sk = "live" },
+    tooltip = Loc("sankey-redraw-this-chart-every-5-seconds-sampling") }
 end
 
 ---------------------------------------------------------------------------
 -- placement (negative-margin absolute positioning, verified in M0)
 ---------------------------------------------------------------------------
--- Every absolutely placed element sits in its own fixed-size wrapper flow: whatever size
--- the engine really gives the element, the wrapper keeps exactly w × h, so nothing placed
--- after it can drift (ribbons and node bars stay aligned with their icons).
+-- Include the Y offset in each wrapper's height and offset its child inside it.
+-- Height and negative bottom margin then cancel the same scaled length. Separate
+-- top/height/bottom lengths round independently at fractional GUI scales and
+-- accumulate drift. The wrapper still contains its child for native culling.
 local function place_raw(e, x, y, w, h)
   local s = e.style
   s.width, s.height = w, h
   s.left_margin, s.right_margin = x, 0
   s.top_margin, s.bottom_margin = y, -(y + h)
+  if e.type == "flow" then
+    s.height, s.top_margin = y + h, 0
+  end
 end
 
 -- round the EDGES, not the size: pieces that meet (flat → curve, stacked ribbons) then
@@ -153,6 +160,7 @@ local function place(e, x, y, w, h)
   if p and p.tags and p.tags.ssk_wrap then
     place_raw(p, x, y, w, h)
     e.style.width, e.style.height = w, h
+    e.style.top_margin = y
   else
     place_raw(e, x, y, w, h)
   end
@@ -183,11 +191,11 @@ local function button(parent, caption, action, tooltip, extra)
   local sprite = ACTION_SPRITES[action]
   if sprite then
     return parent.add { type = "sprite-button", style = action == "reset_layout" and "tool_button_red" or "tool_button",
-      sprite = sprite:find("^ssk%-") and sprite or "utility/" .. sprite, tooltip = tooltip or caption, tags = tags }
+      sprite = sprite:find("^ssk%-") and sprite or Loc.join("utility/", sprite), tooltip = tooltip or caption, tags = tags }
   end
   -- Vanilla has no zoom or fit utility sprite. Its square tool button keeps
   -- the game graphics, hover state, dimensions and click sound for these captions.
-  assert(action == "zoom_in" or action == "zoom_out" or action == "zoom_fit", "Missing toolbar sprite: " .. action)
+  assert(action == "zoom_in" or action == "zoom_out" or action == "zoom_fit", Loc("sankey-missing-toolbar-sprite", action))
   local b = parent.add { type = "button", style = "tool_button", caption = caption, tooltip = tooltip or caption, tags = tags }
   if action ~= "zoom_fit" then b.style.width = 28 end
   return b
@@ -241,34 +249,34 @@ local function dropdown(row, caption, items, index, action, tooltip)
 end
 
 local function widths_picker(row, us)
-  return dropdown(row, "Widths:", { "Proportional", "Compressed" }, us.heights == "linear" and 1 or 2, "f_heights",
-    "Proportional: linear rate widths. Compressed: square-root widths, so small flows stay visible. Fluids use a separate scale and thin ribbons keep a visible minimum. Hover for exact rates.")
+  return dropdown(row, Loc("sankey-widths"), { Loc("sankey-proportional"), Loc("sankey-compressed") }, us.heights == "linear" and 1 or 2, "f_heights",
+    Loc("sankey-proportional-linear-rate-widths-compressed-square-root"))
 end
 
 local function colors_picker(row, us)
-  return dropdown(row, "Colors:", { "Destination", "Source" }, us.color_mode == "source" and 2 or 1, "balance_colors",
-    "Destination: ribbons feeding the same node share its color. Source: ribbons take the color of the material they come from. Ribbons always carry source-material units.")
+  return dropdown(row, Loc("sankey-colors"), { Loc("sankey-destination"), Loc("sankey-source") }, us.color_mode == "source" and 2 or 1, "balance_colors",
+    Loc("sankey-destination-ribbons-feeding-the-same-node-share"))
 end
 
 local function lines_picker(row, us)
-  return dropdown(row, "Lines:", { "Curves", "Right angles" }, us.lines == "metro" and 2 or 1, "f_lines",
-    "Right angles: steep ribbons run vertically and cross others at 90°.")
+  return dropdown(row, Loc("sankey-lines"), { Loc("sankey-curves"), Loc("sankey-right-angles") }, us.lines == "metro" and 2 or 1, "f_lines",
+    Loc("sankey-right-angles-steep-ribbons-run-vertically-and"))
 end
 
 local function zoom_buttons(row, compact)
-  button(row, "−", "zoom_out", "Zoom out")
-  button(row, "Fit", "zoom_fit", "Fit the chart to the window while keeping icons and text readable; dense charts keep scrolling.")
-  button(row, "+", "zoom_in", "Zoom in")
-  if not compact then button(row, "Center", "center_selection", "Center the selected item, or the whole chart when nothing is selected.") end
+  button(row, "−", "zoom_out", Loc("sankey-zoom-out"))
+  button(row, Loc("sankey-fit"), "zoom_fit", Loc("sankey-fit-the-chart-to-the-window-while"))
+  button(row, "+", "zoom_in", Loc("sankey-zoom-in"))
+  if not compact then button(row, Loc("sankey-center"), "center_selection", Loc("sankey-center-the-selected-item-or-the-whole")) end
 end
 
 local function reflow_button(row)
-  button(row, "Reflow", "reflow", "Recalculate node order and spacing. Auto-update otherwise keeps the current layout.")
+  button(row, Loc("sankey-reflow"), "reflow", Loc("sankey-recalculate-node-order-and-spacing-auto-update"))
 end
 
 local function settings_button(row, us)
-  button(row, "Chart settings", "chart_settings",
-    "Chart settings: widths, colors, lines, layout and auto-update. Esc closes them.").toggled = us.settings_open == true
+  button(row, Loc("sankey-chart-settings"), "chart_settings",
+    Loc("sankey-chart-settings-widths-colors-lines-layout-and")).toggled = us.settings_open == true
 end
 
 -- Chart settings float over the chart's top-right corner, so opening them never
@@ -286,10 +294,10 @@ local function settings_panel(c, us, L, player, W, viewH)
   title.style.vertical_align = "center"
   title.style.height = 24
   title.style.bottom_margin = 8
-  title.add { type = "label", caption = "Chart settings", style = "frame_title", ignored_by_interaction = true }
+  title.add { type = "label", caption = Loc("sankey-chart-settings"), style = "frame_title", ignored_by_interaction = true }
   title.add { type = "empty-widget", ignored_by_interaction = true }.style.horizontally_stretchable = true
   title.add { type = "sprite-button", style = "frame_action_button", sprite = "utility/close",
-    tooltip = "Close chart settings (Esc)", tags = { ssk_sk = "chart_settings" } }
+    tooltip = Loc("sankey-close-chart-settings-esc"), tags = { ssk_sk = "chart_settings" } }
   local inner = panel.add { type = "frame", style = "inside_shallow_frame_with_padding", direction = "vertical" }
   inner.style.horizontally_stretchable = true
   local grid = inner.add { type = "table", column_count = 2 }
@@ -313,27 +321,27 @@ local function settings_panel(c, us, L, player, W, viewH)
     d.style.width = 180
     return d
   end
-  picker("Widths:", { "Proportional", "Compressed" }, us.heights == "linear" and 1 or 2, "f_heights",
-    "Proportional: linear rate widths. Compressed: square-root widths, so small flows stay visible. Fluids use a separate scale and thin ribbons keep a visible minimum. Hover for exact rates.")
-  picker("Colors:", { "Destination", "Source" }, us.color_mode == "source" and 2 or 1, "balance_colors",
-    "Destination: ribbons feeding the same node share its color. Source: ribbons take the color of the material they come from. Ribbons always carry source-material units.")
-  picker("Lines:", { "Curves", "Right angles" }, us.lines == "metro" and 2 or 1, "f_lines",
-    "Right angles: steep ribbons run vertically and cross others at 90°.")
+  picker(Loc("sankey-widths"), { Loc("sankey-proportional"), Loc("sankey-compressed") }, us.heights == "linear" and 1 or 2, "f_heights",
+    Loc("sankey-proportional-linear-rate-widths-compressed-square-root"))
+  picker(Loc("sankey-colors"), { Loc("sankey-destination"), Loc("sankey-source") }, us.color_mode == "source" and 2 or 1, "balance_colors",
+    Loc("sankey-destination-ribbons-feeding-the-same-node-share"))
+  picker(Loc("sankey-lines"), { Loc("sankey-curves"), Loc("sankey-right-angles") }, us.lines == "metro" and 2 or 1, "f_lines",
+    Loc("sankey-right-angles-steep-ribbons-run-vertically-and"))
   if us.neighborhood then
-    local cell = line("Inputs:")
-    local fewer = button(cell, "Fewer inputs", "inputs_less", "Hide the furthest upstream step")
+    local cell = line(Loc("sankey-inputs"))
+    local fewer = button(cell, Loc("sankey-fewer-inputs"), "inputs_less", Loc("sankey-hide-the-furthest-upstream-step"))
     fewer.enabled = (us.input_depth or 1) > 1
-    local more = button(cell, "Expand inputs", "inputs_more", "Reveal another upstream production step (up to 6)")
+    local more = button(cell, Loc("sankey-expand-inputs"), "inputs_more", Loc("sankey-reveal-another-upstream-production-step-up-to"))
     more.enabled = (us.input_depth or 1) < View.MAX_INPUT_DEPTH
-    small(cell, string.format("%d step%s", us.input_depth or 1, (us.input_depth or 1) == 1 and "" or "s"))
+    small(cell, Loc("input-step-count", us.input_depth or 1))
   elseif not full then
-    picker("Steps:", { "1", "2", "3" }, us.focus_steps or 2, "f_steps", "Item steps to include upstream and downstream")
+    picker(Loc("sankey-steps"), { "1", "2", "3" }, us.focus_steps or 2, "f_steps", Loc("sankey-item-steps-to-include-upstream-and-downstream"))
   else
-    picker("Layout:", { "Routed columns", "Swimlanes" }, (us.layout == "lanes") and 2 or 1, "layout",
-      "Routed columns reserve item headers and long-link tracks; crossings can remain. Scroll sideways for larger graphs.\nSwimlanes group related items and allow manual ordering; ribbons can overlap.")
-    local tiers = picker("Tiers by:", { "Tech era + depth", "Production depth" },
+    picker(Loc("sankey-layout"), { Loc("sankey-routed-columns"), Loc("sankey-swimlanes") }, (us.layout == "lanes") and 2 or 1, "layout",
+      Loc("sankey-routed-columns-reserve-item-headers-and-long"))
+    local tiers = picker(Loc("sankey-tiers-by"), { Loc("sankey-tech-era-depth"), Loc("sankey-production-depth") },
       (us.view == "overview" or us.tier_mode == "depth") and 2 or 1, "tier_mode",
-      "Overview uses production depth because groups span tech eras. Individual items can use tech era + depth or production depth.")
+      Loc("sankey-overview-uses-production-depth-because-groups-span"))
     tiers.enabled = us.view ~= "overview"
     local titems, lo_i, hi_i = {}, 1, 1
     us.tier_vals = {}
@@ -343,20 +351,20 @@ local function settings_panel(c, us, L, player, W, viewH)
       if us.tier_lo and t <= us.tier_lo + 1e-9 then lo_i = i end
       if not us.tier_hi or t <= us.tier_hi + 1e-9 then hi_i = i end
     end
-    if #titems == 0 then titems = { "T0" } end
-    local range = line("Range:")
+    if #titems == 0 then titems = { Loc("sankey-t0") } end
+    local range = line(Loc("sankey-range"))
     range.add { type = "drop-down", items = titems, selected_index = lo_i, tags = { ssk_sk = "tier_lo" } }.style.width = 86
-    small(range, "to")
+    small(range, Loc("sankey-to"))
     range.add { type = "drop-down", items = titems, selected_index = math.max(lo_i, hi_i), tags = { ssk_sk = "tier_hi" } }.style.width = 86
-    line("").add { type = "checkbox", caption = "Split raw inputs", state = us.split_raw ~= false, tags = { ssk_sk = "split_raw" },
-      tooltip = "Ores, oil, water… get one copy per lane that uses them, placed next to their consumers" }
+    line("").add { type = "checkbox", caption = Loc("sankey-split-raw-inputs"), state = us.split_raw ~= false, tags = { ssk_sk = "split_raw" },
+      tooltip = Loc("sankey-ores-oil-water-get-one-copy-per") }
   end
   live_toggle(line(""), us)
   local actions = line("")
-  if not full then button(actions, "Center", "center_selection", "Center the selected material") end
+  if not full then button(actions, Loc("sankey-center"), "center_selection", Loc("sankey-center-the-selected-material")) end
   reflow_button(actions)
-  button(actions, "Unpin", "unpin", full and "Clear the pinned highlight. Click a node to pin one." or "Clear the pinned chain highlight")
-  if full then button(actions, "Reset layout", "reset_layout", "Forget manual ordering, hidden items and collapsed groups") end
+  button(actions, Loc("sankey-unpin"), "unpin", full and Loc("sankey-clear-the-pinned-highlight-click-a-node") or Loc("sankey-clear-the-pinned-chain-highlight"))
+  if full then button(actions, Loc("sankey-reset-layout"), "reset_layout", Loc("sankey-forget-manual-ordering-hidden-items-and-collapsed")) end
   -- Include the native 4 px gap between the title and content, so the inner
   -- frame and last controls stay inside the outer frame's bottom padding.
   local width, height = full and 360 or 330, 4 + 24 + 8 + 4 + 24 + rows * 28 + (rows - 1) * 8 + 16
@@ -369,7 +377,7 @@ end
 local function material_caption(key)
   local kind, name = key:match("^(%a+)/(.+)$")
   local proto = prototypes[kind] and prototypes[kind][name]
-  return { "", "[" .. kind .. "=" .. name .. "] ", proto and proto.localised_name or name:gsub("%-", " ") }
+  return { "", Loc.join("[", kind, "=", name, "] "), proto and proto.localised_name or name:gsub("%-", " ") }
 end
 
 -- History after the item picker on the same line: Back/Forward, the Last visits
@@ -379,11 +387,11 @@ local function history_controls(row, us)
   divider.style.height = ROW_H
   local back, forward = us.focus_hist or {}, us.focus_forward or {}
   local caption = material_caption
-  local previous = button(row, "◀", "f_back", #back > 0 and { "", "Back to ", caption(back[#back]) } or "No previous material")
+  local previous = button(row, "◀", "f_back", #back > 0 and Loc("sankey-back-to", caption(back[#back])) or Loc("sankey-no-previous-material"))
   previous.enabled = #back > 0
-  local next_ = button(row, "▶", "f_forward", #forward > 0 and { "", "Forward to ", caption(forward[#forward]) } or "No next material")
+  local next_ = button(row, "▶", "f_forward", #forward > 0 and Loc("sankey-forward-to", caption(forward[#forward])) or Loc("sankey-no-next-material"))
   next_.enabled = #forward > 0
-  local items, steps = { "Last visits" }, {}
+  local items, steps = { Loc("sankey-last-visits") }, {}
   for i = #(us.focus_hist or {}), 1, -1 do
     steps[#steps + 1] = -(#back - i + 1)
     items[#items + 1] = { "", "◀ ", caption(back[i]) }
@@ -393,7 +401,7 @@ local function history_controls(row, us)
     items[#items + 1] = { "", "▶ ", caption(forward[i]) }
   end
   local recent = row.add { type = "drop-down", items = items, selected_index = 1,
-    tags = { ssk_sk = "f_history", steps = steps }, tooltip = "Jump to a material you viewed earlier, or forward again after Back" }
+    tags = { ssk_sk = "f_history", steps = steps }, tooltip = Loc("sankey-jump-to-a-material-you-viewed-earlier") }
   recent.style.width = 160
   recent.enabled = #items > 1
   -- visited icons are tool-button sized so the line keeps the toolbar height
@@ -402,7 +410,7 @@ local function history_controls(row, us)
   if first > 1 then small(row, "…") end
   for i = first, #back do
     local visit = row.add { type = "sprite-button", style = "slot_button", sprite = back[i],
-      tooltip = { "", "Return to ", caption(back[i]) }, tags = { ssk_sk = "f_trail", steps = -(#back - i + 1) } }
+      tooltip = Loc("sankey-return-to", caption(back[i])), tags = { ssk_sk = "f_trail", steps = -(#back - i + 1) } }
     visit.style.size = 28
     local arrow = row.add { type = "sprite", sprite = "utility/right_arrow", resize_to_sprite = false }
     arrow.style.width, arrow.style.height = 12, 12
@@ -413,11 +421,11 @@ local function history_controls(row, us)
     current.style.maximal_width = 140
     current.style.font = "default-bold"
     current.style.single_line = true
-    current.tooltip = { "", "Current material: ", caption(us.focus) }
+    current.tooltip = Loc("sankey-current-material", caption(us.focus))
   end
   local clear = row.add { type = "sprite-button", style = "tool_button_red", sprite = "utility/trash",
     tags = { ssk_sk = "f_clear_history" },
-    tooltip = "Clear Last visits. Keeps the current material and collected production data." }
+    tooltip = Loc("sankey-clear-last-visits-keeps-the-current-material") }
   clear.enabled = #back + #forward > 0
 end
 
@@ -444,17 +452,17 @@ local function focus_toolbar(bar, us, player)
     local heading = MaterialPicker.add_heading(main, us.toolbar_width)
     MaterialPicker.update_heading(heading, us.focus)
   else
-    small(main, "Item / fluid:")
+    small(main, Loc("material-picker-item-fluid"))
     MaterialPicker.button(main, us.focus, "focus")
     history_controls(main, us)
   end
   local actions = right_group(main, us)
   if us.neighborhood then
     actions.add { type = "sprite-button", name = "ssk_watch_action", style = "tool_button", sprite = "utility/warning",
-      tags = { ssk_ui = "watch" }, tooltip = "Configure this material's watch" }
+      tags = { ssk_ui = "watch" }, tooltip = Loc("sankey-configure-this-material-s-watch") }
   end
   local machines = actions.add { type = "sprite-button", name = "ssk_machine_action", style = "tool_button", sprite = "utility/map",
-    tags = { ssk_ui = "machine_status" }, tooltip = "Inspect machines that make or use this material" }
+    tags = { ssk_ui = "machine_status" }, tooltip = Loc("sankey-inspect-machines-that-make-or-use-this") }
   machines.enabled = us.focus ~= nil
   zoom_buttons(actions, true)
   label_toggle(actions, us)
@@ -469,8 +477,8 @@ function SK.update_balance_actions(panel, us, key, player_index)
   local watch, machines = actions.ssk_watch_action, actions.ssk_machine_action
   watch.enabled = Watch.available(player_index, us, key)
   watch.toggled = watch.enabled and Watch.get(us, us.sidx, key) ~= nil
-  watch.tooltip = watch.enabled and "Configure this material's watch on the selected surface"
-    or "Star this material or its group to configure a watch"
+  watch.tooltip = watch.enabled and Loc("sankey-configure-this-material-s-watch-on-the")
+    or Loc("sankey-star-this-material-or-its-group-to")
   machines.enabled = key ~= nil
 end
 
@@ -479,10 +487,10 @@ local function build_toolbar(bar, us, L, player)
   local r1
   bar, r1 = toolbar_strip(bar, us)
 
-  small(r1, "View:")
-  local view_picker = r1.add { type = "drop-down", items = { "Grouped (unfinished)", "Item / fluid names" },
+  small(r1, Loc("sankey-view"))
+  local view_picker = r1.add { type = "drop-down", items = { Loc("sankey-grouped-unfinished"), Loc("sankey-item-fluid-names") },
     selected_index = us.view == "overview" and 1 or 2, tags = { ssk_sk = "view" },
-    tooltip = "Individual item and fluid names are the default. Grouping is unfinished: broad category names can hide material details. Expand a group to inspect its members." }
+    tooltip = Loc("sankey-individual-item-and-fluid-names-are-the") }
   view_picker.style.width = 160
   local presets = View.presets()
   local items, sel = {}, 1
@@ -492,12 +500,12 @@ local function build_toolbar(bar, us, L, player)
   end
   us.preset_ids = {}
   for i, p in ipairs(presets) do us.preset_ids[i] = p.id end
-  small(r1, "Preset:")
+  small(r1, Loc("sankey-preset"))
   local preset_picker = r1.add { type = "drop-down", items = items, selected_index = sel, tags = { ssk_sk = "preset" } }
   preset_picker.style.width = 190
 
   local actions = right_group(r1, us)
-  if us.view == "overview" then button(actions, "Collapse overview", "overview_reset", "Unfinished grouping: return expanded groups to the overview") end
+  if us.view == "overview" then button(actions, Loc("sankey-collapse-overview"), "overview_reset", Loc("sankey-unfinished-grouping-return-expanded-groups-to-the")) end
   zoom_buttons(actions)
   label_toggle(actions, us)
   settings_button(actions, us)
@@ -505,46 +513,46 @@ local function build_toolbar(bar, us, L, player)
   local n = us.sel and L.nodes[us.sel]
   local clean = us.layout ~= "lanes"
   if clean and not n then
-    hint(r2, "Hover to trace a chain; click to pin. Select a group to expand it. Scroll for larger graphs.", (us.canvas_w or 1000) - 24)
+    hint(r2, Loc("sankey-hover-to-trace-a-chain-click-to"), (us.canvas_w or 1000) - 24)
   elseif not n then
-    hint(r2, "Click a node to select it. ▲/▼ reorders its group; Shift moves to the end.", (us.canvas_w or 1000) - 24)
+    hint(r2, Loc("sankey-click-a-node-to-select-it-reorders"), (us.canvas_w or 1000) - 24)
   else
-    local selected = small(r2, "Selected: " .. rt(sprite_for(n)) .. " " .. display_name(n) .. " · group: " .. n.ginfo.super_name .. " › " .. n.ginfo.name)
+    local selected = small(r2, Loc("sankey-selected-group", rt(sprite_for(n)), display_name(n), n.ginfo.super_name, n.ginfo.name))
     selected.style.width = (us.canvas_w or 1000) - 24
     selected.style.single_line = true
     r2 = option_row(bar)
     if not clean then
-      button(r2, "▲", "up", "Move up (Shift: to top). At the top it moves the sub-lane, then the lane.")
-      button(r2, "▼", "down", "Move down (Shift: to bottom). At the bottom it moves the sub-lane, then the lane.")
+      button(r2, "▲", "up", Loc("sankey-move-up-shift-to-top-at-the"))
+      button(r2, "▼", "down", Loc("sankey-move-down-shift-to-bottom-at-the"))
     end
-    button(r2, "Hide", "hide", "Hide this node (its flow becomes stubs on neighbours)")
+    button(r2, Loc("sankey-hide"), "hide", Loc("sankey-hide-this-node-its-flow-becomes-stubs"))
     if n.kind == "group" then
-      button(r2, "Expand group", "expand", "Show this group's members and their immediate production inputs", { gid = n.group })
+      button(r2, Loc("sankey-expand-group"), "expand", Loc("sankey-show-this-group-s-members-and-their"), { gid = n.group })
     elseif n.base then
-      hint(r2, "Raw input, split per lane. Untick Split raw inputs in Chart settings to regroup it.", 400)
+      hint(r2, Loc("sankey-raw-input-split-per-lane-untick-split"), 400)
     else
-      button(r2, "Collapse group", "collapse", "Merge all visible members of this group into one node", { gid = n.group })
-      small(r2, "Move to:")
+      button(r2, Loc("sankey-collapse-group"), "collapse", Loc("sankey-merge-all-visible-members-of-this-group"), { gid = n.group })
+      small(r2, Loc("sankey-move-to"))
       local glist = Gr.list(player.index)
       local gitems, gsel = {}, 1
       us.group_ids = {}
       for i, g in ipairs(glist) do
-        gitems[i] = g.super_name .. " › " .. g.name
+        gitems[i] = Loc.join(g.super_name, " › ", g.name)
         us.group_ids[i] = g.id
         if g.id == n.group then gsel = i end
       end
       local group_picker = r2.add { type = "drop-down", items = gitems, selected_index = gsel, tags = { ssk_sk = "move_group" } }
       group_picker.style.width = 180
-      local tf = r2.add { type = "textfield", name = "ssk_newgroup", tooltip = "New group name" }
+      local tf = r2.add { type = "textfield", name = "ssk_newgroup", tooltip = Loc("sankey-new-group-name") }
       tf.style.width = 140
-      button(r2, "New group", "new_group", "Create a group with this name and move the node into it")
-      button(r2, "Default group", "ungroup", "Remove your override for this item")
+      button(r2, Loc("sankey-new-group"), "new_group", Loc("sankey-create-a-group-with-this-name-and"))
+      button(r2, Loc("sankey-default-group"), "ungroup", Loc("sankey-remove-your-override-for-this-item"))
     end
-    button(r2, "Deselect", "deselect")
+    button(r2, Loc("sankey-deselect"), "deselect")
   end
   local nh = 0
   for _ in pairs(us.hidden) do nh = nh + 1 end
-  if nh > 0 then button(r2, "Show hidden (" .. nh .. ")", "unhide_all") end
+  if nh > 0 then button(r2, Loc("sankey-show-hidden", nh), "unhide_all") end
 end
 
 ---------------------------------------------------------------------------
@@ -566,6 +574,7 @@ local function wrapped(canvas, x, y, w, h, spec)
   place(f, x, y, w, h)
   f.style.padding = 0
   local e = f.add(spec)
+  e.style.top_margin = round(y)
   e.style.maximal_width = w
   return e
 end
@@ -630,7 +639,7 @@ local function draw(canvas, L, us, st, player, W, H)
       for _, sb in ipairs(ln.sub_list) do
         local sx0 = cx[sb.c0] - View.LANE_LEFT + 10
         local sx1 = cx[sb.c1] + View.NODE_W + View.LANE_RIGHT - 10
-        bg(canvas, ln.color, sx0, sb.y0, sx1 - sx0, sb.h, "bg", ln.name .. " › " .. sb.name)
+        bg(canvas, ln.color, sx0, sb.y0, sx1 - sx0, sb.h, "bg", Loc.join(ln.name, " › ", sb.name))
         bg(canvas, ln.color, sx0, sb.y0, sx1 - sx0, 1, "line")
         late[#late + 1] = { sx0 + 4, sb.y0 + 1, 200, 14, { type = "label", caption = sb.name, ignored_by_interaction = true },
                             font = "default-small", color = { 0.75, 0.75, 0.75 } }
@@ -649,7 +658,7 @@ local function draw(canvas, L, us, st, player, W, H)
     if not tooltips[link] then tooltips[link] = ribbon_tooltip(link) end
     hover[#hover + 1] = { pieces = pieces, tip = tooltips[link], from = l.from, to = l.to }
     if POLY then
-      local key = l.from .. ">" .. l.to
+      local key = Loc.join(l.from, ">", l.to)
       if not meshes[key] then
         meshes[key] = { from = l.from, to = l.to, color = color, pieces = {} }
         mesh_order[#mesh_order + 1] = key
@@ -691,7 +700,11 @@ local function draw(canvas, L, us, st, player, W, H)
     st.ribbons[#st.ribbons + 1] = r
   end
   for _, target in ipairs(hover) do
-    Tooltip.ribbon(canvas, target.pieces, target.tip, { ssk_sk = "ribbon", from = target.from, to = target.to })
+    Tooltip.ribbon(canvas, target.pieces, target.tip, { ssk_sk = "ribbon", from = target.from, to = target.to }, nil,
+      function(spec, x, y, w, h)
+        local hit = wrapped(canvas, x, y, w, h, spec)
+        hit.style.width, hit.style.height = w, h
+      end)
   end
   -- 3. stubs + node bars (sprites); buttons and labels deferred
   for _, col in ipairs(L.cols) do
@@ -713,11 +726,11 @@ local function draw(canvas, L, us, st, player, W, H)
       end
       local lab_use = n.lab_use or 0
       local other_use = n.stub_out - lab_use
-      local lab_tip = lab_use > 0 and ("Labs (estimated): " .. fmt(lab_use) .. "/s")
+      local lab_tip = lab_use > 0 and (Loc("sankey-labs-estimated-s", fmt(lab_use)))
       if n.stub_out > 0 then
-        local use_tip = lab_tip and (lab_tip .. "\nEstimated from consumption outside recorded recipes.")
-          or string.format("Other uses of %s: %s/s\n(not shown: outside this view, labs, fuel, building, launches…)", display_name(n), fmt(n.stub_out))
-        if lab_tip and other_use > 1e-4 then use_tip = use_tip .. "\nOther uses: " .. fmt(other_use) .. "/s" end
+        local use_tip = lab_tip and (Loc("sankey-estimated-from-consumption-outside-recorded-recipes", lab_tip))
+          or Loc("sankey-other-uses-of-s-not-shown-outside", display_name(n), fmt(n.stub_out))
+        if lab_tip and other_use > 1e-4 then use_tip = Loc("sankey-other-uses-s", use_tip, fmt(other_use)) end
         local stub_x = n.x + View.NODE_W
         stub(stub_x, n.stub_out_y, n.t_stub_out, use_tip)
         if POLY and lab_tip then
@@ -727,59 +740,55 @@ local function draw(canvas, L, us, st, player, W, H)
         count = count + 1
       end
       if n.stub_in > 0 then
-        stub(n.x - View.STUB, n.stub_in_y, n.t_stub_in, string.format("Other sources of %s: %s/s\n(outside this view: mining, pumping, handcraft, recycling, filtered producers…)", display_name(n), fmt(n.stub_in)))
+        stub(n.x - View.STUB, n.stub_in_y, n.t_stub_in, Loc("sankey-other-sources-of-s-outside-this-view", display_name(n), fmt(n.stub_in)))
         count = count + 1
       end
       local tip = {}
-      tip[#tip + 1] = rt(sprite_for(n)) .. " " .. display_name(n) .. "  [" .. n.ginfo.super_name .. " › " .. n.ginfo.name .. "]  " .. View.tier_label(n.tier)
-        .. (n.era and string.format(" (tech era %d)", n.era) or " (production depth)")
+      tip[#tip + 1] = Loc.join(rt(sprite_for(n)), " ", display_name(n), "  [", n.ginfo.super_name, " › ", n.ginfo.name, "]  ", View.tier_label(n.tier), (n.era and Loc.join(" ", Loc("sankey-tech-era", string.format("%d", n.era))) or Loc.join(" ", Loc("sankey-production-depth-2"))))
       if n.context then tip[#tip + 1] = n.context end
       if n.kind == "item" or n.kind == "fluid" or n.kind == "group" then
-        tip[#tip + 1] = string.format("Produced %s %s · consumed %s %s", fmt(n.prod), units(n), fmt(n.cons), units(n))
-        if n.kind == "group" then tip[#tip + 1] = "Totals across these members; expand the group for each material's rate." end
+        tip[#tip + 1] = Loc("sankey-produced-consumed", fmt(n.prod), units(n), fmt(n.cons), units(n))
+        if n.kind == "group" then tip[#tip + 1] = Loc("sankey-totals-across-these-members-expand-the-group") end
       end
       if n.copies and n.copies > 1 then
-        tip[#tip + 1] = string.format("Split input: this copy feeds %s with %s/s (%.0f%% of %s/s total, %d copies)",
-          n.ginfo.super_name, fmt(n.sout), (n.share or 0) * 100, fmt(n.total_prod or n.prod), n.copies)
+        tip[#tip + 1] = Loc("sankey-split-input-this-copy-feeds-with-s", n.ginfo.super_name, fmt(n.sout), string.format("%.0f", (n.share or 0) * 100), fmt(n.total_prod or n.prod), string.format("%d", n.copies))
       end
-      if n.stub_in > 0 then tip[#tip + 1] = "Other sources: " .. fmt(n.stub_in) .. "/s" end
+      if n.stub_in > 0 then tip[#tip + 1] = Loc("sankey-other-sources-s", fmt(n.stub_in)) end
       if lab_tip then tip[#tip + 1] = lab_tip end
-      if other_use > 1e-4 then tip[#tip + 1] = "Other uses: " .. fmt(other_use) .. "/s" end
-      if (n.catalyst or 0) > 0 then tip[#tip + 1] = "Catalyst (consumed and returned, netted out): " .. fmt(n.catalyst) .. "/s" end
+      if other_use > 1e-4 then tip[#tip + 1] = Loc("sankey-other-uses-s-2", fmt(other_use)) end
+      if (n.catalyst or 0) > 0 then tip[#tip + 1] = Loc("sankey-catalyst-consumed-and-returned-netted-out-s", fmt(n.catalyst)) end
       for _, lp in ipairs(n.loops) do
         local what = rt(base_key(lp.what))
         if lp.back and lp.out then
-          tip[#tip + 1] = "↺ feeds back " .. fmt(lp.rate) .. "/s into " .. what .. " (loop, not drawn)"
+          tip[#tip + 1] = Loc("sankey-feeds-back-s-into-loop-not-drawn", fmt(lp.rate), what)
         elseif lp.back then
-          tip[#tip + 1] = "↺ gets " .. fmt(lp.rate) .. "/s back from " .. what .. " (loop, not drawn)"
+          tip[#tip + 1] = Loc("sankey-gets-s-back-from-loop-not-drawn", fmt(lp.rate), what)
         elseif lp.late then
-          tip[#tip + 1] = "↺ " .. what .. " " .. fmt(lp.rate) .. "/s (later-tech producer, not drawn)"
+          tip[#tip + 1] = Loc("sankey-s-later-tech-producer-not-drawn", what, fmt(lp.rate))
         else
-          tip[#tip + 1] = "↺ " .. what .. " " .. fmt(lp.rate) .. "/s (recycling / reversing recipe, not drawn)"
+          tip[#tip + 1] = Loc("sankey-s-recycling-reversing-recipe-not-drawn", what, fmt(lp.rate))
         end
       end
       if n.members then
         local parts = {}
         for _, mk in ipairs(n.members) do parts[#parts + 1] = rt(mk) end
-        tip[#tip + 1] = "Members: " .. table.concat(parts, " ")
+        tip[#tip + 1] = Loc("sankey-members", Loc.join_list(parts, " "))
       end
-      local details = table.concat(tip, "\n")
+      local details = Loc.join_list(tip, "\n")
       local shown = (n.prod > 0) and n.prod or n.cons
-      local rate = n.kind == "recipe" and "Recipe" or (fmt(shown) .. " " .. units(n))
+      local rate = n.kind == "recipe" and Loc("machine-status-recipe") or (Loc.join(fmt(shown), " ", units(n)))
       local usage = us.neighborhood and n.selected_usage
       if usage then
         local material=L.nodes[us.focus]
-        rate=fmt(usage).." "..units(material)
-        details="Consumes selected "..display_name(material)..": "..rate.."\n"..details
+        rate=Loc.join(fmt(usage), " ", units(material))
+        details=Loc("sankey-consumes-selected", display_name(material), rate, details)
       end
       local tooltip = { "", rt(sprite_for(n)), " ", localised_name(n), "\n", rate }
       if usage then
-        tooltip[#tooltip+1]=" of "
-        tooltip[#tooltip+1]=localised_name(L.nodes[us.focus])
-        tooltip[#tooltip+1]=" consumed"
-        if n.kind~="recipe" then tooltip[#tooltip+1]="\nConsumer production: "..fmt(n.prod).." "..units(n) end
+        tooltip[#tooltip+1]=Loc.join(" ", Loc("selected-material-consumed", localised_name(L.nodes[us.focus])))
+        if n.kind~="recipe" then tooltip[#tooltip+1]=Loc("sankey-consumer-production", fmt(n.prod), units(n)) end
       end
-      if lab_tip then tooltip[#tooltip + 1] = "\n" .. lab_tip end
+      if lab_tip then tooltip[#tooltip + 1] = Loc.join("\n", lab_tip) end
       local bar
       if POLY then
         POLY.rect(n.x, n.y, View.NODE_W, n.h, Canvas.col(n.color or n.ginfo.color, 1))
@@ -829,9 +838,9 @@ local function draw(canvas, L, us, st, player, W, H)
     local heading = View.tier_label(t)
     if us.neighborhood then
       local center = L.center_ci or 2
-      local material=us.focus and localised_name({key=us.focus,kind=us.focus:match("^(%a+)/")}) or "selected material"
-      heading = ci == center and "Selected material" or ci > center and {"","Uses · consumed /s\n",material}
-        or ci == center - 1 and "Materials" or "Inputs " .. (center - ci)
+      local material=us.focus and localised_name({key=us.focus,kind=us.focus:match("^(%a+)/")}) or Loc("sankey-selected-material")
+      heading = ci == center and Loc("sankey-selected-material-2") or ci > center and Loc("uses-material-heading", material)
+        or ci == center - 1 and Loc("sankey-materials") or Loc("sankey-inputs-2", (center - ci))
     end
     late[#late + 1] = { cx[ci], 6, us.neighborhood and L.label_w[ci] or 60, us.neighborhood and 40 or 18,
       { type = "label", caption = heading, tooltip=heading, tags={ssk_column=us.neighborhood and ci>(L.center_ci or 2) and "uses" or "other"} },
@@ -855,7 +864,7 @@ end
 -- st: runtime per-player render state (ribbon element refs for hover)
 local function rstate(pi, view)
   storage.sk_render = storage.sk_render or {}
-  local k = (view == "focus") and (pi .. ":focus") or pi
+  local k = (view == "focus") and (Loc.join(pi, ":focus")) or pi
   storage.sk_render[k] = storage.sk_render[k] or { ribbons = {} }
   return storage.sk_render[k]
 end
@@ -899,7 +908,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     end
     canvas.clear()
     Canvas.clear(player.index)
-    local l = canvas.add { type = "label", caption = us.neighborhood and "Select an item or fluid from the Balance list to inspect its inputs and uses." or "Pick an item or fluid above, or use a row's magnifier in the Balance tab." }
+    local l = canvas.add { type = "label", caption = us.neighborhood and Loc("sankey-select-an-item-or-fluid-from-the") or Loc("sankey-pick-an-item-or-fluid-above-or") }
     l.style.single_line = false
     place(l, 24, 40, math.max(100, W - 48), 60)
     return
@@ -923,11 +932,10 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
   if nn == 0 then
     Canvas.clear(player.index)
     local caption = (L.seconds < 2)
-      and "Collecting data… rates appear after the first few seconds."
-      or "Nothing to show for this preset / scope / tier range."
+      and Loc("sankey-collecting-data-rates-appear-after-the-first")
+      or Loc("sankey-nothing-to-show-for-this-preset-scope")
     if us.view == "focus" and L.seconds >= 2 then
-      caption = { "", "No recorded recipe flow for ", localised_name({key=us.focus}),
-        " on this surface in the selected period. Try another material, surface or period." }
+      caption = Loc("no-recorded-material-flow", localised_name({key=us.focus}))
     end
     local l = canvas.add { type = "label", caption = caption }
     l.style.single_line = false
@@ -1063,7 +1071,7 @@ function SK.on_click(e, us)
   elseif a == "hide" then
     if us.sel then us.hidden[base_key(us.sel)] = true; us.sel = nil end
   elseif a == "unhide_all" then us.hidden = {}
-  elseif a == "collapse" then us.collapsed[tags.gid] = true; us.sel = "group/" .. tags.gid
+  elseif a == "collapse" then us.collapsed[tags.gid] = true; us.sel = Loc.join("group/", tags.gid)
   elseif a == "expand" then
     if us.view == "overview" and string.sub(tags.gid, 1, 1) == "@" then
       us.overview_open = us.overview_open or {}; us.overview_open[string.sub(tags.gid, 2)] = true
@@ -1078,7 +1086,7 @@ function SK.on_click(e, us)
       local id = Gr.create(pi, name, cur.super)
       Gr.assign(pi, base_key(us.sel), id)
     else
-      player.print("[Production Flow] Type a group name first.")
+      player.print(Loc("sankey-type-a-group-name-first"))
       return "redraw"
     end
   else
@@ -1146,7 +1154,7 @@ function SK.on_elem_changed(e, us)
   local v = e.element.elem_value
   if type(v) == "table" then v = v.name end
   if not v then return "none" end
-  local k = ((a == "f_item") and "item/" or "fluid/") .. v
+  local k = Loc.join(((a == "f_item") and "item/" or "fluid/"), v)
   SK.select_focus(us, k)
   return "rebuild"
 end

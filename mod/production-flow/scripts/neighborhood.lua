@@ -1,4 +1,5 @@
 -- Immediate materials -> selected item -> uses, for the Balance inspector.
+local Loc = require("scripts.locale")
 local N = {}
 N.MAX_DEPTH = 6 -- room for enrichment, molten metal and ingots in modded chains
 
@@ -43,7 +44,7 @@ function N.build(nodes, links, model, focus, depth)
           for _, ingredient in pairs(links) do
             if ingredient.to == l.from then
               local input = inputs(ingredient.from, distance + 1)
-              link(input, target, ingredient, "This input is shared by all products of the recipe.")
+              link(input, target, ingredient, Loc("shared-recipe-input"))
               via[#via + 1] = input.key
             end
           end
@@ -77,7 +78,12 @@ function N.build(nodes, links, model, focus, depth)
           if product.from == l.to then outputs[#outputs + 1] = product.to end
         end
         table.sort(outputs)
-        use.context = "Used by this multi-output recipe. Products: " .. table.concat(outputs, ", ")
+        for i, key in ipairs(outputs) do
+          local kind, name = key:match("^(%a+)/(.+)$")
+          local proto = prototypes[kind] and prototypes[kind][name]
+          outputs[i] = proto and proto.localised_name or name
+        end
+        use.context = Loc("multi-output-products", Loc.join_list(outputs, ", "))
       end
     end
   end

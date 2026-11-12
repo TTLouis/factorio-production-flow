@@ -130,20 +130,23 @@ end
 
 Sm.PERIODS = { 60, 600, 3600, 36000, 180000, 900000, 3600000 }
 Sm.DEFAULT_PERIOD = 600
-Sm.PERIOD_CAPTIONS = { "1m", "10m", "1H", "10H", "50H", "250H", "1000H" }
+local Loc = require("scripts.locale")
+Sm.PERIOD_CAPTIONS = { Loc("period-minute", 1), Loc("period-minute", 10),
+  Loc("period-hour", 1), Loc("period-hour", 10), Loc("period-hour", 50),
+  Loc("period-hour", 250), Loc("period-hour", 1000) }
 
 local RING_SPECS = { {60, 60}, {600, 60}, {3600, 51}, {18000, 51}, {72000, 51} }
 
 function Sm.duration(seconds)
   if seconds >= 3600 then
     local hours, minutes = math.floor(seconds / 3600), math.floor(seconds % 3600 / 60)
-    return hours .. " h" .. (minutes > 0 and " " .. minutes .. " min" or "")
+    return minutes > 0 and Loc("duration-hours-minutes", hours, minutes) or Loc("duration-hours", hours)
   end
   if seconds >= 60 then
     local minutes, remainder = math.floor(seconds / 60), math.floor(seconds % 60)
-    return minutes .. " min" .. (remainder > 0 and " " .. remainder .. " s" or "")
+    return remainder > 0 and Loc("duration-minutes-seconds", minutes, remainder) or Loc("duration-minutes", minutes)
   end
-  return string.format("%d s", math.floor(seconds))
+  return Loc("duration-seconds", math.floor(seconds))
 end
 
 function Sm.normal_crafts(sample)

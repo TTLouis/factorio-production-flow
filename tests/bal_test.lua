@@ -70,7 +70,7 @@ UI.refresh(player, true)
 assert(root() == grouped, "grouped live update should reuse every section")
 assert(UI.on_checked({ player_index = 1, element = { tags = { ssk_ui = "bal_details" }, state = true } }))
 for _, t in ipairs(tables()) do assert(t.column_count == 8, "details must stack without adding width")
-  assert(t.children[4].caption:find("\n"), "producer utilisation should appear beneath production") end
+  assert(LOC(t.children[4].caption):find("\n"), "producer utilisation should appear beneath production") end
 check_header_alignment()
 local group_index
 for i, id in pairs(us.bal_group_ids) do if id == "plates" then group_index = i end end
@@ -132,25 +132,25 @@ assert(#links() == 200 and #find(root(), function(e) return e.tags.ssk_ui == "ba
 UI.on_click({ player_index = 1, element = { name = "x", tags = { ssk_ui = "bal_more" } } })
 assert(#links() == 205, "show more must expose all remaining rows")
 local t = tables()[1]
-assert(t.children[7].caption == "0.000", "known zero stock must not become missing stock")
-assert(t.children[15].caption == "—", "missing stock must stay unavailable")
+assert(LOC(t.children[7].caption) == "0.000", "known zero stock must not become missing stock")
+assert(LOC(t.children[15].caption) == "—", "missing stock must stay unavailable")
 assert(t.children[2].caption[4] == prototypes.item["test-1"].localised_name, "use prototype display name")
 local summary = root().ssk_bal_summary
 assert(summary.column_count == 3 and summary.ssk_bal_under and summary.ssk_bal_ok and summary.ssk_bal_over, "activity summary must have three themed columns")
-assert(summary.ssk_bal_over.ssk_bal_theme.caption:find("Overproducing: 205", 1, true), "summary must count the full filtered set, not just the first page")
+assert(LOC(summary.ssk_bal_over.ssk_bal_theme.caption):find("Overproducing: 205", 1, true), "summary must count the full filtered set, not just the first page")
 local reuse = root()
 fixture[1].prod = 3
 UI.refresh(player, true)
-assert(root() == reuse and t.children[4].caption == "3.00", "live numbers must update in place")
+assert(root() == reuse and LOC(t.children[4].caption) == "3.00", "live numbers must update in place")
 fixture[1].status = "deficit"
 UI.refresh(player, true)
-assert(root()==reuse and t.children[3].caption:find("Deficit"), "live status changes must update cells without destroying controls")
-assert(summary.ssk_bal_under.ssk_bal_theme.caption:find("Underproducing: 1", 1, true)
-  and summary.ssk_bal_over.ssk_bal_theme.caption:find("Overproducing: 204", 1, true), "theme totals must update without rebuilding the list")
+assert(root()==reuse and LOC(t.children[3].caption):find("Deficit"), "live status changes must update cells without destroying controls")
+assert(LOC(summary.ssk_bal_under.ssk_bal_theme.caption):find("Underproducing: 1", 1, true)
+  and LOC(summary.ssk_bal_over.ssk_bal_theme.caption):find("Overproducing: 204", 1, true), "theme totals must update without rebuilding the list")
 local original_first=t.children[1]
 table.remove(fixture,1)
 UI.refresh(player,true)
-assert(root()==reuse and t.children[1]==original_first and t.children[3].caption:find("Inactive"), "expired rows must not interrupt selection")
+assert(root()==reuse and t.children[1]==original_first and LOC(t.children[3].caption):find("Inactive"), "expired rows must not interrupt selection")
 UI.refresh(player)
 assert(root()~=reuse, "manual Refresh must reapply list membership")
 fixture = {}
@@ -186,7 +186,7 @@ expect_order(biggest, tied_first, tied_second, relative, surplus, steady)
 select("bal_sort", 4)
 assert(us.bal_sort == "empty")
 local sort_picker = find(root(), function(e) return e.tags.ssk_ui == "bal_sort" end)[1]
-assert(sort_picker.items[3] == "Biggest deficit" and sort_picker.items[4] == "Soonest empty"
+assert(LOC(sort_picker.items[3]) == "Biggest deficit" and LOC(sort_picker.items[4]) == "Soonest empty"
   and sort_picker.selected_index == 4, "Order dropdown labels and selection must agree")
 expect_order(surplus, relative, tied_first, biggest, tied_second, steady)
 local sorted = root()

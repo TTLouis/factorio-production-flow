@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 -- Balance tab: per item, is it in deficit (draining a buffer), in surplus (filling one),
 -- held back by its supply, or over-built for its demand?
 --
@@ -17,22 +18,22 @@ B.LOW = 0.85       -- machines below 85 % busy are "waiting"
 B.HIGH = 0.95      -- machines above 95 % busy are "maxed"
 
 B.STATUS = {
-  stored = { order = 8, label = "Stock only", color = "0.7,0.7,0.7",
-             help = "Stored in chests, with no measured production or consumption in this period." },
-  deficit   = { order = 1, label = "Deficit",          color = "1,0.35,0.35",
-                help = "Measured consumption exceeds production by more than 5%. Check stored supply and transport; chest stock gives an estimated time to empty when a drain is measured." },
-  limited   = { order = 2, label = "Possible supply limit", color = "1,0.6,0.2",
-                help = "Rates roughly balance, consumer utilisation is below 85% and producers are at least 95% busy. Check this item's supply and delivery before adding capacity; utilisation alone does not identify the cause." },
-  starved   = { order = 3, label = "Low activity",          color = "1,0.8,0.3",
-                help = "Rates roughly balance and both producer and consumer utilisation are below 85%. Check inputs, transport, power and demand; low utilisation alone does not prove an upstream bottleneck." },
-  surplus   = { order = 4, label = "Surplus",          color = "1,0.9,0.3",
-                help = "Measured production exceeds consumption by more than 5%. Output may be accumulating, exported or used outside tracked crafting machines; check recent stock trend." },
-  overbuilt = { order = 5, label = "Spare capacity",    color = "0.45,0.7,1",
-                help = "Rates roughly balance, producer utilisation is below 85% and consumers are at least 95% busy. Producer capacity may exceed current demand; check delivery and machine conditions." },
-  ok        = { order = 6, label = "OK",               color = "0.5,0.9,0.5",
-                help = "Measured rates match within 5%, with no utilisation warning detected. Some machines or uses may be outside the tracked data." },
-  source    = { order = 7, label = "Source / sink",    color = "0.7,0.7,0.7",
-                help = "Mined, pumped or consumed outside crafting machines (labs, fuel, building…): no machine data." },
+  stored = { order = 8, label = Loc("balance-stock-only"), color = "0.7,0.7,0.7",
+             help = Loc("balance-stored-in-chests-with-no-measured-production") },
+  deficit   = { order = 1, label = Loc("balance-deficit"),          color = "1,0.35,0.35",
+                help = Loc("balance-measured-consumption-exceeds-production-by-more-than") },
+  limited   = { order = 2, label = Loc("balance-possible-supply-limit"), color = "1,0.6,0.2",
+                help = Loc("balance-rates-roughly-balance-consumer-utilisation-is-below") },
+  starved   = { order = 3, label = Loc("balance-low-activity"),          color = "1,0.8,0.3",
+                help = Loc("balance-rates-roughly-balance-and-both-producer-and") },
+  surplus   = { order = 4, label = Loc("balance-surplus"),          color = "1,0.9,0.3",
+                help = Loc("balance-measured-production-exceeds-consumption-by-more-than") },
+  overbuilt = { order = 5, label = Loc("balance-spare-capacity"),    color = "0.45,0.7,1",
+                help = Loc("balance-rates-roughly-balance-producer-utilisation-is-below") },
+  ok        = { order = 6, label = Loc("balance-ok"),               color = "0.5,0.9,0.5",
+                help = Loc("balance-measured-rates-match-within-5-with-no") },
+  source    = { order = 7, label = Loc("balance-source-sink"),    color = "0.7,0.7,0.7",
+                help = Loc("balance-mined-pumped-or-consumed-outside-crafting-machines") },
 }
 
 -- Residuals are keyed by material ("item/name" or "fluid/name") and contain

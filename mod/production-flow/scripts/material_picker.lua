@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 -- Material selector using vanilla filter-group controls, ordered subgroup rows
 -- and native item slots. Its searchable contents include only items and fluids.
 local P = {}
@@ -22,14 +23,14 @@ end
 local function label(key)
   local kind, name = key:match("^(%a+)/(.+)$")
   local proto = prototypes[kind] and prototypes[kind][name]
-  return { "", "[" .. kind .. "=" .. name .. "] ",
+  return { "", Loc.join("[", kind, "=", name, "] "),
     proto and proto.localised_name or name:gsub("%-", " ") }
 end
 
 local function update_button(button, key, target)
   button.sprite = key or "utility/search"
   button.tags = { ssk_picker = "open", target = target, current = key or "" }
-  button.tooltip = key and { "", label(key), "\nChoose an item or fluid" } or "Choose an item or fluid"
+  button.tooltip = key and { "", label(key), Loc("material-picker-choose-an-item-or-fluid") } or Loc("material-picker-choose-an-item-or-fluid-2")
 end
 
 function P.button(row, key, target, name)
@@ -43,7 +44,7 @@ function P.add_heading(row, width)
   local heading = row.add { type = "flow", name = "ssk_material_heading", direction = "horizontal" }
   heading.style.vertical_align = "center"
   heading.style.horizontal_spacing = 8
-  heading.add { type = "label", caption = "Item / fluid:" }
+  heading.add { type = "label", caption = Loc("material-picker-item-fluid") }
   P.button(heading, nil, "balance", "ssk_material_slot")
   if width >= 680 then
     local caption = heading.add { type = "label", name = "ssk_material_name", style = "caption_label" }
@@ -57,7 +58,7 @@ function P.update_heading(heading, key)
   local kind, name
   if key then kind, name = key:match("^([^/]+)/(.+)$") end
   local proto = kind and prototypes[kind] and prototypes[kind][name]
-  local caption = proto and proto.localised_name or name or "No material selected"
+  local caption = proto and proto.localised_name or name or Loc("history-no-material-selected")
   update_button(heading.ssk_material_slot, proto and key, "balance")
   if heading.ssk_material_name then
     heading.ssk_material_name.caption = caption
@@ -116,10 +117,10 @@ local function collect_catalog(picker_state, query)
   for _, kind in ipairs({ "item", "fluid" }) do
     for name, proto in pairs(prototypes[kind]) do
       if selectable(proto) then
-        local key = kind .. "/" .. name
+        local key = Loc.join(kind, "/", name)
         local group = kind == "fluid" and { name = "fluids", order = "zzzz", localised_name = { "item-group-name.fluids" } }
           or proto.group or (proto.subgroup and proto.subgroup.group)
-          or { name = "other", order = "z", localised_name = "Other" }
+          or { name = "other", order = "z", localised_name = Loc("material-picker-other") }
         total = total + 1
         local subgroup = proto.subgroup or { name = kind, order = "" }
         groups[group.name] = group
@@ -127,9 +128,8 @@ local function collect_catalog(picker_state, query)
         if matches_query(query, display, name) then
           matched_groups[group.name] = true
           entries[#entries + 1] = { key = key, name = name, kind = kind, group = group.name,
-            subgroup = group.name .. "/" .. subgroup.name,
-            sort = (group.order or "") .. "\t" .. group.name .. "\t"
-              .. (subgroup.order or "") .. "\t" .. subgroup.name .. "\t" .. (proto.order or "") .. "\t" .. name .. "\t" .. kind }
+            subgroup = Loc.join(group.name, "/", subgroup.name),
+            sort = Loc.join((group.order or ""), "\t", group.name, "\t", (subgroup.order or ""), "\t", subgroup.name, "\t", (proto.order or ""), "\t", name, "\t", kind) }
         end
       end
     end
@@ -188,7 +188,7 @@ local function render_groups(frame, group_list, matched_groups, query, chosen_gr
   local tabs = frame.ssk_material_inner.ssk_group_scroll.ssk_groups
   tabs.clear()
   for _, group in ipairs(group_list) do
-    local tab = tabs.add { type = "sprite-button", style = "filter_group_button_tab_slightly_larger", sprite = "item-group/" .. group.name,
+    local tab = tabs.add { type = "sprite-button", style = "filter_group_button_tab_slightly_larger", sprite = Loc.join("item-group/", group.name),
       toggled = query == "" and chosen_group == group.name, tooltip = group.localised_name or group.name,
       tags = { ssk_picker = "group", group = group.name } }
     tab.enabled = query == "" or matched_groups[group.name] == true
@@ -214,7 +214,7 @@ local function populate(player)
   local tab_size = fit(player, frame, #group_list, material_rows)
   render_groups(frame, group_list, matched_groups, query, chosen_group, tab_size)
   grid.tags = { keys = keys, total = total }
-  frame.ssk_count.caption = #entries == 0 and "No matching materials" or (#entries .. " materials")
+  frame.ssk_count.caption = #entries == 0 and Loc("material-picker-no-matching-materials") or (Loc("material-count", #entries))
 end
 
 function P.on_group(e)
@@ -264,19 +264,19 @@ function P.open(player, target, current)
   local f = player.gui.screen.add { type = "frame", name = NAME, direction = "vertical", tags = { target = target, group = group, current = current or "" } }
   local title = f.add { type = "flow", name = "ssk_title", direction = "horizontal" }
   title.style.horizontal_spacing = 8
-  title.add { type = "label", caption = "Select item / fluid", style = "frame_title" }
+  title.add { type = "label", caption = Loc("material-picker-select-item-fluid"), style = "frame_title" }
   local drag = title.add { type = "empty-widget", style = "draggable_space_header" }
   drag.style.horizontally_stretchable = true
   drag.style.height = 24
   drag.style.minimal_width = 24
   drag.drag_target = f
   local query = title.add { type = "textfield", name = "ssk_query", text = "", style = "search_popup_textfield",
-    tags = { ssk_picker = "query" }, tooltip = "Search item and fluid names" }
+    tags = { ssk_picker = "query" }, tooltip = Loc("material-picker-search-item-and-fluid-names") }
   query.style.width = 150
   title.add { type = "sprite-button", sprite = "utility/search", style = "frame_action_button",
-    tags = { ssk_picker = "search" }, tooltip = "Search item and fluid names" }
+    tags = { ssk_picker = "search" }, tooltip = Loc("material-picker-search-item-and-fluid-names") }
   title.add { type = "sprite-button", sprite = "utility/close", style = "frame_action_button",
-    tags = { ssk_picker = "close" }, tooltip = "Close material picker" }
+    tags = { ssk_picker = "close" }, tooltip = Loc("material-picker-close-material-picker") }
   local inner = f.add { type = "frame", name = "ssk_material_inner", style = "inside_deep_frame", direction = "vertical" }
   local tab_scroll = inner.add { type = "scroll-pane", name = "ssk_group_scroll", style = "naked_scroll_pane",
     horizontal_scroll_policy = "never", vertical_scroll_policy = "auto" }
@@ -300,7 +300,7 @@ function P.open(player, target, current)
   local strings, keys = {}, {}
   for _, kind in ipairs({ "item", "fluid" }) do
     for name, proto in pairs(prototypes[kind]) do
-      local key = kind .. "/" .. name
+      local key = Loc.join(kind, "/", name)
       if selectable(proto) and not s.names[key] then
         keys[#keys + 1] = key
         strings[#strings + 1] = proto.localised_name or name:gsub("%-", " ")

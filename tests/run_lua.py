@@ -5,6 +5,14 @@ import sys
 
 TESTS = Path(__file__).resolve().parent
 MOD = TESTS.parent / "mod" / "production-flow"
+from localization_check import validate
+catalog, language_count = validate()
+print(f"LOCALIZATION OK: {len(catalog)} English keys; {language_count} language(s)", flush=True)
+if len(sys.argv) == 1:
+    import unittest
+    suite = unittest.defaultTestLoader.discover(str(TESTS), pattern="localization_test.py")
+    if not unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful():
+        raise SystemExit(1)
 (TESTS / "out").mkdir(exist_ok=True)
 sys.path.insert(0, str(TESTS / ".runtime"))
 try:
@@ -13,6 +21,8 @@ except ImportError:
     raise SystemExit("Install Lua support: python -m pip install --target tests/.runtime lupa")
 
 lua = LuaRuntime()
+lua.globals().TEST_LOCALE = lua.table_from(catalog)
+lua.globals().LOC = lua.execute((TESTS / "locale_test_support.lua").read_text(encoding="utf-8"))(lua.globals().TEST_LOCALE)
 check = lua.eval("function(s,n) local f,e=load(s,n); if not f then error(e) end end")
 paths = sorted(MOD.rglob("*.lua")) + sorted(TESTS.glob("*.lua")) + sorted((TESTS / "development").glob("*.lua"))
 for path in paths:

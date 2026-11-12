@@ -105,11 +105,11 @@ local player = { gui = { screen = screen }, force_index = 1, opened = main,
   display_resolution = { width = 1024, height = 768 }, display_scale = 2 }
 local status_window = StatusUI.open(player, 1, "item/iron-plate")
 local sample = find(status_window, "ssk_machine_age", "iron-plate")
-assert(sample and sample.caption == "1 s" and sample.tags.sample_tick < game.tick)
+assert(sample and LOC(sample.caption) == "1 s" and sample.tags.sample_tick < game.tick)
 assert(find(status_window, "ssk_machine_age", "gear"), "show observed consumer recipes")
 local inspect = find(status_window, "ssk_machine_status", "preview")
 assert(inspect and inspect.tags.issue == "input" and not inspect.caption)
-assert(inspect.parent.ssk_machine_count.caption == "1", "the count is readable beside its preview action")
+assert(LOC(inspect.parent.ssk_machine_count.caption) == "1", "the count is readable beside its preview action")
 assert(StatusUI.on_click(player, inspect) and screen.ssk_machine_preview and not status_window.visible)
 local preview = screen.ssk_machine_preview
 local slider = find(preview, "ssk_machine_status", "zoom")

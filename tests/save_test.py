@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import time
 from zipfile import ZipFile, ZIP_DEFLATED
+from localization_check import install_native_support
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = Path(os.environ['APPDATA']) / 'Factorio'
@@ -76,10 +77,12 @@ def prepare(args):
     (stage / 'config.ini').write_text(
         f'[path]\nread-data={args.exe.parents[2].as_posix()}/data\nwrite-data={stage.as_posix()}\n'
         '[graphics]\nfull-screen=false\n[other]\nautosave-interval=0\nhide-achievement-popups=true\n'
-        '[interface]\nui-scale-mode=manual-pixels\ncustom-ui-scale=1\n', encoding='utf-8')
+        '[interface]\nui-scale-mode=manual-pixels\ncustom-ui-scale=1\n'
+        f'[general]\nlocale={args.language}\n', encoding='utf-8')
     manifest = {'source_save': str(args.save), 'saved_mods': saved, 'engine': version,
                 'source_factorio_version': original_series, 'staged_factorio_version': series,
-                'protected_sha256': original, 'input_sha256': digest(stage / 'input.zip')}
+                'protected_sha256': original, 'input_sha256': digest(stage / 'input.zip'),
+                'language': args.language}
     (stage / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     return stage
 
@@ -103,6 +106,7 @@ def install_hook(stage, phase):
     manifest['candidate_package'] = package.name
     manifest['candidate_sha256'] = digest(package)
     (stage / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    install_native_support(target, manifest.get('language', 'en'))
     shutil.copyfile(ROOT / 'tests/save_test.lua', target / 'scripts/save_test.lua')
     shutil.copyfile(ROOT / 'tests/development/diag.lua', target / 'scripts/diag.lua')
     (target / 'scripts/save_test_mode.lua').write_text(f'return "{phase}"\n', encoding='utf-8')
@@ -111,6 +115,9 @@ def install_hook(stage, phase):
     assert control.count(needle) == 1
     control = 'local SaveTest = require("scripts.save_test")\n' + control.replace(
         needle, needle + '\n  SaveTest.tick(UI, Sampler)')
+    translation_hook = 'function(e) UI.on_string_translated(e) end'
+    assert control.count(translation_hook) == 1
+    control = control.replace(translation_hook, 'function(e) SaveTest.on_string_translated(e); UI.on_string_translated(e) end')
     config = 'script.on_configuration_changed(function()'
     assert control.count(config) == 1
     control = control.replace(config, 'script.on_configuration_changed(function(event)\n'
@@ -177,6 +184,8 @@ def run(stage, args, phase):
                     if phase != 'history':
                         folder = stage / 'script-output/save-test'
                         result = json.loads((folder / 'gui.json').read_text())
+                        if result.get('locale') != args.language:
+                            raise RuntimeError(f'Expected client locale {args.language}, got {result.get("locale")}')
                         if not result['captures']:
                             raise RuntimeError('No GUI views captured')
                         if phase in ('history-view', 'transfer-view', 'ribbon-view') and result['display_scale'] != 1:
@@ -188,6 +197,14 @@ def run(stage, args, phase):
                         evidence = dict(result, phase=phase,
                             candidate_sha256=json.loads((stage / 'manifest.json').read_text())['candidate_sha256'],
                             captures_sha256={name: digest(folder / f'{name}.png') for name in result['captures']})
+                        # Phases can reuse capture names. Keep the exact images
+                        # beside their evidence before another phase replaces them.
+                        phase_folder = folder / (phase + '-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
+                        phase_folder.mkdir()
+                        for name in result['captures']:
+                            shutil.copyfile(folder / f'{name}.png', phase_folder / f'{name}.png')
+                        evidence['captures_directory'] = phase_folder.name
+                        (phase_folder / 'evidence.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
                         (folder / f'evidence-{phase}.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
                     print(f'PASS {phase}', flush=True)
                     return
@@ -208,11 +225,15 @@ def main():
     parser.add_argument('--stage', type=Path, help='Reuse a previously isolated stage for iteration')
     parser.add_argument('--phase', choices=['all', 'history', 'gui', 'balance', 'full', 'focus', 'selection', 'picker', 'scroll', 'names', 'audit', 'ux', 'warmup', 'diagnostics', 'history-view', 'transfer-view', 'ribbon-view'], default='all')
     parser.add_argument('--timeout', type=int, default=1200)
+    languages = sorted(p.name for p in (ROOT / 'mod/production-flow/locale').iterdir() if p.is_dir())
+    parser.add_argument('--language', choices=languages, default='en', help='Client language for native rendering and translation probes')
     args = parser.parse_args()
     stage = args.stage.resolve() if args.stage else prepare(args)
     if not stage.is_relative_to((ROOT / 'tests/out').resolve()):
         raise ValueError('Test stage must be inside this project tests/out directory')
     manifest = json.loads((stage / 'manifest.json').read_text())
+    if manifest.get('language', 'en') != args.language:
+        raise ValueError('Use a fresh stage for a different language; preserve the earlier language evidence')
     try:
         for phase in (['history', 'gui'] if args.phase == 'all' else [args.phase]):
             run(stage, args, phase)

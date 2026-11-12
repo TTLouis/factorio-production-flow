@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 local Graph = require("scripts.graph")
 local Sampler = require("scripts.sampler")
 local Surfaces = require("scripts.surfaces")
@@ -7,9 +8,9 @@ local STATUS, PREVIEW, MAIN = "ssk_machine_status", "ssk_machine_preview", "ssk_
 local CAMERA, ZOOM = "ssk_machine_camera", "ssk_machine_zoom"
 local DEFAULT_ZOOM = 0.85
 local ISSUES = {
-  { id = "input", heading = "Missing input", narrow = "Input" },
-  { id = "output", heading = "Blocked output", narrow = "Output" },
-  { id = "power", heading = "Power", narrow = "Power" },
+  { id = "input", heading = Loc("machine-status-missing-input"), narrow = Loc("machine-status-input") },
+  { id = "output", heading = Loc("machine-status-blocked-output"), narrow = Loc("machine-status-output") },
+  { id = "power", heading = Loc("machine-status-power"), narrow = Loc("machine-status-power") },
 }
 
 local function frame(player, name, width, title)
@@ -27,7 +28,7 @@ local function frame(player, name, width, title)
 end
 
 local function header_button(header, sprite, tooltip, action)
-  header.add { type = "sprite-button", style = "frame_action_button", sprite = "utility/" .. sprite,
+  header.add { type = "sprite-button", style = "frame_action_button", sprite = Loc.join("utility/", sprite),
     tooltip = tooltip, tags = { ssk_machine_status = action } }
 end
 
@@ -41,14 +42,14 @@ local function caption(kind, name)
   local proto = prototypes[kind] and prototypes[kind][name]
   local plain = name:gsub("%-", " ")
   local label = proto and proto.localised_name and { "?", proto.localised_name, plain } or plain
-  return { "", Graph.rt(kind .. "/" .. name), " ", label }
+  return { "", Graph.rt(Loc.join(kind, "/", name)), " ", label }
 end
 
 local function age(tick)
   local seconds = math.max(0, math.floor((game.tick - tick) / 60))
-  if seconds == 0 then return "<1 s" end
-  if seconds < 60 then return seconds .. " s" end
-  return string.format("%d m %02d s", math.floor(seconds / 60), seconds % 60)
+  if seconds == 0 then return Loc("sample-age-under-second") end
+  if seconds < 60 then return Loc("duration-seconds", seconds) end
+  return Loc("machine-status-m-s", string.format("%d", math.floor(seconds / 60)), string.format("%02d", seconds % 60))
 end
 
 local function columns(width)
@@ -72,13 +73,13 @@ end
 
 local function add_headings(parent, widths, compact)
   local t = grid(parent)
-  cell(t, widths[1]).add { type = "label", style = "heading_2_label", caption = "Recipe" }
+  cell(t, widths[1]).add { type = "label", style = "heading_2_label", caption = Loc("machine-status-recipe") }
   for i, issue in ipairs(ISSUES) do
     cell(t, widths[i + 1]).add { type = "label", style = "heading_2_label",
       caption = compact and issue.narrow or issue.heading, tooltip = issue.heading }
   end
   cell(t, widths[5]).add { type = "label", style = "heading_2_label",
-    caption = compact and "Age" or "Sample age", tooltip = "Time since the latest observation of this recipe." }
+    caption = compact and Loc("machine-status-age") or Loc("machine-status-sample-age"), tooltip = Loc("machine-status-time-since-the-latest-observation-of-this") }
 end
 
 local function add_recipes(parent, title, names, rows, widths)
@@ -91,7 +92,7 @@ local function add_recipes(parent, title, names, rows, widths)
     end
   end
   if #shown == 0 then
-    parent.add { type = "label", style = "grey_label", caption = "No machines observed." }
+    parent.add { type = "label", style = "grey_label", caption = Loc("machine-status-no-machines-observed") }
     return
   end
   table.sort(shown)
@@ -111,13 +112,13 @@ local function add_recipes(parent, title, names, rows, widths)
         f.style.horizontal_spacing = 4
         count_label.style.maximal_width = widths[i + 1] - 28
         local inspect = f.add { type = "sprite-button", style = "tool_button", sprite = "utility/search",
-          tooltip = issue.heading .. ". Preview one matching machine.",
+          tooltip = Loc("machine-status-preview-one-matching-machine", issue.heading),
           tags = { ssk_machine_status = "preview", recipe = name, issue = issue.id } }
         inspect.style.width, inspect.style.height = 24, 24
       end
     end
     cell(t, widths[5]).add { type = "label", caption = age(row.sample_tick),
-      tooltip = "Time since the latest observation of this recipe. The counts combine samples taken at different times.",
+      tooltip = Loc("machine-status-time-since-the-latest-observation-of-this-2"),
       tags = { ssk_machine_age = name, sample_tick = row.sample_tick } }
   end
 end
@@ -131,10 +132,10 @@ end
 function M.open(player, surface, material)
   M.close(player)
   local width, height = dimensions(player, 610, 530)
-  local f, header = frame(player, STATUS, width, "Machine status")
+  local f, header = frame(player, STATUS, width, Loc("help-machine-status"))
   f.tags = { surface = surface, material = material or "", force = player.force_index }
-  header_button(header, "refresh", "Refresh machine status counts", "refresh")
-  header_button(header, "close", "Close machine status", "close")
+  header_button(header, "refresh", Loc("machine-status-refresh-machine-status-counts"), "refresh")
+  header_button(header, "close", Loc("machine-status-close-machine-status"), "close")
   local panel = f.add { type = "frame", style = "inside_shallow_frame_with_padding", direction = "vertical",
     name = "ssk_machine_panel" }
   panel.style.horizontally_stretchable = true
@@ -143,16 +144,16 @@ function M.open(player, surface, material)
   local graph = Graph.get()
   local node = graph.nodes[material]
   if not node then
-    panel.add { type = "label", caption = "Select an item or fluid to see its machine status." }
+    panel.add { type = "label", caption = Loc("machine-status-select-an-item-or-fluid-to-see") }
     return f
   end
   local scope = panel.add { type = "label", style = "caption_label",
-    caption = { "", caption(node.type, node.name), " on ", Surfaces.rich(game.surfaces[surface]) } }
+    caption = Loc("material-on-surface", caption(node.type, node.name), Surfaces.rich(game.surfaces[surface])) }
   scope.style.single_line, scope.style.maximal_width = false, width - 40
   local rows, warming = Sampler.machine_status(surface, player.force_index)
   local hint = panel.add { type = "label", style = "grey_label", caption = warming
-    and "First pass in progress. Refresh as more machines are sampled."
-    or "Latest observations across machines. Refresh to update counts and age." }
+    and Loc("machine-status-first-pass-in-progress-refresh-as-more")
+    or Loc("machine-status-latest-observations-across-machines-refresh-to-update") }
   hint.style.single_line, hint.style.maximal_width = false, width - 40
   local widths = columns(width)
   local strip = panel.add { type = "frame", style = "subheader_frame", direction = "horizontal" }
@@ -165,8 +166,8 @@ function M.open(player, surface, material)
   scroller.style.maximal_height = math.max(56, height - 180)
   local list = scroller.add { type = "flow", direction = "vertical" }
   list.style.vertical_spacing = 8
-  add_recipes(list, "Producers", node.producers, rows or {}, widths)
-  add_recipes(list, "Consumers", node.consumers, rows or {}, widths)
+  add_recipes(list, Loc("balance-producers"), node.producers, rows or {}, widths)
+  add_recipes(list, Loc("balance-consumers"), node.consumers, rows or {}, widths)
   return f
 end
 
@@ -185,7 +186,7 @@ local function show_unavailable(player)
   local f = player.gui.screen[STATUS]
   if not f then return end
   local notice = f.ssk_machine_panel.ssk_machine_notice
-  notice.caption = "No matching machine is currently available. Refresh the counts and try again."
+  notice.caption = Loc("machine-status-no-matching-machine-is-currently-available-refresh")
   notice.visible = true
 end
 
@@ -198,21 +199,21 @@ local function open_preview(player, status, tags)
   local entity = Sampler.find_status_machine(scope.surface, scope.force, tags.recipe, tags.issue)
   if not entity then show_unavailable(player); return end
   local width, height = dimensions(player, 560, 390)
-  local f, header = frame(player, PREVIEW, width, "Machine preview")
+  local f, header = frame(player, PREVIEW, width, Loc("machine-status-machine-preview"))
   f.tags = { unit = entity.unit_number, surface = scope.surface, force = scope.force,
     recipe = tags.recipe, issue = tags.issue }
-  header_button(header, "left_arrow", "Back to machine status", "back")
+  header_button(header, "left_arrow", Loc("machine-status-back-to-machine-status"), "back")
   local panel = f.add { type = "frame", style = "inside_deep_frame", direction = "vertical" }
   panel.style.horizontally_stretchable = true
   local toolbar = panel.add { type = "frame", style = "subheader_frame", direction = "horizontal" }
   toolbar.style.horizontally_stretchable, toolbar.style.vertical_align = true, "center"
-  toolbar.add { type = "label", style = "subheader_caption_label", caption = "Zoom" }
+  toolbar.add { type = "label", style = "subheader_caption_label", caption = Loc("machine-status-zoom") }
   local slider = toolbar.add { type = "slider", name = ZOOM, minimum_value = 0.25, maximum_value = 2,
     value = DEFAULT_ZOOM, value_step = 0.05, tags = { ssk_machine_status = "zoom" } }
   slider.style.width = math.min(180, width - 135)
   toolbar.add { type = "empty-widget" }.style.horizontally_stretchable = true
   toolbar.add { type = "sprite-button", style = "tool_button", sprite = "utility/go_to_arrow",
-    tooltip = "Jump to this machine in remote view", tags = { ssk_machine_status = "jump" } }
+    tooltip = Loc("machine-status-jump-to-this-machine-in-remote-view"), tags = { ssk_machine_status = "jump" } }
   local camera = panel.add { type = "camera", name = CAMERA, surface_index = scope.surface,
     position = entity.position, zoom = DEFAULT_ZOOM }
   camera.style.width, camera.style.height = width - 24, math.max(70, height - 100)

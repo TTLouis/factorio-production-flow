@@ -1,3 +1,4 @@
+local Loc = require("scripts.locale")
 -- M4 view model + layout: turns the measured Model into a drawable Sankey.
 --
 -- Display graph (D1):
@@ -59,17 +60,17 @@ end
 function V.presets()
   local _, packs = Graph.lab_inputs()
   local out = {
-    { id = "all", name = "Everything" },
-    { id = "science", name = "Sciences only" },
+    { id = "all", name = Loc("balance-everything") },
+    { id = "science", name = Loc("preset-sciences") },
   }
   for _, n in ipairs(packs) do
-    out[#out + 1] = { id = "pack:" .. n, name = "  [item=" .. n .. "] " .. n }
+    out[#out + 1] = { id = "pack:" .. n, name = Loc.join("  [item=" .. n .. "] ", prototypes.item[n] and prototypes.item[n].localised_name or n) }
   end
-  out[#out + 1] = { id = "super:oil", name = "Oil chain" }
-  out[#out + 1] = { id = "roots:item/processing-unit", name = "Electronics" }
-  out[#out + 1] = { id = "roots:item/copper-plate", name = "Copper chain" }
-  out[#out + 1] = { id = "roots:item/rocket-part", name = "Rocket" }
-  out[#out + 1] = { id = "super:nuclear", name = "Nuclear" }
+  out[#out + 1] = { id = "super:oil", name = Loc("preset-oil") }
+  out[#out + 1] = { id = "roots:item/processing-unit", name = Loc("groups-default-electronics") }
+  out[#out + 1] = { id = "roots:item/copper-plate", name = Loc("preset-copper") }
+  out[#out + 1] = { id = "roots:item/rocket-part", name = Loc("groups-default-rocket") }
+  out[#out + 1] = { id = "super:nuclear", name = Loc("groups-default-nuclear") }
   return out
 end
 
@@ -575,10 +576,10 @@ local function tiers(nodes, links, mode)
 end
 
 function V.tier_label(t)
-  if t == math.floor(t) then return string.format("T%d", t) end
-  local s = string.format("T%.2f", t)
+  if t == math.floor(t) then return Loc("tier", string.format("%d", t)) end
+  local s = string.format("%.2f", t)
   s = string.gsub(s, "0+$", "")
-  return s
+  return Loc("tier", s)
 end
 
 ---------------------------------------------------------------------------
@@ -761,7 +762,7 @@ function V.build(player, us, W, viewH)
       if best then
         local sup = Default.supers[best.lane]
         n.lane = best.lane
-        n.ginfo = { id = "inputs@" .. best.lane, name = "Inputs", super = best.lane,
+        n.ginfo = { id = "inputs@" .. best.lane, name = Loc("group-inputs"), super = best.lane,
                     super_name = sup and sup.name or best.ginfo.super_name, color = n.ginfo.color,
                     order = -1, super_order = sup and Default.super_order[best.lane] or 99 }
         n.group = n.ginfo.id
@@ -783,7 +784,7 @@ function V.build(player, us, W, viewH)
           if best then
             local sup = Default.supers[best.lane]
             n.lane = best.lane
-            n.ginfo = { id = "inputs@" .. best.lane, name = "Inputs", super = best.lane,
+            n.ginfo = { id = "inputs@" .. best.lane, name = Loc("group-inputs"), super = best.lane,
                         super_name = sup and sup.name or best.ginfo.super_name, color = n.ginfo.color,
                         order = -1, super_order = sup and Default.super_order[best.lane] or 99 }
             n.group = n.ginfo.id
@@ -835,7 +836,7 @@ end
 -- raw inputs follow their consumers (D30)
 --   A raw input (Raw lane or a pure-source fluid, nothing drawn flowing into it) is split
 --   into one copy per consuming lane. Each copy sits in that lane, one column before its
---   earliest consumer there, in an "Inputs" sub-lane. Mining (stub_in) is shared out in
+--   earliest consumer there, in an Loc("group-inputs") sub-lane. Mining (stub_in) is shared out in
 --   proportion; "other uses" stays on the biggest copy.
 ---------------------------------------------------------------------------
 function V.split_raw(nodes, links, pi)
@@ -847,7 +848,7 @@ function V.split_raw(nodes, links, pi)
       -- a raw item that is only produced here: show it next to its producer
       local p = n.ins[1].a
       n.lane = p.lane
-      n.ginfo = { id = "inputs@" .. p.lane, name = "Inputs", super = p.lane, super_name = p.ginfo.super_name,
+      n.ginfo = { id = "inputs@" .. p.lane, name = Loc("group-inputs"), super = p.lane, super_name = p.ginfo.super_name,
                   color = n.ginfo.color, order = -1, super_order = p.ginfo.super_order }
       n.group = n.ginfo.id
     end
@@ -883,7 +884,7 @@ function V.split_raw(nodes, links, pi)
           ci = math.max(1, g.ci - 1),
           group = "inputs@" .. lane, lane = lane,
         }
-        c.ginfo = { id = c.group, name = "Inputs", super = lane,
+        c.ginfo = { id = c.group, name = Loc("group-inputs"), super = lane,
                     super_name = sup and sup.name or (n.ginfo and n.ginfo.super_name) or lane,
                     color = n.ginfo.color, order = -1, super_order = sup and Default.super_order[lane] or 99 }
         c.origin_ginfo = n.ginfo

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.7 — 2026-11-12
+
+- Keep Sankey labels and icons aligned with their flow bars at fractional GUI
+  scales, including 125%. [Issue #2](https://github.com/TTLouis/factorio-production-flow/issues/2),
+  reported by [HorizonBeta](https://github.com/HorizonBeta).
+- Add Simplified Chinese support for all views, mod settings, help, tooltips and
+  alerts, using Factorio terminology and Chinese time and rate units.
+- Display interface text in each player's game language. English remains available.
+
+## 0.2.6 — 2026-11-11
+
+- Correct recipe input, output and utilisation estimates with productivity modules,
+  research bonuses and delayed bonus crafts, including recipe-use estimates in History.
+- Hide Transfers when Space Age or its required cargo events are unavailable.
+  Return to Balance if a saved Transfers selection is no longer available.
+- Jump to the selected space platform in remote view from Transfers Flow or History.
+- List Space Age as a recommended dependency while retaining base-game support.
+
 ## 0.2.5
 
 - Switch between Flow and History for the selected material in Balance. Compare

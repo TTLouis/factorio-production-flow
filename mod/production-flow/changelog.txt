@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.2.7
+Date: 2026-11-12
+  Bugfixes:
+    - Keep Sankey labels and icons aligned with their flow bars at fractional GUI scales, including 125%. Reported by HorizonBeta. (https://github.com/TTLouis/factorio-production-flow/issues/2)
+  Features:
+    - Add Simplified Chinese support for all views, mod settings, help, tooltips and alerts.
+  Changes:
+    - Display interface text, time labels and rate units in each player's game language.
+---------------------------------------------------------------------------------------------------
 Version: 0.2.6
 Date: 2026-11-11
   Bugfixes:
