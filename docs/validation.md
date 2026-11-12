@@ -1,3 +1,23 @@
+# Historical validation and engineering notes
+
+Current release history is maintained in the
+[Factorio changelog](../mod/production-flow/changelog.txt) and rendered into the
+[root changelog](../CHANGELOG.md). This document preserves historical engineering
+detail and measurements; its version-specific results are not current benchmarks.
+
+The former manually maintained root changelog also recorded these details:
+
+- 0.1.4 refactored the shared material picker, Balance calculations and production
+  graph internals, and documented the sampler's data structures. First-use Focus
+  search was verified with recorded item/fluid flows on Factorio 2.1.24 with Space Age.
+- Earlier 0.1.3 cooldown checks used three 40,000-update repetitions with 50,000
+  full chests, with Balance open and closed. Completed scans were about 5 minutes
+  26 seconds apart. Average stock-script overhead was about 0.08 ms per update on
+  the test laptop. These hardware-specific results predate the final 0.1.3 UI.
+- 0.1.2 stress fixtures covered 1,000, 10,000 and 50,000 chests, up to 2.4 million
+  randomized stacks from 210 item types and five qualities. Exact totals and
+  stock-enabled/disabled comparisons were recorded with the original evidence.
+
 # Published 0.1.3
 
 Version 0.1.3 was published on 24 October 2026. The current UI

@@ -3,6 +3,12 @@
 Write for players. Say what they can do, what works better, and what they need
 to know. Keep implementation details and extended explanations on GitHub.
 
+Maintain release bullets only in `mod/production-flow/changelog.txt`. Regenerate
+the root changelog with `python tools/changelog.py --write`, check it with
+`python tools/changelog.py --check`, and generate a GitHub release's notes with
+`python tools/changelog.py --release VERSION`. The other formats are views of
+that source, not independently edited histories.
+
 ## Update notes
 
 - Lead with the most useful changes and fixes.

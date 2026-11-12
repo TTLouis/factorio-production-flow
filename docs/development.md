@@ -63,6 +63,28 @@ Before drafting update notes or a mod description, follow the
 [release writing guide](release-writing-guide.md). Keep public copy concise and
 player-facing; reserve fuller technical explanations for GitHub.
 
+Release history has one editable source: `mod/production-flow/changelog.txt`.
+After editing it, run `python tools/changelog.py --write` to regenerate the root
+`CHANGELOG.md`, then `python tools/changelog.py --check`. Generate GitHub release
+notes with `python tools/changelog.py --release VERSION`; do not maintain separate
+release bullets manually. The check verifies the root rendering and the latest
+version against `info.json`. Historical engineering detail lives in
+[validation.md](validation.md).
+
+Repository hygiene CI runs the check plus the changelog and publisher Python
+suites on pushes and pull requests. The publisher checks new release sources,
+puts the generated version-specific notes into the verified bundle, and uses them
+as the GitHub release body during publication. Older immutable release tags
+without this tooling retain their original publication behavior.
+
+Local tooling checks:
+
+```powershell
+python tools/changelog.py --check
+python -m unittest discover -s tests -p changelog_test.py -v
+python -m unittest discover -s tests -p publish_test.py -v
+```
+
 The **Publish Mod Portal** Actions workflow runs when a GitHub release is
 published, including beta pre-releases. Ordinary pushes do not publish. The
 release tag must be `v` followed by the exact version in `info.json`.

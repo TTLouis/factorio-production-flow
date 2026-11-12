@@ -59,6 +59,29 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(P.PublishError, "version differ"):
             P.validate_archive(self.archive, self.root, "v0.1.2")
 
+    def test_stale_generated_changelog_stops_before_github_lookup(self):
+        tools = self.root / "tools"
+        tools.mkdir()
+        checker = tools / "changelog.py"
+        checker.write_text("# release synchronization check")
+        error = P.subprocess.CalledProcessError(1, [str(checker), "--check"])
+        with patch.object(P.subprocess, "run", side_effect=error) as run, patch.object(P, "release") as remote:
+            with self.assertRaises(P.subprocess.CalledProcessError):
+                P.prepare(self.root, "v0.1.1", self.root / "bundle")
+        self.assertEqual(run.call_args.args[0], [P.sys.executable, str(checker), "--check"])
+        remote.assert_not_called()
+
+    def test_new_release_bundle_uses_generated_notes(self):
+        tools = self.root / "tools"
+        tools.mkdir()
+        checker = tools / "changelog.py"
+        checker.write_text("# release synchronization check")
+        expected = "## 0.1.1\n\n### Bugfixes\n\n- A canonical fix."
+        with patch.object(P.subprocess, "run"), patch.object(P.subprocess, "check_output", return_value=expected + "\n") as notes:
+            bundle = self.bundle()
+        self.assertEqual(P.verify_bundle(bundle)["release_notes"], expected)
+        self.assertEqual(notes.call_args.args[0], [P.sys.executable, str(checker), "--release", "0.1.1"])
+
     def test_reject_unexpected_and_duplicate_files(self):
         with ZipFile(self.archive, "a") as z:
             z.writestr("production-flow_0.1.1/scripts/save_test.lua", "private test hook")
@@ -147,6 +170,27 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("/api/v2/mods/init_publish", fake.calls)
         self.assertEqual(fake.state["tags"], [])
         self.assertIn("https://cdn.example/test.png", fake.state["description"])
+
+    def test_generated_github_notes_are_synchronized_idempotently(self):
+        bundle = self.bundle()
+        plan_path = bundle / "plan.json"
+        plan = json.loads(plan_path.read_text())
+        plan["release_notes"] = "## 0.1.1\n\n- A canonical fix."
+        plan_path.write_text(json.dumps(plan))
+        fake = FakePortal(plan)
+
+        def update(path, *, method, data):
+            self.assertEqual(path, f"/repos/{P.REPOSITORY}/releases/123")
+            self.assertEqual(method, "PATCH")
+            self.assertEqual(json.loads(data), {"body": plan["release_notes"]})
+            self.remote.update(json.loads(data))
+            return self.remote
+
+        with patch.object(P, "github", side_effect=update) as github:
+            self.deploy(bundle, fake)
+            self.deploy(bundle, fake)
+        self.assertEqual(github.call_count, 1)
+        self.assertEqual(fake.uploads, 1)
 
     def test_existing_mod_uses_release_upload(self):
         bundle = self.bundle()

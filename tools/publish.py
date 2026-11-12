@@ -147,6 +147,12 @@ def page(source):
 def prepare(source, tag, output):
     info = json.loads((source / "mod" / MOD / "info.json").read_text())
     require(tag == "v" + info["version"], "Release tag and source version differ")
+    changelog_check = source / "tools/changelog.py"
+    release_notes = None
+    if changelog_check.is_file():
+        subprocess.run([sys.executable, str(changelog_check), "--check"], check=True)
+        release_notes = subprocess.check_output(
+            [sys.executable, str(changelog_check), "--release", info["version"]], encoding="utf-8").strip()
     remote = release(tag)
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"{MOD}_{info['version']}.zip"
@@ -177,6 +183,8 @@ def prepare(source, tag, output):
             "sha1": digest(archive, "sha1"), "metadata": metadata,
             "gallery": [{"file": name, "sha1": digest(gallery / name, "sha1"),
                          "sha256": digest(gallery / name)} for name in images]}
+    if release_notes is not None:
+        plan["release_notes"] = release_notes
     (output / "plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     print(f"Verified {archive.name}: SHA256 {plan['sha256']}; {len(images)} screenshots; category: {config['category']}; tags: {', '.join(config['tags']) or 'none'}")
 
@@ -279,6 +287,15 @@ def deploy(bundle):
         path = f"/uploads/repos/{REPOSITORY}/releases/{plan['release_id']}/assets?" + urlencode({"name": plan["archive"]})
         uploaded = github(path, data=(bundle / plan["archive"]).read_bytes(), method="POST", content_type="application/zip")
         require(uploaded.get("state") == "uploaded", "GitHub release asset did not finish uploading")
+    if "release_notes" in plan:
+        notes = plan["release_notes"]
+        require(isinstance(notes, str) and notes.strip(), "Generated release notes are empty or invalid")
+        if (remote.get("body") or "").replace("\r\n", "\n").strip() != notes:
+            edited = github(f"/repos/{REPOSITORY}/releases/{remote['id']}", method="PATCH",
+                            data=json.dumps({"body": notes}).encode("utf-8"))
+            require(edited.get("id") == remote["id"] and edited.get("tag_name") == plan["tag"]
+                    and (edited.get("body") or "").replace("\r\n", "\n").strip() == notes,
+                    "GitHub release notes differ from the canonical changelog")
     state = portal_state()
     if not existing_release(state, plan):
         if state and state.get("releases"):

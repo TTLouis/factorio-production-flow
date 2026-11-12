@@ -1,0 +1,25 @@
+name: Repository hygiene
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - name: Check release history and regression tests
+        run: |
+          python tools/changelog.py --check
+          python -m unittest discover -s tests -p changelog_test.py -v
+          python -m unittest discover -s tests -p publish_test.py -v

@@ -11,7 +11,7 @@ and what needs improving. Report bugs or suggest improvements on
 [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues) or the
 [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion).
 
-The **0.2.5 beta** focuses on Balance History and Space Age Transfers.
+The beta includes Balance History and Space Age Transfers.
 See [the changelog](CHANGELOG.md).
 
 ## Views
