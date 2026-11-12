@@ -15,7 +15,7 @@ local TICK = { r = 0.75, g = 0.74, b = 0.71, a = 1 }
 local HIGHLIGHT = { r = 0.28, g = 0.24, b = 0.18, a = 1 }
 local CARD_ROW, CARD_HEADER, CARD_GAP = 25, 34, 12
 local DIRECTIONS = { "loaded", "unloaded" }
-local LAYOUT_VERSION = 6
+local LAYOUT_VERSION = 7
 local SPLIT_GAP, LIST_INSET, TAB_MARGIN, TAB_INSET = 12, 4, 4, 8
 local HEADING_HEIGHT, LIST_HEADER_HEIGHT, TAB_HEIGHT, TAB_CHROME = 38, 32, 36, 48
 local GRAPH_TOP, PLATFORM_HEIGHT = 34, 124
@@ -113,6 +113,17 @@ end
 local function endpoint_name(endpoint)
   local name, icon = Transfers.describe(endpoint)
   return endpoint.surface.valid and name or name .. " (removed)", icon
+end
+
+local function platform_hub(force, id)
+  if not id then return end
+  for _, platform in pairs(force.platforms or {}) do
+    if platform.valid and platform.index == id then
+      local hub = platform.hub
+      if hub and hub.valid and hub.force == force then return hub end
+      return
+    end
+  end
 end
 
 local function add_platform_rows(pane, platforms, width, favourite)
@@ -228,8 +239,10 @@ local function build(content, width, height)
   icon.style.width, icon.style.height = 24, 24
   icon.style.left_margin = 4
   local caption = label(heading, "platform", "", "subheader_caption_label")
-  caption.style.maximal_width = math.min(320, math.max(32, header_w - (compact and 156 or 240)))
+  caption.style.maximal_width = math.min(320, math.max(32, header_w - (compact and 156 or 240) - 36))
   caption.style.single_line = true
+  heading.add { type = "sprite-button", name = "ssk_transfer_jump", style = "tool_button",
+    sprite = "utility/go_to_arrow", tooltip = "Jump to this platform in remote view" }
   return panel
 end
 
@@ -724,6 +737,10 @@ function UI.render(content, player, period, state, width, height)
   update_platforms(platforms, result.platforms, result.platform, state.favourites)
   sidebar.heading.count.caption = tostring(#result.platforms)
   local tabs, heading = tab_row.ssk_transfer_tabs, tab_row.heading
+  local jump = heading.ssk_transfer_jump
+  jump.visible = result.platform ~= nil
+  jump.enabled = result.platform ~= nil and platform_hub(force, result.platform.id) ~= nil
+  jump.tags = result.platform and { transfer_jump = result.platform.id } or {}
   local production = heading.ssk_transfer_show_all_production
   tabs.selected_tab_index = state.view == "history" and 2 or 1
   production.visible = result.platform ~= nil and state.view == "flow"
@@ -775,11 +792,18 @@ function UI.on_checked(event, state)
   return true
 end
 
-function UI.on_click(event, state)
+function UI.on_click(event, state, close_all)
   local el = event.element
   if not (state and el and el.valid) then return false end
   local tags = el.tags
-  if tags.transfer_platform then
+  if tags.transfer_jump then
+    local player = game.get_player(event.player_index)
+    local hub = state.platform == tags.transfer_jump and platform_hub(player.force, tags.transfer_jump)
+    if hub then
+      close_all(player)
+      player.centered_on = hub
+    end
+  elseif tags.transfer_platform then
     if state.platform ~= tags.transfer_platform then
       state.platform = tags.transfer_platform
       reset_log(state)

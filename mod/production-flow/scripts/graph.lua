@@ -66,6 +66,7 @@ function G.build()
       name = name,
       category = table.concat(categories, ", "),
       energy = rp.energy,
+      max_productivity = rp.maximum_productivity,
       hidden = rp.hidden,
       reversing = is_reversing(rp, categories),
       ingredients = {},

@@ -50,11 +50,7 @@ local function utilisation_of(recipe_names, rates, capacity, used)
   for _, recipe_name in ipairs(recipe_names) do
     if used[recipe_name] and capacity[recipe_name] and capacity[recipe_name] > 0 then
       local recipe_rate = rates.recipes[recipe_name]
-      local normal_crafts = 0
-      if recipe_rate then
-        normal_crafts = Sampler.PF_INCLUDES_BONUS
-          and recipe_rate.cps / (1 + recipe_rate.prod) or recipe_rate.cps
-      end
+      local normal_crafts = recipe_rate and recipe_rate.normal_cps or 0
       completed = completed + normal_crafts
       possible = possible + capacity[recipe_name]
     end

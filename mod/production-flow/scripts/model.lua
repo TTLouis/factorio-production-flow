@@ -64,9 +64,9 @@ end
 M._tarjan = tarjan
 
 -- Table contracts used by the build phases:
--- rates (ProductionFlowRates) = { recipes = { [recipe_name] = { cps, prod } },
+-- rates (ProductionFlowRates) = { recipes = { [recipe_name] = { cps, normal_cps } },
 --           nodes = { [material_key] = { prod, cons } } } from Sampler.rates.
--- cps counts crafts per second; prod is the productivity bonus. Node totals and
+-- cps counts both normal and bonus crafts per second. Node totals and
 -- edge rates are amounts per second. Keys use item/, fluid/ or recipe/ prefixes.
 -- edges is an ordered array of { from, to, rate, reversing, cycle }; reversing
 -- retains the recipe value (including nil), and cycle is filled after tiering.
@@ -107,10 +107,8 @@ local function assemble_graph(graph, rates, used_list)
     local recipe = graph.recipes[recipe_name]
     local recipe_key = "recipe/" .. recipe_name
     local recipe_rate = rates.recipes[recipe_name]
-    local crafts_per_second = recipe_rate and recipe_rate.cps or 0
-    local productivity = recipe_rate and recipe_rate.prod or 0
-    -- products_finished includes bonus crafts; only normal crafts consume inputs.
-    local normal_crafts_per_second = Sampler.PF_INCLUDES_BONUS and crafts_per_second / (1 + productivity) or crafts_per_second
+    local normal_crafts_per_second = recipe_rate and recipe_rate.normal_cps or 0
+    local bonus_crafts_per_second = recipe_rate and recipe_rate.cps - normal_crafts_per_second or 0
     local tier_edge = not recipe.reversing
     add_vertex(recipe_key)
     for _, ingredient in ipairs(recipe.ingredients) do
@@ -122,7 +120,7 @@ local function assemble_graph(graph, rates, used_list)
     end
     for _, product in ipairs(recipe.products) do
       add_vertex(product.key)
-      local rate = normal_crafts_per_second * (product.amount + product.prod * productivity)
+      local rate = normal_crafts_per_second * product.amount + bonus_crafts_per_second * product.prod
       edges[#edges + 1] = { from = recipe_key, to = product.key, rate = rate, reversing = recipe.reversing }
       measured_inputs[product.key] = (measured_inputs[product.key] or 0) + rate
       link(recipe_key, product.key, tier_edge)

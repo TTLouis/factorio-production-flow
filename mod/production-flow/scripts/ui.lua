@@ -13,11 +13,17 @@ local Watch = require("scripts.watch")
 local Canvas = require("scripts.canvas")
 local HistoryUI = require("scripts.history_ui")
 local TransfersUI = require("scripts.transfers_ui")
+local Transfers = require("scripts.transfers")
 
 local UI = {}
-local TABS = { "balance", "focus", "sankey", "transfers" }
 local TAB_CAPTIONS = { balance = "Balance", focus = "Focus", sankey = "Full Sankey", transfers = "Transfers" }
 local WIN = "ssk_main"
+
+local function visible_tabs()
+  local list = { "balance", "focus", "sankey" }
+  if Transfers.available() then list[#list + 1] = "transfers" end
+  return list
+end
 
 local function ustate(pi)
   storage.ui = storage.ui or {}
@@ -311,10 +317,10 @@ function UI.open(player)
   local inner = f.add { type = "frame", name = "ssk_inner", style = "inside_deep_frame", direction = "vertical" }
   inner.style.horizontally_stretchable = true
   inner.style.vertically_stretchable = true
-  local tabs = inner.add { type = "tabbed-pane", name = "ssk_tabs" }
+  local list = visible_tabs()
+  local tabs = inner.add { type = "tabbed-pane", name = "ssk_tabs", tags = { ssk_tab_ids = list } }
   tabs.style.horizontally_stretchable = true
   tabs.style.vertically_stretchable = true
-  local list = TABS
   local sel = 1
   for i, id in ipairs(list) do if id == us.tab_id then sel = i end end
   us.tab_id = list[sel]
@@ -381,7 +387,7 @@ function UI.on_click(e)
   if el.name == "ssk_toggle" then UI.toggle(player); return true end
   if MachineStatus.on_click(player, el, UI.close) then return true end
   local us = ustate(e.player_index)
-  if us.tab_id == "transfers" and TransfersUI.on_click(e, us.transfers) then
+  if us.tab_id == "transfers" and TransfersUI.on_click(e, us.transfers, UI.close) then
     UI.refresh(player)
     return true
   end
@@ -572,7 +578,8 @@ function UI.on_tab_changed(e)
   end
   if not (f.name == "ssk_tabs" and f.parent and f.parent.parent and f.parent.parent.name == WIN) then return false end
   HistoryUI.clear_hover(e.player_index)
-  us.tab_id = TABS[f.selected_tab_index] or "balance"
+  local ids = f.tags.ssk_tab_ids or {}
+  us.tab_id = ids[f.selected_tab_index] or "balance"
   MaterialPicker.close(player)
   Canvas.clear(player.index)
   close_inspectors(player)

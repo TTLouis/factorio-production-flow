@@ -1,11 +1,12 @@
 {
   "name": "production-flow",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "title": "Production Flow (Beta)",
   "author": "TTLouis",
   "factorio_version": "2.1",
   "dependencies": [
-    "base >= 2.1"
+    "base >= 2.1",
+    "+ space-age"
   ],
   "description": "See where your factory's resources go. Spot imbalances and explore item and fluid production with interactive Sankey charts."
 }

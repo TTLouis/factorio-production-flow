@@ -29,7 +29,7 @@ material and metric changes, shared time axes, and measured and estimated stock)
 `ribbon-view` (itemised hover details in Balance History, Focus, Full Sankey and Transfers at 100% scale).
 Phase-specific evidence records native image hashes and the clean archive hash.
 Release packages contain Balance with Flow and History, Focus, Full Sankey and
-Transfers. Local diagnostic and render fixtures live under `tests/development/`.
+Transfers (when Space Age and its cargo events are available). Local diagnostic and render fixtures live under `tests/development/`.
 The native harness
 injects its diagnostic helper into an isolated test copy after creating the clean
 candidate archive. These helpers and test hooks are excluded from release ZIPs.

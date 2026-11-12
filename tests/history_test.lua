@@ -161,5 +161,20 @@ totals, seconds = Sm.rates(1, 36000)
 assert(seconds == 599 and totals.nodes[material].prod == 2 and Sm.coverage(1, 36000) == 599)
 assert(History.build(1, 36000, material).seconds == 599)
 
+-- A bonus-only sample must roll up without adding ingredient-consuming crafts,
+-- even when it lands in a bucket already populated by the previous sampler.
+storage = {}
+game.tick = 60
+Sm.init()
+local old = sample(0, 1, 1)
+old.rec[1] = { smelting = { c = 15, p = 7.5 } }
+storage.rings[1].bins[1] = old
+Sm.on_stats(game.tick)
+storage.bins[2].rec[1] = { smelting = { c = 1, n = 0 } }
+game.tick = 120
+Sm.on_stats(game.tick)
+local rolled_up = old.rec[1].smelting
+assert(rolled_up.c == 16 and Sm.normal_crafts(rolled_up) == 10, "rollup changed the split between normal and bonus crafts")
+
 storage, game.tick, settings.global["ssk-window-seconds"].value = saved, tick, setting
 print("HISTORY TESTS OK: exact short windows, long rollups and coverage, warm-up, upgrade and period choices")

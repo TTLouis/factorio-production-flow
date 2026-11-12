@@ -17,12 +17,20 @@ is the history actually recorded, not an assumed full ten minutes.
 
 Recipe links come from observed completed-craft counters on assembling machines,
 furnaces and rocket silos. Intervals whose recipe changed are discarded.
-The sampler interprets completed-craft counters as including productivity bonus
-crafts and divides by one plus the sampled productivity bonus to estimate normal
-crafts. Ingredients are normal crafts/s multiplied by ingredient amount. Products
-use base expected yield plus the productivity-eligible yield times the bonus.
-Probabilistic products use expected average amounts, so links are estimates and
-can differ from the game's measured item/fluid totals.
+Completed-craft counters include productivity bonus crafts. The sampler uses
+changes in the crafting and productivity progress bars to separate regular crafts
+from bonus crafts before combining results across machines. It adds the force's
+recipe research bonus to the machine's effects before applying the recipe cap.
+While the game reports a full productivity bar, the sampler allows for the small
+amount of progress the bar can hide before a bonus craft is paid out. When the sampled
+productivity changes or the progress bars cannot explain the counter delta, the
+sampler estimates the split from that machine's current productivity. Saved history
+from before this change still uses its recorded productivity estimate.
+
+Regular crafts use ingredients and produce the full recipe yield. Bonus crafts
+produce only the productivity-eligible yield. The links use expected yields for
+probabilistic products, and their sampling windows can differ from the game's
+measured item and fluid totals.
 
 Single-output recipes are represented as material-to-material connections.
 Multi-output recipes can remain separate recipe nodes. Returned catalysts are

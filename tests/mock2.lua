@@ -82,7 +82,8 @@ MOCK_CHESTS = {}
 local function M(recipe, speed, prod, surface)
   local e = { valid = true, type = (recipe:find("plate") and "furnace" or "assembling-machine"),
               unit_number = #machines + 1, surface = surface, force = FORCE, products_finished = 0,
-              crafting_speed = speed, productivity_bonus = prod, _r = recipe, name = "am" }
+              crafting_speed = speed, productivity_bonus = prod, crafting_progress = 0, bonus_progress = 0,
+              _r = recipe, name = "am" }
   e.get_recipe = function() return { name = e._r } end
   machines[#machines+1] = e; return e
 end
@@ -151,17 +152,20 @@ assert(player.gui.top.ssk_toggle, "toolbar button missing")
 print("graph:", storage.graph.n_nodes, storage.graph.n_recipes, storage.graph.n_reversing, "tracked:", #storage.mlist)
 
 -- simulate 5 minutes: machines craft at speed/energy per second
-local acc = {}
 for t = 1, 60 * 300 do
   game.tick = t
   for _, m in ipairs(machines) do
     local rate = m.crafting_speed / recipes[m._r].energy / 60
-    acc[m] = (acc[m] or 0) + rate
-    local whole = math.floor(acc[m]); m.products_finished = m.products_finished + whole; acc[m] = acc[m] - whole
-    if whole > 0 and m.valid then
+    local crafting = m.crafting_progress + rate
+    local bonus = m.bonus_progress + rate * m.productivity_bonus
+    local whole, extra = math.floor(crafting), math.floor(bonus)
+    m.crafting_progress, m.bonus_progress = crafting - whole, bonus - extra
+    m.products_finished = m.products_finished + whole + extra
+    if whole + extra > 0 and m.valid then
       local rp = recipes[m._r]
       for _, p in ipairs(rp.products) do local T = p.type == "fluid" and FSTATS or fstats
-        T.input_counts[p.name] = (T.input_counts[p.name] or 0) + whole * p.amount * (p.probability or 1) * (1 + m.productivity_bonus) end
+        local eligible = math.max(0, p.amount - (p.ignored_by_productivity or 0))
+        T.input_counts[p.name] = (T.input_counts[p.name] or 0) + (whole * p.amount + extra * eligible) * (p.probability or 1) end
       for _, i in ipairs(rp.ingredients) do local T = i.type == "fluid" and FSTATS or fstats
         T.output_counts[i.name] = (T.output_counts[i.name] or 0) + whole * i.amount end
     end
@@ -182,7 +186,7 @@ print("tracked after removal:", #storage.mlist, "cycle ticks:", storage.cycle.la
 local Model = TREQ("scripts.model")
 local m = Model.build(1)
 print("window s:", m.seconds)
-for r, x in pairs(m.rates.recipes) do print(string.format("  %-28s %.4f cps  prod %.2f", r, x.cps, x.prod)) end
+for r, x in pairs(m.rates.recipes) do print(string.format("  %-28s %.4f cps  normal %.4f cps", r, x.cps, x.normal_cps)) end
 for _, v in ipairs(m.verts) do print(string.format("  T%d %-32s comp %d", m.vertices[v].tier, v, m.vertices[v].comp)) end
 for i, s in ipairs(m.sccs) do print("  SCC", i, table.concat(s, ", ")) end
 local r = m.residuals["item/iron-plate"]
@@ -249,6 +253,7 @@ dofile(TESTDIR .. "/readability_test.lua")
 dofile(TESTDIR .. "/balance_readability_test.lua")
 dofile(TESTDIR .. "/full_readability_test.lua")
 dofile(TESTDIR .. "/recipe_api_test.lua")
+dofile(TESTDIR .. "/productivity_test.lua")
 dofile(TESTDIR .. "/selection_refresh_test.lua")
 dofile(TESTDIR .. "/history_ui_test.lua")
 dofile(TESTDIR .. "/plain_names_test.lua")
@@ -256,4 +261,6 @@ dofile(TESTDIR .. "/usability_test.lua")
 dofile(TESTDIR .. "/chest_stock_test.lua")
 dofile(TESTDIR .. "/material_picker_test.lua")
 dofile(TESTDIR .. "/watch_test.lua")
+dofile(TESTDIR .. "/tab_visibility_test.lua")(handlers)
+dofile(TESTDIR .. "/transfers_ui_test.lua")
 print("ALL OK")

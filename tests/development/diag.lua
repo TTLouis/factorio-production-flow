@@ -62,18 +62,17 @@ local function recipe_block(g, rates, sidx)
   local force = game.forces["player"]
   for _, r in ipairs(names) do
     local x = per[r] or { machines = 0, max_cps = 0, prod_sum = 0, samples = {} }
-    local rr = rates.recipes[r] or { cps = 0, prod = 0 }
+    local rr = rates.recipes[r] or { cps = 0, normal_cps = 0 }
+    local bonus_cps = rr.cps - rr.normal_cps
     local rec = g.recipes[r]
     local fr = force and force.recipes[r]
     local products = {}
     if rec then
       for _, p in ipairs(rec.products) do
-        local per_craft = p.amount + p.prod * rr.prod
         local st = rates.nodes[p.key]
         products[#products + 1] = {
           key = p.key, amount = r3(p.amount), prod_eligible = r3(p.prod),
-          rate_if_pf_normal_only = r3(rr.cps * per_craft),
-          rate_if_pf_includes_bonus = r3(rr.cps * per_craft / (1 + rr.prod)),
+          estimated_rate = r3(rr.normal_cps * p.amount + bonus_cps * p.prod),
           stats_produced = st and r3(st.prod) or 0,
         }
       end
@@ -81,8 +80,9 @@ local function recipe_block(g, rates, sidx)
     out[#out + 1] = {
       recipe = r, category = rec and rec.category, reversing = rec and rec.reversing or false,
       machines = x.machines, crafts_per_s = r3(rr.cps), max_crafts_per_s = r3(x.max_cps),
-      utilisation = x.max_cps > 0 and r3(rr.cps / x.max_cps) or nil,
-      avg_entity_prod = r3(rr.prod), avg_entity_prod_now = x.machines > 0 and r3(x.prod_sum / x.machines) or 0,
+      normal_crafts_per_s = r3(rr.normal_cps), bonus_crafts_per_s = r3(bonus_cps),
+      utilisation = x.max_cps > 0 and r3(rr.normal_cps / x.max_cps) or nil,
+      avg_entity_prod_now = x.machines > 0 and r3(x.prod_sum / x.machines) or 0,
       force_recipe_prod = fr and r3(fr.productivity_bonus) or 0,
       energy = rec and r3(rec.energy), products = products, samples = x.samples,
     }
@@ -131,7 +131,6 @@ function D.snapshot()
     space_age = script.active_mods["space-age"] ~= nil,
     tick = game.tick,
     window_seconds = secs,
-    assumptions = { pf_includes_bonus = Sampler.PF_INCLUDES_BONUS },
     sampler = st,
     graph = { nodes = g.n_nodes, recipes = g.n_recipes, reversing = g.n_reversing },
     model = { in_use_recipes = #m.used, vertices = #m.verts, edges = #m.edges, sccs = #m.sccs,

@@ -205,6 +205,24 @@ class ReleaseTests(unittest.TestCase):
                 P.deploy(bundle)
         post.assert_not_called()
 
+    def test_screenshot_refresh_preserves_live_description_exactly(self):
+        bundle = self.bundle()
+        fake = FakePortal(P.verify_bundle(bundle))
+        previous = "Approved\r\n description.\r\r\n\r\r\n![Test](/assets/old.png)"
+        fake.state = {"releases": [], "description": previous,
+                      "images": [{"id": "old", "url": "/assets/old.png"}]}
+        self.deploy(bundle, fake)
+        self.assertEqual(fake.state["description"], previous.replace("/assets/old.png", "https://cdn.example/test.png"))
+        self.assertNotIn("old", fake.order)
+        self.deploy(bundle, fake)
+        self.assertEqual(fake.state["description"], previous.replace("/assets/old.png", "https://cdn.example/test.png"))
+        self.assertEqual(fake.image_uploads, 1)
+
+    def test_intended_description_edits_still_apply(self):
+        previous = "Old wording.\n\n![Test](/old.png)"
+        self.assertEqual(P.gallery_description(previous, self.description), self.description)
+        self.assertEqual(P.gallery_description("Approved description.", self.description), self.description)
+
 
 class FakePortal:
     def __init__(self, plan):

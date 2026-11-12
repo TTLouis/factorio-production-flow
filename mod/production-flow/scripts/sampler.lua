@@ -40,6 +40,9 @@ end
 ---@field s integer Surface index captured on registration.
 ---@field r string? Recipe observed at the previous sample.
 ---@field pf number Previous products_finished counter.
+---@field pb number? Previous productivity bonus.
+---@field cp number? Previous crafting progress, sampled on productive machines.
+---@field bp number? Previous productivity bar progress, sampled on productive machines.
 ---@field spd number Last observed crafting speed.
 ---@field silo boolean? Whether rocket-part accounting applies.
 ---@field rp number? Previous rocket_parts counter.
@@ -52,7 +55,8 @@ end
 
 ---@class ProductionFlowRecipeSample
 ---@field c number Completed crafts, including productivity bonus crafts.
----@field p number Sum of completed crafts multiplied by productivity bonus.
+---@field n number? Normal crafts.
+---@field p number? Legacy sum of completed crafts multiplied by productivity bonus.
 
 ---@class ProductionFlowNodeSample
 ---@field i number Produced quantity (statistics input_counts).
@@ -70,7 +74,7 @@ end
 -- Query results are new tables; callers may use them without mutating history.
 ---@class ProductionFlowRecipeRate
 ---@field cps number Completed crafts per second, including productivity bonuses.
----@field prod number Craft-weighted productivity bonus, not a production rate.
+---@field normal_cps number Completed crafts per second that consumed ingredients.
 
 ---@class ProductionFlowNodeRate
 ---@field prod number Produced material units per second.
@@ -83,10 +87,6 @@ end
 ---@class ProductionFlowStockEntry
 ---@field count number Latest completed scan quantity, all qualities combined.
 ---@field per_min number? Change per game minute; absent without elapsed history.
-
--- Verified on a real base (v0.0.7 export): products_finished INCLUDES productivity bonus crafts.
--- normal crafts = pf / (1 + prod); inputs = normal * amount; outputs = normal * (amount + eligible * prod)
-Sm.PF_INCLUDES_BONUS = true
 
 Sm.TYPES = TYPES
 
@@ -146,15 +146,30 @@ function Sm.duration(seconds)
   return string.format("%d s", math.floor(seconds))
 end
 
+function Sm.normal_crafts(sample)
+  if sample.n then return sample.n end
+  if sample.c == 0 then return 0 end
+  -- Older bins only recorded the total and a craft-weighted productivity bonus.
+  return sample.c / (1 + sample.p / sample.c)
+end
+
+local function add_crafts(recipes, name, total, normal)
+  local sample = recipes[name]
+  if sample then
+    sample.n = Sm.normal_crafts(sample) + normal
+    sample.c = sample.c + total
+    sample.p = nil
+  else
+    recipes[name] = { c = total, n = normal }
+  end
+end
+
 local function add_into(dst, src)
   for s, recs in pairs(src.rec) do
     local d = dst.rec[s]
     if not d then d = {}; dst.rec[s] = d end
     for r, a in pairs(recs) do
-      local x = d[r]
-      if not x then x = { c = 0, p = 0 }; d[r] = x end
-      x.c = x.c + a.c
-      x.p = x.p + a.p
+      add_crafts(d, r, a.c, Sm.normal_crafts(a))
     end
   end
   for s, keys in pairs(src.stat) do
@@ -295,7 +310,7 @@ end
 ---------------------------------------------------------------------------
 function Sm.current_recipe(e)
   local r = e.get_recipe()
-  if r then return r.name end
+  if r then return r.name, r end
   if e.type == "furnace" then
     local pr = e.previous_recipe
     if pr then
@@ -307,13 +322,30 @@ function Sm.current_recipe(e)
   return nil
 end
 
+local function craft_productivity(e, name, force_recipe, recipe)
+  if not name then return 0 end
+  if not force_recipe then
+    -- A furnace can finish its last craft and report only its previous recipe.
+    local force = e.force
+    force_recipe = force and force.recipes[name]
+  end
+  local bonus = (e.productivity_bonus or 0) + (force_recipe and force_recipe.productivity_bonus or 0)
+  if bonus <= 0 then return 0 end
+  -- Recipe research is separate from the entity's effects. Cap the combined bonus.
+  return math.min(bonus, recipe and recipe.max_productivity or bonus)
+end
+
 function Sm.add(e)
   ChestStock.add(e)
   if not (e and e.valid and TYPESET[e.type]) then return end
   local u = e.unit_number
   if not u or storage.machines[u] then return end
-  local rec = { e = e, u = u, s = e.surface.index, r = Sm.current_recipe(e), pf = e.products_finished,
+  local name, force_recipe = Sm.current_recipe(e)
+  local recipes = storage.graph and storage.graph.recipes
+  local rec = { e = e, u = u, s = e.surface.index, r = name, pf = e.products_finished,
                 spd = e.crafting_speed }
+  rec.pb = craft_productivity(e, name, force_recipe, recipes and recipes[name])
+  if rec.pb > 0 then rec.cp, rec.bp = e.crafting_progress, e.bonus_progress end
   if e.type == "rocket-silo" then
     rec.silo = true
     rec.rp = e.rocket_parts
@@ -398,6 +430,28 @@ end
 ---------------------------------------------------------------------------
 -- per-tick sampling
 ---------------------------------------------------------------------------
+local function normal_crafts_between(rec, total, productivity, crafting, bonus, speed, recipe)
+  if productivity > 0 and rec.pb == productivity and rec.bp and bonus then
+    -- Each normal craft (including partial progress) adds productivity to the
+    -- bonus bar. Each bonus craft subtracts one and is also in the total.
+    local divisor = 1 + productivity
+    local wraps = ((total + crafting - rec.cp) * productivity + rec.bp - bonus) / divisor
+    local lower, upper = wraps - 1e-4, wraps + 1e-4
+    if (rec.bp == 1 or bonus == 1) and recipe and recipe.energy > 0 then
+      -- The API clamps a pending payout to 1. The hidden overflow comes from
+      -- the update that filled the bar, so allow up to one tick of progress.
+      local scale = productivity / (60 * recipe.energy * divisor)
+      if bonus == 1 then lower = lower - speed * scale end
+      if rec.bp == 1 then upper = upper + rec.spd * scale end
+    end
+    local first = math.max(0, math.ceil(lower))
+    local last = math.min(total, math.floor(upper))
+    if first == last then return total - first end
+  end
+  -- A changed effect or interrupted progress can leave an ambiguous interval.
+  return total / (1 + productivity)
+end
+
 function Sm.on_tick(tick)
   ChestStock.tick(tick)
   local list = storage.mlist
@@ -407,6 +461,7 @@ function Sm.on_tick(tick)
   local bin = cur_bin(tick)
   local cur = storage.mcursor
   local machines = storage.machines
+  local recipes = storage.graph and storage.graph.recipes
 
   for _ = 1, per do
     local n = #list
@@ -430,8 +485,13 @@ function Sm.on_tick(tick)
       list[cur] = list[n]
       list[n] = nil
     else
-      local r = Sm.current_recipe(e)
+      local r, force_recipe = Sm.current_recipe(e)
+      local recipe = recipes and recipes[r]
       local pf = e.products_finished
+      local speed = e.crafting_speed
+      local productivity = craft_productivity(e, r, force_recipe, recipe)
+      local crafting, bonus
+      if productivity > 0 then crafting, bonus = e.crafting_progress, e.bonus_progress end
       local rp
       if rec.silo then rp = e.rocket_parts end
       if r and r == rec.r then
@@ -441,17 +501,15 @@ function Sm.on_tick(tick)
         if d > 0 then
           local bs = bin.rec[rec.s]
           if not bs then bs = {}; bin.rec[rec.s] = bs end
-          local a = bs[r]
-          if not a then a = { c = 0, p = 0 }; bs[r] = a end
-          a.c = a.c + d
-          a.p = a.p + d * (e.productivity_bonus or 0)
+          add_crafts(bs, r, d, normal_crafts_between(rec, d, productivity, crafting, bonus, speed, recipe))
         end
       end
       if entity_status and (r ~= rec.r or not rec.status_due or tick >= rec.status_due) then
         observe_status(rec, e, r, tick)
       end
       rec.r, rec.pf = r, pf
-      rec.spd = e.crafting_speed
+      rec.pb, rec.cp, rec.bp = productivity, crafting, bonus
+      rec.spd = speed
       if rec.silo then rec.rp = rp end
       cur = cur + 1
     end
@@ -631,7 +689,7 @@ function Sm.coverage(sidx, period)
   return ticks / BIN_TICKS
 end
 
--- returns {recipes = {[r] = {cps, prod}}, nodes = {[key] = {prod, cons}}}, seconds
+-- returns {recipes = {[r] = {cps, normal_cps}}, nodes = {[key] = {prod, cons}}}, seconds
 -- period: seconds to average over (nil / 0 = the fine rate window)
 ---@param sidx integer? Surface index; nil combines all recorded surfaces.
 ---@param period number? Requested observation period in seconds.
@@ -641,10 +699,7 @@ function Sm.rates(sidx, period)
   local rc, st, secs = {}, {}, 0
   local function crafts(recs, fraction)
     for r, a in pairs(recs) do
-      local x = rc[r]
-      if not x then x = { c = 0, p = 0 }; rc[r] = x end
-      x.c = x.c + a.c * fraction
-      x.p = x.p + a.p * fraction
+      add_crafts(rc, r, a.c * fraction, Sm.normal_crafts(a) * fraction)
     end
   end
   local function totals(keys, fraction)
@@ -674,7 +729,7 @@ function Sm.rates(sidx, period)
   local out = { recipes = {}, nodes = {} }
   if secs > 0 then
     for r, x in pairs(rc) do
-      out.recipes[r] = { cps = x.c / secs, prod = (x.c > 0) and (x.p / x.c) or 0 }
+      out.recipes[r] = { cps = x.c / secs, normal_cps = x.n / secs }
     end
     for k, x in pairs(st) do
       out.nodes[k] = { prod = x.i / secs, cons = x.o / secs }

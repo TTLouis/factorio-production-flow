@@ -150,6 +150,18 @@ for _, point in ipairs(h.points) do
   end
 end
 
+-- A productivity payout can occur while a regular craft is still in progress.
+-- It must not receive any of the material consumption in that time bucket.
+reset(60)
+storage.graph = { nodes = { [material] = { consumers = { "a", "b" } } }, recipes = {
+  a = recipe(single, input(a, 1)), b = recipe(single, input(b, 1)),
+} }
+fine(0, stats(0, 2), nil, { { a = { c = 1, n = 0 }, b = { c = 2, n = 1 } } })
+h = H.build(1, 1, material)
+assert(h.usage_totals[a] == nil)
+near(h.usage_totals[b], 1)
+near(h.usage_totals[other], 1)
+
 -- Science consumption left after recipes is estimated lab use. Keep ambiguous
 -- recipe outputs separate, and recognise modded lab inputs from prototypes.
 reset(60)

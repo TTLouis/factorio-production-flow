@@ -42,7 +42,6 @@ local graph = { nodes = {}, recipes = {} }
 for k, e in pairs(R.era) do graph.nodes[k] = { era = e } end
 for r, e in pairs(R.recipe_era) do graph.recipes[r] = { era = e } end
 package.loaded["scripts.graph"] = { get = function() return graph end, key = function(t, n) return t .. "/" .. n end }
-package.loaded["scripts.sampler"] = { PF_INCLUDES_BONUS = true }
 local ginfo = {}
 for k, g in pairs(R.groups) do
   ginfo[g[1]] = { id = g[1], name = g[2], super = g[3], super_name = g[4], color = g[5], order = g[6], super_order = g[7] }

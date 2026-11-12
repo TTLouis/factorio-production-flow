@@ -45,9 +45,10 @@ local function add_estimates(estimates, samples, recipes)
   for name, recipe in pairs(recipes) do
     local sample = samples[name]
     if sample and sample.c > 0 then
-      local crafts = sample.c
-      if Sampler.PF_INCLUDES_BONUS then crafts = crafts / (1 + sample.p / crafts) end
-      estimates[recipe.key] = (estimates[recipe.key] or 0) + crafts * recipe.amount
+      local crafts = Sampler.normal_crafts(sample)
+      if crafts > 0 then
+        estimates[recipe.key] = (estimates[recipe.key] or 0) + crafts * recipe.amount
+      end
     end
   end
 end

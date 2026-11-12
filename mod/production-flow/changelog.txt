@@ -1,4 +1,16 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.2.6
+Date: 2026-11-11
+  Bugfixes:
+    - Correct recipe input, output and utilisation estimates with productivity modules,
+      research bonuses and delayed bonus crafts, including recipe-use estimates in History.
+    - Hide Transfers when Space Age or its required cargo events are unavailable.
+      Return to Balance if a saved Transfers selection is no longer available.
+  Gui:
+    - Jump to the selected space platform in remote view from Transfers Flow or History.
+  Changes:
+    - List Space Age as a recommended dependency while retaining base-game support.
+---------------------------------------------------------------------------------------------------
 Version: 0.2.5
   Features:
     - Compare Made, Used, Net, estimated use by product and chest stock in Balance History.

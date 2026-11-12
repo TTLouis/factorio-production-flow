@@ -249,6 +249,18 @@ def existing_release(state, plan):
     return False
 
 
+def gallery_description(previous, proposed):
+    image = r"(!\[[^]]*\]\()([^)]+)(\))"
+    # Screenshot-only updates retain the live wording, wrapping and blank lines.
+    # Keep image captions in the comparison so images still map in the same order.
+    template = lambda text: re.sub(image, r"\1SCREENSHOT\3", text).split()
+    urls = [match[1] for match in re.findall(image, proposed)]
+    if urls and template(previous) == template(proposed):
+        replacements = iter(urls)
+        return re.sub(image, lambda match: match[1] + next(replacements) + match[3], previous)
+    return proposed
+
+
 def deploy(bundle):
     plan = verify_bundle(bundle)
     require(os.getenv("FACTORIO_API_KEY"), "Add the FACTORIO_API_KEY repository secret before publishing")
@@ -287,7 +299,7 @@ def deploy(bundle):
     previous_inline = {key for key, image in current.items() if image.get("url")
                        and (image["url"] in previous_description
                             or urljoin(PORTAL, image["url"]) in previous_description)}
-    desired, description = [], plan["metadata"]["description"]
+    desired, description = [], gallery_description(previous_description, plan["metadata"]["description"])
     for entry in plan["gallery"]:
         image = current.get(entry["sha1"])
         if not image:
@@ -307,7 +319,7 @@ def deploy(bundle):
     require(edited.get("success") is True, "Portal did not confirm the page update")
     def complete(final):
         return (existing_release(final, plan)
-                and final.get("description", "").replace("\r\n", "\n").strip() == description.strip()
+                and final.get("description", "").replace("\r\n", "\n").strip() == description.replace("\r\n", "\n").strip()
                 and set(plan["metadata"]["tags"]) == set(final.get("tags", []))
                 and final.get("category") == plan["metadata"]["category"]
                 and final.get("summary") == plan["metadata"]["summary"]
