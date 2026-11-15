@@ -6,6 +6,12 @@ Release history is maintained in the [Factorio changelog](mod/production-flow/ch
 Run `python tools/changelog.py --write` after editing it.
 See [validation and engineering notes](docs/validation.md) for historical test details.
 
+## 0.2.8 — 2026-11-15
+
+### Changes
+
+- Mark Space Age as an optional dependency instead of a recommended dependency.
+
 ## 0.2.7 — 2026-11-12
 
 ### Bugfixes
