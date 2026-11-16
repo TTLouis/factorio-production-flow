@@ -26,7 +26,7 @@ function Tooltip.ribbon(canvas, pieces, caption, tags, prefix, add_hit)
       return
     end
     local spec = { type = "sprite", name = name, sprite = "ssk-node-hit", resize_to_sprite = false,
-      tooltip = caption, tags = tags }
+      tooltip = caption, tags = tags, raise_hover_events = true }
     if add_hit then
       add_hit(spec, x, y, width, height)
       return
@@ -34,7 +34,14 @@ function Tooltip.ribbon(canvas, pieces, caption, tags, prefix, add_hit)
     hit = canvas.add(spec)
     local style = hit.style
     style.width, style.height = width, height
-    style.left_margin, style.top_margin, style.bottom_margin = x, y, -(y + height)
+    -- Cancel each scaled length separately. Combining Y + height in one
+    -- negative margin shifts subsequent Transfer hover targets at 125/150%.
+    style.left_margin, style.top_margin, style.bottom_margin = x, y, -height
+    local reset = canvas.add { type = "empty-widget", ignored_by_interaction = true,
+      tags = { ssk_position_reset = true } }
+    reset.style.width, reset.style.height = 0, 0
+    reset.style.left_margin, reset.style.bottom_margin = 0, 0
+    reset.style.top_margin = -y
   end)
 end
 

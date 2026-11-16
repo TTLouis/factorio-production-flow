@@ -1,5 +1,10 @@
 # Development and native validation
 
+Accounting supports the default `player` force. Foreign machines remain as
+candidates in the bounded registry, with counters reset when an ownership change
+is observed. Other-force players receive an unavailable message. Historical craft
+bins have no force identity; earlier mixed-force samples remain until they expire.
+
 Install `requirements-dev.txt`, then run `python tests/run_lua.py`.
 The offline suite uses synthetic data and does not need a Factorio installation.
 The focused suites run separately with `python tests/run_lua.py` followed by
@@ -7,6 +12,9 @@ The focused suites run separately with `python tests/run_lua.py` followed by
 `tests/machine_status_test.lua`.
 
 Optional native checks (Windows, a local licensed Factorio installation required):
+
+Keep review/test audio muted: use `--disable-audio`, or `[sound]`
+`master-volume=0` and `master-muted=true` in an isolated interactive profile.
 
 ```powershell
 python tests/engine_smoke.py "C:/path/to/Factorio/bin/x64/Factorio.exe"
@@ -33,6 +41,22 @@ Transfers (when Space Age and its cargo events are available). Local diagnostic 
 The native harness
 injects its diagnostic helper into an isolated test copy after creating the clean
 candidate archive. These helpers and test hooks are excluded from release ZIPs.
+
+`python tests/gui_interaction.py --scales 1.25` checks native chart geometry,
+hover flags and handler routing at 125% scale on a disposable vanilla map. Its
+synthetic recipe rates make it a focused rendering regression, not a factory
+validation. `python tests/gui_simulation.py --scales 1` complements it with 18
+actual engine mouse clicks through Balance, Focus and Full Sankey, both renderers
+and top/middle/bottom targets. Neither runner sends desktop input. Normal-window
+captures use actual GUI scale; main-menu simulation players report scale one.
+Native screenshots still require visual inspection, including large-chart scroll
+viewports. Both runners preserve source/profile hashes and clean candidates under
+ignored `tests/out` stages.
+
+For user-authorized modded saves, `python tests/modded_gui.py --save PATH --mods MODS`
+uses actual sampled production history and private save/mod copies. Synchronize
+dependencies into an isolated profile first. Never copy credentials into the
+validation stage or claim compatible mod updates exactly reproduce the old set.
 
 GUI changes follow the vanilla button, frame and label rules in
 [ui-style.md](ui-style.md).

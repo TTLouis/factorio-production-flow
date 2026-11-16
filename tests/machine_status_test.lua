@@ -5,7 +5,10 @@ local status = { item_ingredient_shortage = 1, fluid_ingredient_shortage = 2, no
 defines = { entity_status = status }
 settings = { global = { ["ssk-window-seconds"] = { value = 60 }, ["ssk-entities-per-tick"] = { value = 2 } } }
 local nauvis, other = { index = 1, name = "nauvis", valid = true }, { index = 2, name = "other", valid = true }
-game = { tick = 0, surfaces = { nauvis, other } }
+nauvis.find_entities_filtered=function()return {} end
+other.find_entities_filtered=function()return {} end
+local forces={{index=1,recipes={}},{index=2,recipes={}}}
+game = { tick = 0, surfaces = { nauvis, other },forces={player=forces[1]} }
 storage = {}
 local Sm = require("scripts.sampler")
 local StatusUI = require("scripts.machine_status_ui")
@@ -15,7 +18,7 @@ local machines, status_reads = {}, 0
 local function machine(recipe, state, surface, force, furnace)
   local e = setmetatable({ valid = true, type = furnace and "furnace" or "assembling-machine",
     unit_number = #machines + 1, products_finished = 0, crafting_speed = 1,
-    surface = surface, surface_index = surface.index, force_index = force,
+    surface = surface, surface_index = surface.index, force_index = force,force=forces[force],
     position = { x = #machines * 4, y = 0 }, recipe = recipe, state = state }, {
     __index = function(self, key)
       if key == "status" then status_reads = status_reads + 1; return self.state end
@@ -48,15 +51,15 @@ advance(3)
 assert(select(2, Sm.machine_status(1, 1)), "a partial old cycle must not complete warm-up")
 advance(10)
 local rows, warming = Sm.machine_status(1, 1)
-assert(not warming and status_reads == #machines, "sample all machines once while the first pass fills")
+assert(not warming and status_reads == #machines-1, "sample only player-force machines while the first pass fills")
 assert(rows["iron-plate"].observed == 3 and rows["iron-plate"].issues.input.count == 1)
 assert(rows["iron-plate"].issues.power.count == 2 and rows.gear.issues.output.count == 1)
 assert(rows.gear.observed == 2 and not rows.gear.issues.power and not rows.gear.issues.input)
-assert(Sm.machine_status(1, 2)["iron-plate"].issues.input.count == 1, "force isolation")
+assert(Sm.machine_status(1, 2)==nil, "foreign candidates must not populate sampled machine status")
 assert(Sm.machine_status(2, 1)["iron-plate"].issues.input.count == 1, "surface isolation")
 assert(Sm.find_status_machine(1, 1, "iron-plate", "input") == starved, "furnace previous recipe")
 advance(100)
-assert(status_reads == #machines + 1, "normal visits must not reread status inside five seconds")
+assert(status_reads == #machines, "normal visits must not reread status inside five seconds")
 
 -- Issue targets are live-checked even before the next sampled observation.
 local preferred = Sm.find_status_machine(1, 1, "iron-plate", "power")
@@ -65,10 +68,11 @@ assert(Sm.find_status_machine(1, 1, "iron-plate", "power") == (preferred == no_p
 assert(rows["iron-plate"].issues.power.count == 2, "live lookup must not mutate counts")
 preferred.state = status.low_power
 disabled.force_index, disabled.surface_index, disabled.surface = 2, 2, other
+disabled.force=forces[2]
 disabled.recipe, disabled.state = "iron-plate", status.low_power
 advance(105)
 assert(rows.gear.observed == 1, "recipe transition should remove the previous observation promptly")
-assert(Sm.machine_status(2, 2)["iron-plate"].issues.power.count == 1)
+assert(Sm.machine_status(2, 2)==nil, "force transition must remove status without sampling foreign work")
 disabled.valid = false
 advance(110)
 assert(not Sm.machine_status(2, 2), "drop invalid entities and prune emptied scope")

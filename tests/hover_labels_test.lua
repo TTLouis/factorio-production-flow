@@ -53,8 +53,27 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
   elements = collect(c)
   assert(elements.labels[key].visible, "selected label must stay visible")
   assert(not elements.labels["item/plastic-bar"].visible, "unselected label leaked")
+  local unrelated = "item/plastic-bar"
+  assert(elements.icons[unrelated].style.draw_grayscale_picture == true,
+    "Full Sankey must gray unrelated icons without disabling their click targets")
+  assert(elements.icons[unrelated].enabled ~= false and not elements.icons[key].style.draw_grayscale_picture
+    and not elements.icons["item/iron-plate"].style.draw_grayscale_picture,
+    "Selected and upstream nodes must retain their normal icons")
+  local visual = storage.sk_render[1].node_visuals[unrelated]
+  assert(visual.dimmed and elements.labels[unrelated].style.font_color[1] == .4)
+  if renderer == "sprites" then
+    assert(elements.bars[unrelated].sprite == TREQ("shared.sprites").bar(TREQ("shared.palette").DIM),
+      "Unrelated sprite bars must dim with their icons")
+  else
+    assert(visual.shapes[#visual.shapes].object.color.a == .16,
+      "Unrelated polygon bars must dim with their icons")
+  end
   SK.on_hover(event(elements.icons["item/plastic-bar"]), true)
+  assert(not elements.icons[unrelated].style.draw_grayscale_picture and elements.icons[key].style.draw_grayscale_picture,
+    "Hover must temporarily trace the hovered chain")
   SK.on_hover(event(elements.icons["item/plastic-bar"]), false)
+  assert(elements.icons[unrelated].style.draw_grayscale_picture and not elements.icons[key].style.draw_grayscale_picture,
+    "Leaving hover must restore the pinned chain")
   assert(storage.sk_render[1].selected == key and elements.labels[key].visible)
   assert(before == route(storage.sk_render[1]), "pinning changed routes")
   -- Live redraw retains pinned state and updates native tooltip data.
@@ -64,6 +83,8 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
   assert(SK.on_click(event(elements.icons[key]), us) == "rebuild" and not us.sel)
   SK.fill(player, c, us, 1000, 700, false)
   assert(not collect(c).labels[key].visible, "second click must unpin")
+  assert(not collect(c).icons[unrelated].style.draw_grayscale_picture,
+    "Clearing the selected node must restore unrelated icons")
   for _, enabled in ipairs({ true, false }) do
     local toggle = collect(c).toggles[1]; toggle.state = enabled
     assert(SK.on_checked(event(toggle), us) == "rebuild")
@@ -78,6 +99,8 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
     SK.fill(player, c, fx, 520, 600, true)
     elements = collect(c)
     assert(#elements.toggles == 1 and elements.labels[key].visible, "focused item must be identified")
+    for _,target in pairs(elements.icons) do assert(not target.style.draw_grayscale_picture,
+      "Full Sankey node dimming must not affect Focus/Balance icons") end
     local other
     for k, target in pairs(elements.bars) do
       if k ~= key and k:sub(1, 5) == "item/" then other = target; break end

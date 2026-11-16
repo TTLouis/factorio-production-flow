@@ -21,7 +21,7 @@ rendering = {
 }
 local SURF
 game.get_surface = function(n) return SURF end
-game.create_surface = function(n, s) SURF = { index = 77, name = n, request_to_generate_chunks = function() end,
+game.create_surface = function(n, s) SURF = { index = 77, name = n, map_gen_settings = s, is_chunk_generated = function() return true end, request_to_generate_chunks = function() end,
   force_generate_chunk_requests = function() end, set_tiles = function() end }; return SURF end
 player.force = player.force or {}
 player.force.chart = function() end

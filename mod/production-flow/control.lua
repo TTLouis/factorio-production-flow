@@ -22,9 +22,14 @@ end
 script.on_init(function() setup(true) end)
 script.on_configuration_changed(function()
   setup(true)
+  UI.sanitize_saved_states()
   for _, player in pairs(game.connected_players) do
     if UI.is_open(player) then UI.open(player) end
   end
+end)
+
+script.on_event(defines.events.on_player_removed, function(e)
+  UI.on_player_removed(e.player_index)
 end)
 
 script.on_event(defines.events.on_player_created, function(e)
@@ -63,9 +68,17 @@ local track_cargo = Transfers.available()
 if track_cargo then
   script.on_event(defines.events.on_cargo_pod_finished_ascending, Transfers.on_departed)
   script.on_event(defines.events.on_cargo_pod_finished_descending, Transfers.on_landed)
-  script.on_event(defines.events.on_cargo_pod_delivered_cargo, Transfers.on_delivered)
-  script.on_event(defines.events.on_pre_surface_deleted, Transfers.on_surface_deleted)
+  script.on_event(defines.events.on_cargo_pod_delivered_cargo, function(e)
+    -- Surface drops create their container internally, without a built event.
+    if e.spawned_container then Sampler.add(e.spawned_container) end
+    Transfers.on_delivered(e)
+  end)
 end
+
+script.on_event(defines.events.on_pre_surface_deleted, function(e)
+  Sampler.on_surface_deleted(e.surface_index)
+  if track_cargo then Transfers.on_surface_deleted(e) end
+end)
 
 ---------------------------------------------------------------------------
 -- ticking
@@ -114,6 +127,7 @@ end
 script.on_event(defines.events.on_player_display_resolution_changed, display_changed)
 script.on_event(defines.events.on_player_display_scale_changed, display_changed)
 script.on_event(defines.events.on_player_changed_surface, function(e) UI.on_surface_changed(game.get_player(e.player_index)) end)
+script.on_event(defines.events.on_player_changed_force, function(e) UI.on_force_changed(game.get_player(e.player_index)) end)
 
 ---------------------------------------------------------------------------
 -- commands

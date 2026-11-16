@@ -13,7 +13,8 @@ local BUCKET_SECONDS = { 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600
   18000, 36000, 90000, 180000, 360000 }
 
 function T.available()
-  return script and script.active_mods and script.active_mods["space-age"] ~= nil
+  local active_mods = script and script.active_mods
+  return active_mods and active_mods["space-age"] ~= nil
     and defines.events.on_cargo_pod_finished_ascending ~= nil
     and defines.events.on_cargo_pod_finished_descending ~= nil
     and defines.events.on_cargo_pod_delivered_cargo ~= nil

@@ -78,7 +78,7 @@ def prepare(args):
         f'[path]\nread-data={args.exe.parents[2].as_posix()}/data\nwrite-data={stage.as_posix()}\n'
         '[graphics]\nfull-screen=false\n[other]\nautosave-interval=0\nhide-achievement-popups=true\n'
         '[interface]\nui-scale-mode=manual-pixels\ncustom-ui-scale=1\n'
-        f'[general]\nlocale={args.language}\n', encoding='utf-8')
+        f'[general]\nlocale={args.language}\n[sound]\nmaster-volume=0\nmaster-muted=true\n', encoding='utf-8')
     manifest = {'source_save': str(args.save), 'saved_mods': saved, 'engine': version,
                 'source_factorio_version': original_series, 'staged_factorio_version': series,
                 'protected_sha256': original, 'input_sha256': digest(stage / 'input.zip'),

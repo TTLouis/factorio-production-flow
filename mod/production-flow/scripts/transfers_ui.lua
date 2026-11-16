@@ -17,7 +17,7 @@ local TICK = { r = 0.75, g = 0.74, b = 0.71, a = 1 }
 local HIGHLIGHT = { r = 0.28, g = 0.24, b = 0.18, a = 1 }
 local CARD_ROW, CARD_HEADER, CARD_GAP = 25, 34, 12
 local DIRECTIONS = { "loaded", "unloaded" }
-local LAYOUT_VERSION = 7
+local LAYOUT_VERSION = 8
 local SPLIT_GAP, LIST_INSET, TAB_MARGIN, TAB_INSET = 12, 4, 4, 8
 local HEADING_HEIGHT, LIST_HEADER_HEIGHT, TAB_HEIGHT, TAB_CHROME = 38, 32, 36, 48
 local GRAPH_TOP, PLATFORM_HEIGHT = 34, 124
@@ -253,11 +253,37 @@ local function build(content, width, height)
 end
 
 -- Match the existing Sankey camera and keep native controls aligned with its coordinates.
+local function position_reset_name(el)
+  if el.name and el.name~="" then return "ssk_transfer_position_reset_"..el.name end
+  local tags=el.tags
+  if not tags.transfer_position_reset then
+    tags.transfer_position_reset="ssk_transfer_position_reset_anon_"..(#el.parent.children+1)
+    el.tags=tags
+  end
+  return tags.transfer_position_reset
+end
+
 local function place(el, x, y, width, height)
   local style = el.style
   style.width, style.height = width, height
-  style.left_margin, style.top_margin, style.bottom_margin = x, y, -(y + height)
+  style.left_margin, style.top_margin, style.bottom_margin = x, y, -height
+  local parent,name=el.parent,position_reset_name(el)
+  local reset=parent[name]
+  if not reset then
+    reset=parent.add { type="empty-widget",name=name,index=el.get_index_in_parent()+1,
+      ignored_by_interaction=true }
+  end
+  reset.style.width,reset.style.height=0,0
+  reset.style.left_margin,reset.style.bottom_margin=0,0
+  reset.style.top_margin=-y
+  reset.visible=el.visible~=false
   return el
+end
+
+local function overlay_visible(el,visible)
+  el.visible=visible
+  local reset=el.parent[position_reset_name(el)]
+  if reset then reset.visible=visible end
 end
 
 local function camera(parent, player, painter, width, height)
@@ -571,11 +597,11 @@ local function timeline(player, chart, result, width, height)
       hit.tooltip = bucket_tooltip(bucket, direction, start_tick, end_tick, recorded_from)
       hit.tags = { transfer_bucket = bucket.start_tick, transfer_direction = direction }
       place(hit, a, up and top or mid, band, up and mid - top or bottom - mid)
-      hit.visible = true
+      overlay_visible(hit,true)
     end
   end
   for i = #result.buckets + 1, chart.tags.bucket_count or 0 do
-    for _, direction in ipairs(DIRECTIONS) do chart[Loc.join("ssk_transfer_bucket_", direction, "_", i)].visible = false end
+    for _, direction in ipairs(DIRECTIONS) do overlay_visible(chart[Loc.join("ssk_transfer_bucket_", direction, "_", i)],false) end
   end
   chart.tags = { bucket_count = math.max(#result.buckets, chart.tags.bucket_count or 0) }
 end

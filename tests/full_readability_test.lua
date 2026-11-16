@@ -40,15 +40,15 @@ for _,renderer in ipairs({"poly","sprites"}) do
   SK.on_selection(event(colors),us); SK.fill(player,c,us,1600,850,false)
   for _,r in ipairs(storage.sk_render[1].ribbons) do assert(r.color==P.material(r.from)) end
 end
--- Native GUI lengths are rounded separately after scaling. Every overlay must
--- leave the next sibling at the canvas origin, including transparent ribbon hits.
+-- Native GUI lengths are rounded separately after scaling. Each tight wrapper
+-- and its following Y-reset must return to the canvas origin.
 -- The old top + height - (top + height) cancellation drifts at 125%.
 local original_scale=player.display_scale
 local function pixels(value,scale)
   local n=(value or 0)*scale
   return n<0 and math.ceil(n) or math.floor(n)
 end
-for _,scale in ipairs({1,1.25}) do
+for _,scale in ipairs({1,1.25,1.5}) do
   player.display_scale=scale
   for _,renderer in ipairs({"poly","sprites"}) do
     local us={view="detail",layout="clean",renderer=renderer,period=600,show_labels=true}
@@ -56,16 +56,22 @@ for _,scale in ipairs({1,1.25}) do
     local advance=0
     local overlays=c.ssk_sp.ssk_canvas.children
     assert(#overlays>20,"scaling regression needs multiple overlays")
-    for _,overlay in ipairs(overlays) do
+    for i,overlay in ipairs(overlays) do
       local s=overlay.style
       advance=advance+pixels(s.top_margin,scale)+pixels(s.height,scale)+pixels(s.bottom_margin,scale)
-      assert(advance==0,"scaled overlays move subsequent icons, bars or ribbon hover targets")
+      if overlay.type=="flow" then
+        assert(overlays[i+1] and overlays[i+1].tags.ssk_position_reset,"positioned flow needs a Y reset")
+        assert(advance==pixels(s.top_margin,scale),"scaled wrapper height did not cancel")
+      else
+        assert(advance==0,"scaled overlays move subsequent icons, bars or ribbon hover targets")
+      end
       if overlay.type=="flow" then
         local child=assert(overlay.children[1])
         assert((child.style.top_margin or 0)+(child.style.height or 0)<=s.height,
           "overlay wrapper would cull its child")
       end
     end
+    assert(advance==0,"last overlay must restore canvas origin")
   end
 end
 player.display_scale=original_scale

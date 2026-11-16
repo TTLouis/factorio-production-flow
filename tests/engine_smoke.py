@@ -25,6 +25,9 @@ hook = "script.on_init(function() setup(true) end)"
 assert source.count(hook) == 1
 source = 'local Smoke = require("scripts.engine_smoke")\n' + source.replace(
     hook, "script.on_init(function() setup(true); Smoke.run(UI, Canvas) end)")
+tick_hook = '  Sampler.on_tick(e.tick)'
+assert source.count(tick_hook) == 1
+source = source.replace(tick_hook, tick_hook + '\n  Smoke.verify()')
 control.write_text(source, encoding="utf-8")
 (stage / "mods" / "mod-list.json").write_text(json.dumps({"mods": [
     {"name": "base", "enabled": True}, {"name": "production-flow", "enabled": True}
@@ -39,7 +42,16 @@ result = subprocess.run([str(exe), "--config", str(config), "--mod-directory", s
                         capture_output=True, text=True, encoding="utf-8", errors="replace")
 log = result.stdout + result.stderr
 (stage / "output.txt").write_text(log, encoding="utf-8")
-if result.returncode or "PRODUCTION FLOW ENGINE SMOKE OK" not in log:
+if result.returncode or "PRODUCTION FLOW ENGINE SMOKE SETUP OK" not in log:
+    print(log[-10000:])
+    raise SystemExit(f"Engine smoke setup failed; see {stage / 'output.txt'}")
+result = subprocess.run([str(exe), '--config', str(config), '--mod-directory', str(stage / 'mods'),
+                         '--benchmark', str(stage / 'smoke.zip'), '--benchmark-ticks', '60',
+                         '--benchmark-runs', '1'], capture_output=True, text=True,
+                        encoding='utf-8', errors='replace', timeout=120)
+log += result.stdout + result.stderr
+(stage / 'output.txt').write_text(log, encoding='utf-8')
+if result.returncode or 'PRODUCTION FLOW ENGINE SMOKE OK' not in log:
     print(log[-10000:])
     raise SystemExit(f"Engine smoke failed; see {stage / 'output.txt'}")
 print(next(line for line in log.splitlines() if "PRODUCTION FLOW ENGINE SMOKE OK" in line))

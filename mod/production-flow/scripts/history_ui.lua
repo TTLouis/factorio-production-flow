@@ -25,7 +25,6 @@ local PLOT_LEFT, PLOT_RIGHT = 52, 24
 local PLOT_TOP, PLOT_BOTTOM = 12, 21
 local STOCK_MARKER_HALF = 3
 local SCROLL_INSET, SCROLLBAR_WIDTH, BODY_MARGIN_Y = 8, 12, 4
-local hover_views = {}
 local LAB_NOTE = Loc("history-lab-use-is-estimated-from-measured-science")
 
 local function color(rgb)
@@ -524,7 +523,9 @@ local function highlight(view, target)
     local rect = band.rect
     if rect.valid then
       if region then
-        view.painter.rect(region.left, band.top, region.right - region.left, band.height, HOVER_BAND, rect)
+        local x,y,w,h=Geometry.box(region.left,band.top,region.right-region.left,band.height)
+        rect.left_top={view.ox+x/32,view.oy+y/32}
+        rect.right_bottom={view.ox+(x+w)/32,view.oy+(y+h)/32}
       end
       rect.visible = region ~= nil
     end
@@ -534,7 +535,7 @@ end
 function H.on_hover(e, entering)
   local target = e.element
   if not (target.valid and target.tags.ssk_history_bucket) then return false end
-  local view = hover_views[e.player_index]
+  local view = storage.history_hover and storage.history_hover[e.player_index]
   if view then
     if entering then highlight(view, target)
     elseif target == view.target then highlight(view) end
@@ -543,8 +544,8 @@ function H.on_hover(e, entering)
 end
 
 function H.clear_hover(index)
-  local view = hover_views[index]
-  if view then highlight(view); hover_views[index] = nil end
+  local view = storage.history_hover and storage.history_hover[index]
+  if view then highlight(view); storage.history_hover[index] = nil end
 end
 
 function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
@@ -689,10 +690,13 @@ function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
   camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0, buckets, bands)
   camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top, buckets, bands)
   camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top, stock_regions, bands)
-  local previous = hover_views[player.index]
+  storage.history_hover=storage.history_hover or {}
+  local previous = storage.history_hover[player.index]
   local target = previous and previous.target
-  local view = painter and { painter = painter, bands = bands, key = key, period = us.period, surface = us.sidx }
-  hover_views[player.index] = view
+  -- Save only serializable coordinates and LuaObject references, never painter
+  -- closures. A joining/reloading peer can apply the same hover event immediately.
+  local view = painter and { ox=painter.ox,oy=painter.oy,bands=bands,key=key,period=us.period,surface=us.sidx }
+  storage.history_hover[player.index] = view
   if view and target and target.valid and target.visible and target.parent.parent.visible
     and previous.key == key and previous.period == us.period and previous.surface == us.sidx then
     highlight(view, target)

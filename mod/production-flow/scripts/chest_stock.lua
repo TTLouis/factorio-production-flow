@@ -39,6 +39,28 @@ function C.rescan()
   end
 end
 
+function C.on_surface_deleted(index)
+  for _, snapshot in ipairs(storage.stock or {}) do snapshot.s[index] = nil end
+  local s = state()
+  if not s then return end
+  local batch = s.batch
+  local list, cursor, limit = {}, 1, 0
+  for i, unit in ipairs(s.list) do
+    local entity = s.entities[unit]
+    if entity and entity.valid and entity.surface.index == index then
+      s.entities[unit] = nil
+    else
+      list[#list + 1] = unit
+      if batch and i < batch.cursor then cursor = cursor + 1 end
+      if batch and i <= batch.limit then limit = limit + 1 end
+    end
+  end
+  s.list = list
+  if batch then
+    batch.cursor, batch.limit, batch.s[index] = cursor, limit, nil
+  end
+end
+
 function C.request(tick)
   local s = state()
   if s.batch or tick < s.next_tick then return end

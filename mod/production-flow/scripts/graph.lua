@@ -26,10 +26,15 @@ end
 local function expected(p)
   local amt = p.amount
   if not amt then amt = ((p.amount_min or 0) + (p.amount_max or 0)) / 2 end
-  local prob = p.probability or 1
+  local prob = p.independent_probability or p.probability or 1
+  if p.shared_probability then
+    prob = prob * (p.shared_probability.max - p.shared_probability.min)
+  end
   local extra = p.extra_count_fraction or 0
   local ign = math.min(p.ignored_by_productivity or 0, amt)
-  return amt * prob + extra, math.max(0, amt - ign) * prob + extra
+  local stats = math.min(p.ignored_by_stats or 0, amt)
+  return amt * prob + extra, math.max(0, amt - ign) * prob + extra,
+    stats * prob, math.max(0, stats - ign) * prob
 end
 
 -- recipes that undo other recipes: excluded from tiering, rendered as loop-backs (D4)
@@ -75,15 +80,17 @@ function G.build()
     for _, ing in pairs(rp.ingredients) do
       if ing.type == "item" or ing.type == "fluid" then
         local nd = node(ing.type, ing.name)
-        r.ingredients[#r.ingredients + 1] = { key = nd.key, amount = ing.amount }
+        r.ingredients[#r.ingredients + 1] = { key = nd.key, amount = ing.amount,
+          ignored_by_stats = math.min(ing.ignored_by_stats or 0, ing.amount) }
         nd.consumers[#nd.consumers + 1] = name
       end
     end
     for _, p in pairs(rp.products) do
       if p.type == "item" or p.type == "fluid" then
         local nd = node(p.type, p.name)
-        local base, elig = expected(p)
-        r.products[#r.products + 1] = { key = nd.key, amount = base, prod = elig }
+        local base, elig, stats, bonus_stats = expected(p)
+        r.products[#r.products + 1] = { key = nd.key, amount = base, prod = elig,
+          ignored_by_stats = stats, ignored_stats_productivity = bonus_stats }
         nd.producers[#nd.producers + 1] = name
       end
     end

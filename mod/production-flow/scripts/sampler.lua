@@ -7,6 +7,12 @@
 
 local Sm = {}
 local ChestStock = require("scripts.chest_stock")
+local CANVAS_SURFACE = require("scripts.canvas").SURFACE
+
+local function empty_stats()
+  storage.empty_stat = storage.empty_stat or {}
+  return storage.empty_stat
+end
 
 local TYPES = { "assembling-machine", "furnace", "rocket-silo" }
 local TYPESET = { ["assembling-machine"] = true, furnace = true, ["rocket-silo"] = true }
@@ -109,6 +115,7 @@ local init_rings
 
 function Sm.init()
   ChestStock.init()
+  empty_stats()
   storage.machines = storage.machines or {} -- unit_number -> {e, u, s, r, pf}
   storage.mlist = storage.mlist or {}       -- array of unit_numbers (round-robin order)
   storage.mcursor = storage.mcursor or 1
@@ -168,6 +175,7 @@ local function add_crafts(recipes, name, total, normal)
 end
 
 local function add_into(dst, src)
+  local empty = empty_stats()
   for s, recs in pairs(src.rec) do
     local d = dst.rec[s]
     if not d then d = {}; dst.rec[s] = d end
@@ -177,8 +185,9 @@ local function add_into(dst, src)
   end
   for s, keys in pairs(src.stat) do
     local d = dst.stat[s]
-    if not d then d = {}; dst.stat[s] = d end
+    if not d then d = empty; dst.stat[s] = d end
     for k, a in pairs(keys) do
+      if d == empty then d = {}; dst.stat[s] = d end
       local x = d[k]
       if not x then x = { i = 0, o = 0 }; d[k] = x end
       x.i = x.i + a.i
@@ -338,22 +347,32 @@ local function craft_productivity(e, name, force_recipe, recipe)
   return math.min(bonus, recipe and recipe.max_productivity or bonus)
 end
 
+local function player_machine(e)
+  return e and e.valid and game.forces and game.forces.player and e.force==game.forces.player
+end
+
+local function seed_machine(rec,e)
+  local name,force_recipe=Sm.current_recipe(e)
+  local recipes=storage.graph and storage.graph.recipes
+  rec.s,rec.r,rec.pf,rec.spd=e.surface.index,name,e.products_finished,e.crafting_speed
+  rec.pb=craft_productivity(e,name,force_recipe,recipes and recipes[name])
+  rec.cp,rec.bp=nil,nil
+  if rec.pb>0 then rec.cp,rec.bp=e.crafting_progress,e.bonus_progress end
+  rec.eligible=true
+  if e.type=='rocket-silo' then
+    rec.silo=true;rec.rp=e.rocket_parts;rec.req=e.prototype.rocket_parts_required or 50
+  end
+end
+
 function Sm.add(e)
   ChestStock.add(e)
   if not (e and e.valid and TYPESET[e.type]) then return end
   local u = e.unit_number
   if not u or storage.machines[u] then return end
-  local name, force_recipe = Sm.current_recipe(e)
-  local recipes = storage.graph and storage.graph.recipes
-  local rec = { e = e, u = u, s = e.surface.index, r = name, pf = e.products_finished,
-                spd = e.crafting_speed }
-  rec.pb = craft_productivity(e, name, force_recipe, recipes and recipes[name])
-  if rec.pb > 0 then rec.cp, rec.bp = e.crafting_progress, e.bonus_progress end
-  if e.type == "rocket-silo" then
-    rec.silo = true
-    rec.rp = e.rocket_parts
-    rec.req = e.prototype.rocket_parts_required or 50
-  end
+  -- Retain foreign entities only as budgeted ownership-change candidates: the
+  -- runtime has no generic entity-force-changed event. Never sample their crafts.
+  local rec = {e=e,u=u,s=e.surface.index,eligible=false}
+  if player_machine(e) then seed_machine(rec,e) end
   storage.machines[u] = rec
   storage.mlist[#storage.mlist + 1] = u
 end
@@ -487,6 +506,15 @@ function Sm.on_tick(tick)
       machines[u] = nil
       list[cur] = list[n]
       list[n] = nil
+    elseif not player_machine(e) then
+      remove_observation(rec)
+      rec.eligible,rec.r,rec.pf=false,nil,nil
+      cur=cur+1
+    elseif rec.eligible~=true then
+      -- Do not count crafts completed while another force owned this machine.
+      remove_observation(rec)
+      seed_machine(rec,e)
+      cur=cur+1
     else
       local r, force_recipe = Sm.current_recipe(e)
       local recipe = recipes and recipes[r]
@@ -532,29 +560,96 @@ function Sm.on_stats(tick)
   local force = game.forces["player"]
   if not force then return end
   local bin = cur_bin(tick)
+  local empty = empty_stats()
   for _, s in pairs(game.surfaces) do
-    local last = storage.stat_last[s.index]
-    local first = last == nil
-    if first then last = {}; storage.stat_last[s.index] = last end
-    local out = bin.stat[s.index]
-    if not out then out = {}; bin.stat[s.index] = out end
-    for kind, st in pairs({ item = force.get_item_production_statistics(s),
-                            fluid = force.get_fluid_production_statistics(s) }) do
-      for side, counts in pairs({ i = st.input_counts, o = st.output_counts }) do
-        for name, v in pairs(counts) do
-          local key = kind .. "/" .. name
-          local l = last[key]
-          if not l then l = { i = 0, o = 0 }; last[key] = l end
-          local now = num(v)
-          local d = now - l[side]
-          l[side] = now
-          if not first and d > 0 then
-            local a = out[key]
-            if not a then a = { i = 0, o = 0 }; out[key] = a end
-            a[side] = a[side] + d
+    if s.name ~= CANVAS_SURFACE then
+      local last = storage.stat_last[s.index]
+      local first = last == nil
+      if first then last = {}; storage.stat_last[s.index] = last end
+      -- An empty per-surface entry is a known-zero coverage marker. Keep it,
+      -- but share the immutable map until this bin receives a positive delta.
+      local out = bin.stat[s.index]
+      if not out then out = empty; bin.stat[s.index] = out end
+      for kind, st in pairs({ item = force.get_item_production_statistics(s),
+                              fluid = force.get_fluid_production_statistics(s) }) do
+        for side, counts in pairs({ i = st.input_counts, o = st.output_counts }) do
+          for name, v in pairs(counts) do
+            local key = kind .. "/" .. name
+            local l = last[key]
+            if not l then l = { i = 0, o = 0 }; last[key] = l end
+            local now = num(v)
+            local d = now - l[side]
+            l[side] = now
+            if not first and d > 0 then
+              if out == empty then out = {}; bin.stat[s.index] = out end
+              local a = out[key]
+              if not a then a = { i = 0, o = 0 }; out[key] = a end
+              a[side] = a[side] + d
+            end
           end
         end
       end
+    end
+  end
+end
+
+-- Called before deletion, while stock entities still expose their surface.
+-- Factorio may reuse surface indexes; no retained sample or alert may follow
+-- the removed surface into its replacement.
+function Sm.on_surface_deleted(index)
+  if storage.stat_last then storage.stat_last[index] = nil end
+  local function purge(bin)
+    if bin.rec then bin.rec[index] = nil end
+    if bin.stat then bin.stat[index] = nil end
+    if bin.coverage and bin.coverage[index] then
+      bin.coverage[index] = nil
+      -- The combined-surface duration is the union of surviving observations.
+      local intervals = {}
+      for surface, runs in pairs(bin.coverage) do
+        if surface ~= 0 then
+          for i = 1, #runs, 2 do intervals[#intervals + 1] = { runs[i], runs[i + 1] } end
+        end
+      end
+      table.sort(intervals, function(a, b) return a[1] < b[1] end)
+      local union = {}
+      for _, span in ipairs(intervals) do
+        if #union == 0 or span[1] > union[#union] then
+          union[#union + 1], union[#union + 2] = span[1], span[2]
+        else union[#union] = math.max(union[#union], span[2]) end
+      end
+      bin.coverage[0] = #union > 0 and union or nil
+    end
+  end
+  for _, bin in pairs(storage.bins or {}) do purge(bin) end
+  for _, ring in ipairs(storage.rings or {}) do
+    for _, bin in pairs(ring.bins) do purge(bin) end
+  end
+  local removed = {}
+  for unit, rec in pairs(storage.machines or {}) do
+    if rec.s == index then
+      remove_observation(rec)
+      removed[unit], storage.machines[unit] = true, nil
+    elseif rec.status_surface == index then
+      remove_observation(rec)
+      rec.status_due = nil
+    end
+  end
+  if storage.machine_status then storage.machine_status[index] = nil end
+  local list, cursor = {}, 1
+  for i, unit in ipairs(storage.mlist or {}) do
+    if not removed[unit] then
+      list[#list + 1] = unit
+      if i < (storage.mcursor or 1) then cursor = cursor + 1 end
+    end
+  end
+  storage.mlist, storage.mcursor = list, cursor
+  ChestStock.on_surface_deleted(index)
+  -- Watch configuration belongs to each player's UI state. Purge only the
+  -- deleted scope, preserving their favourites and other surfaces' thresholds.
+  for _, us in pairs(storage.ui or {}) do
+    if us.bal_watches then
+      us.bal_watches[index] = nil
+      if not next(us.bal_watches) then us.bal_watches = nil end
     end
   end
 end
@@ -746,7 +841,7 @@ end
 function Sm.machine_counts(sidx)
   local m = {}
   for _, rec in pairs(storage.machines) do
-    if rec.r and (not sidx or rec.s == sidx) then m[rec.r] = (m[rec.r] or 0) + 1 end
+    if rec.r and player_machine(rec.e) and (not sidx or rec.s == sidx) then m[rec.r] = (m[rec.r] or 0) + 1 end
   end
   return m
 end
@@ -796,7 +891,7 @@ function Sm.capacity(sidx)
   local g = storage.graph
   local cap = {}
   for _, rec in pairs(storage.machines) do
-    if rec.r and (not sidx or rec.s == sidx) then
+    if rec.r and player_machine(rec.e) and (not sidx or rec.s == sidx) then
       local r = g and g.recipes[rec.r]
       local energy = r and r.energy or 0
       if energy > 0 and rec.spd then cap[rec.r] = (cap[rec.r] or 0) + rec.spd / energy end

@@ -14,6 +14,7 @@ local function check(recipe, machine, before, after, normal)
     productivity_bonus = machine.bonus, crafting_progress = before.crafting, bonus_progress = before.bonus,
     force = { recipes = { [recipe.name] = force_recipe } } }
   entity.get_recipe = function() return force_recipe end
+  game.forces={player=entity.force}
   Sampler.add(entity)
   entity.products_finished, entity.crafting_progress, entity.bonus_progress =
     after.total, after.crafting, after.bonus

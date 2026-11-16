@@ -15,7 +15,6 @@ local Watch = require("scripts.watch")
 local Tooltip = require("scripts.tooltip")
 
 local SK = {}
-local hovered_elements = {}
 local ZOOM_STEP = 1.25
 
 local function round(v) return math.floor(v + 0.5) end
@@ -136,17 +135,21 @@ end
 ---------------------------------------------------------------------------
 -- placement (negative-margin absolute positioning, verified in M0)
 ---------------------------------------------------------------------------
--- Include the Y offset in each wrapper's height and offset its child inside it.
--- Height and negative bottom margin then cancel the same scaled length. Separate
--- top/height/bottom lengths round independently at fractional GUI scales and
--- accumulate drift. The wrapper still contains its child for native culling.
+-- Keep wrappers tight around their children: empty space in a tall flow catches
+-- clicks meant for earlier rows. Cancel height and Y in separate equal lengths,
+-- so fractional GUI scaling cannot accumulate rounding drift between overlays.
 local function place_raw(e, x, y, w, h)
   local s = e.style
   s.width, s.height = w, h
   s.left_margin, s.right_margin = x, 0
   s.top_margin, s.bottom_margin = y, -(y + h)
   if e.type == "flow" then
-    s.height, s.top_margin = y + h, 0
+    s.bottom_margin = -h
+    local reset = e.parent.add { type = "empty-widget", ignored_by_interaction = true,
+      tags = { ssk_position_reset = true } }
+    reset.style.width, reset.style.height = 0, 0
+    reset.style.left_margin, reset.style.bottom_margin = 0, 0
+    reset.style.top_margin = -y
   end
 end
 
@@ -160,7 +163,7 @@ local function place(e, x, y, w, h)
   if p and p.tags and p.tags.ssk_wrap then
     place_raw(p, x, y, w, h)
     e.style.width, e.style.height = w, h
-    e.style.top_margin = y
+    e.style.top_margin = 0
   else
     place_raw(e, x, y, w, h)
   end
@@ -425,8 +428,8 @@ local function history_controls(row, us)
   end
   local clear = row.add { type = "sprite-button", style = "tool_button_red", sprite = "utility/trash",
     tags = { ssk_sk = "f_clear_history" },
-    tooltip = Loc("sankey-clear-last-visits-keeps-the-current-material") }
-  clear.enabled = #back + #forward > 0
+    tooltip = Loc("sankey-clear-selected-material-and-last-visits") }
+  clear.enabled = us.focus ~= nil or #back + #forward > 0
 end
 
 -- Every toolbar row sits in one subheader strip across the top of the chart panel,
@@ -574,7 +577,7 @@ local function wrapped(canvas, x, y, w, h, spec)
   place(f, x, y, w, h)
   f.style.padding = 0
   local e = f.add(spec)
-  e.style.top_margin = round(y)
+  e.style.top_margin = 0
   e.style.maximal_width = w
   return e
 end
@@ -607,10 +610,31 @@ local function highlight(st, key)
       if r.ro.valid then r.ro.color = Canvas.col(c) end
     elseif r.elem and r.elem.valid then r.elem.sprite = ribbon_sprite(r, c) end
   end
+  for node_key, node in pairs(st.node_visuals or {}) do
+    local dim = st.dim_nodes and key ~= nil and not (upstream[node_key] or downstream[node_key])
+    if node.dimmed ~= dim then
+      node.dimmed = dim
+      for _, sprite in ipairs(node.sprites) do
+        if sprite.element.valid then sprite.element.sprite = dim and S.bar(palette.DIM) or sprite.original end
+      end
+      for _, shape in ipairs(node.shapes) do
+        if shape.object.valid then
+          shape.object.color = dim and Canvas.col(palette.DIM, shape.alpha * 0.16)
+            or Canvas.col(shape.color, shape.alpha)
+        end
+      end
+      if node.icon and node.icon.valid then node.icon.style.draw_grayscale_picture = dim or node.grayscale end
+      for _, label in ipairs(node.labels) do
+        if label.element.valid then label.element.style.font_color = dim and {0.4, 0.4, 0.4} or label.original end
+      end
+    end
+  end
 end
 
 local function draw(canvas, L, us, st, player, W, H)
   st.ribbons = {}
+  st.node_visuals = {}
+  st.dim_nodes = us.view ~= "focus"
   st.quiet = true
   st.selected = us.view == "focus" and us.focus or us.sel
   if us.neighborhood then st.selected=us.pinned end
@@ -709,6 +733,8 @@ local function draw(canvas, L, us, st, player, W, H)
   -- 3. stubs + node bars (sprites); buttons and labels deferred
   for _, col in ipairs(L.cols) do
     for _, n in ipairs(col) do
+      local visual = { sprites = {}, shapes = {}, labels = {}, dimmed = false }
+      st.node_visuals[n.key] = visual
       local function stub(x, y, h, tip)
         if POLY then
           -- fades out away from the node: three steps of decreasing alpha
@@ -717,11 +743,12 @@ local function draw(canvas, L, us, st, player, W, H)
           for i = 0, 2 do
             local a = 0.25 - 0.08 * i
             local xx = right and (x + i * w3) or (x + View.STUB - (i + 1) * w3)
-            POLY.rect(xx, y, w3, h, Canvas.col(palette.GREY, a))
+            local object = POLY.rect(xx, y, w3, h, Canvas.col(palette.GREY, a))
+            if object then visual.shapes[#visual.shapes + 1] = { object=object, color=palette.GREY, alpha=a } end
           end
-          return
         end
-        local e = add_sprite(canvas, S.bar(palette.GREY), tip)
+        local e = add_sprite(canvas, POLY and "ssk-node-hit" or S.bar(palette.GREY), tip)
+        if not POLY then visual.sprites[#visual.sprites + 1] = { element=e, original=e.sprite } end
         place(e, x, y, View.STUB, h)
       end
       local lab_use = n.lab_use or 0
@@ -733,10 +760,6 @@ local function draw(canvas, L, us, st, player, W, H)
         if lab_tip and other_use > 1e-4 then use_tip = Loc("sankey-other-uses-s", use_tip, fmt(other_use)) end
         local stub_x = n.x + View.NODE_W
         stub(stub_x, n.stub_out_y, n.t_stub_out, use_tip)
-        if POLY and lab_tip then
-          local hit = add_sprite(canvas, "ssk-node-hit", use_tip)
-          place(hit, stub_x, n.stub_out_y, View.STUB, n.t_stub_out)
-        end
         count = count + 1
       end
       if n.stub_in > 0 then
@@ -791,10 +814,13 @@ local function draw(canvas, L, us, st, player, W, H)
       if lab_tip then tooltip[#tooltip + 1] = Loc.join("\n", lab_tip) end
       local bar
       if POLY then
-        POLY.rect(n.x, n.y, View.NODE_W, n.h, Canvas.col(n.color or n.ginfo.color, 1))
+        local color = n.color or n.ginfo.color
+        local object = POLY.rect(n.x, n.y, View.NODE_W, n.h, Canvas.col(color, 1))
+        if object then visual.shapes[#visual.shapes + 1] = { object=object, color=color, alpha=1 } end
         bar = add_sprite(canvas, "ssk-node-hit", tooltip)
       else
         bar = add_sprite(canvas, S.bar(n.color or n.ginfo.color), tooltip)
+        visual.sprites[#visual.sprites + 1] = { element=bar, original=bar.sprite }
       end
       place(bar, n.x, n.y, View.NODE_W, n.h)
       bar.raise_hover_events = true
@@ -802,11 +828,12 @@ local function draw(canvas, L, us, st, player, W, H)
       count = count + 1
       local iy = n.y - View.NODE_W - View.ICON_GAP
       local stem = add_sprite(canvas, S.bar(n.color or n.ginfo.color))
+      visual.sprites[#visual.sprites + 1] = { element=stem, original=stem.sprite }
       place(stem, n.x + View.NODE_W / 2 - 1, iy + View.NODE_W, 2, View.ICON_GAP)
       stem.ignored_by_interaction = true
       late[#late + 1] = { n.x, iy, View.NODE_W, View.NODE_W,
         { type = "sprite-button", sprite = sprite_for(n), tooltip = tooltip, style = "slot_button",
-          raise_hover_events = true, tags = { ssk_sk = "node", key = n.key, fx = (us.view == "focus") } }, toggled = (us.sel == n.key), fill = true }
+          raise_hover_events = true, tags = { ssk_sk = "node", key = n.key, fx = (us.view == "focus") } }, toggled = (us.sel == n.key), fill = true, node_icon=n.key }
       local show_label = us.show_labels or n.key == us.sel or n.key == us.pinned
         or n.kind == "group"
         or (us.view == "focus" and base_key(n.key) == us.focus)
@@ -814,21 +841,21 @@ local function draw(canvas, L, us, st, player, W, H)
         late[#late + 1] = { n.x, n.top or (iy - 18), math.min(260, (L.label_w and L.label_w[n.ci]) or 260), 16,
           { type = "label", caption = localised_name(n), tooltip = details,
             visible = show_label == true, tags = { ssk_label = n.key } },
-          font = "default-small-bold" }
+          font = "default-small-bold", node_label=n.key }
         if usage or (n.kind ~= "recipe" and n.kind ~= "group") then
           local rate_w = math.max(1, math.min(260, (L.label_w and L.label_w[n.ci]) or 260) - View.NODE_W - 6)
           late[#late + 1] = { n.x + View.NODE_W + 6, iy + 8, rate_w, 16,
             { type = "label", caption = rate,
               visible = show_label == true, ignored_by_interaction = true, tags = { ssk_rate = n.key } },
-            font = "default-small", color = { 0.75, 0.75, 0.75 } }
+            font = "default-small", color = { 0.75, 0.75, 0.75 }, node_label=n.key }
         end
       else
         late[#late + 1] = { n.x + View.NODE_W + 3, iy + 6, 80, 16,
           { type = "label", caption = rate, tooltip = details, visible = show_label == true,
-            tags = { ssk_label = n.key } }, font = "default-small-bold" }
+            tags = { ssk_label = n.key } }, font = "default-small-bold", node_label=n.key }
       end
       if #n.loops > 0 then
-        late[#late + 1] = { n.x - 18, iy + 4, 18, 20, { type = "label", caption = "↺", ignored_by_interaction = true }, font = "default-bold" }
+        late[#late + 1] = { n.x - 18, iy + 4, 18, 20, { type = "label", caption = "↺", ignored_by_interaction = true }, font = "default-bold", node_label=n.key }
       end
     end
   end
@@ -855,6 +882,13 @@ local function draw(canvas, L, us, st, player, W, H)
     if d.fill or d[5].type == "label" then e.style.width, e.style.height = d[3], d[4] end
     if d[5].type == "label" then e.style.single_line = d.single_line~=false end
     if d.toggled then e.toggled = true end
+    if d.node_icon then
+      local visual = st.node_visuals[d.node_icon]
+      visual.icon, visual.grayscale = e, e.style.draw_grayscale_picture == true
+    elseif d.node_label then
+      local visual = st.node_visuals[d.node_label]
+      visual.labels[#visual.labels + 1] = { element=e, original=e.style.font_color or {1, 1, 1} }
+    end
     count = count + 1
   end
   highlight(st, st.selected)
@@ -877,13 +911,13 @@ end
 
 -- c: tab content (vertical flow). full=false keeps the scroll-pane (and its scroll position).
 function SK.fill(player, c, us, W, viewH, full, only_auto)
-  local hovered=hovered_elements[player.index]
+  local hovered=storage.sk_hover and storage.sk_hover[player.index]
   if hovered and hovered.valid then
     local ancestor=hovered
     while ancestor and ancestor~=c do ancestor=ancestor.parent end
     if ancestor==c and only_auto and not full then return end
   end
-  hovered_elements[player.index]=nil
+  SK.clear_hover(player.index)
   SK.defaults(us)
   if full or not c.ssk_sp then
     c.clear()
@@ -1050,6 +1084,7 @@ function SK.on_click(e, us)
     if string.sub(k, 1, 6) == "group/" or string.sub(k, 1, 7) == "recipe/" or k == us.focus then return "none" end
     SK.select_focus(us, k)
   elseif a == "f_clear_history" then
+    us.focus, us.sel, us.pinned = nil, nil, nil
     us.focus_hist, us.focus_forward = {}, {}
   elseif a == "f_back" or a == "f_forward" or a == "f_trail" then
     if not SK.step_history(us, a == "f_back" and -1 or a == "f_forward" and 1 or tags.steps) then return "none" end
@@ -1168,6 +1203,8 @@ function SK.focus_state(us)
   end
   fx.period, fx.sidx = us.period, us.sidx
   fx.canvas_w, fx.canvas_h = us.canvas_w, us.canvas_h
+  if fx.show_labels == nil then fx.show_labels = true end
+  MaterialPicker.sanitize_state(fx)
   return fx
 end
 
@@ -1176,14 +1213,23 @@ function SK.balance_state(us)
     heights = "sqrt", lines = "curves", renderer = "poly", live = true } end
   local fx = us.bal_fx
   fx.period, fx.sidx = us.period, us.sidx
+  if fx.show_labels == nil then fx.show_labels = true end
+  MaterialPicker.sanitize_state(fx)
   return fx
+end
+
+function SK.clear_hover(index)
+  if storage.sk_hover then storage.sk_hover[index]=nil end
 end
 
 function SK.on_hover(e, entering)
   local tags = e.element.valid and e.element.tags
   if not tags or (tags.ssk_sk ~= "node" and tags.ssk_sk ~= "ribbon") then return false end
-  if entering then hovered_elements[e.player_index]=e.element
-  elseif hovered_elements[e.player_index]==e.element then hovered_elements[e.player_index]=nil end
+  -- Hover events are player/tick events. The saved element reference must also
+  -- survive a script reload, since it controls deterministic GUI rebuilds.
+  storage.sk_hover=storage.sk_hover or {}
+  if entering then storage.sk_hover[e.player_index]=e.element
+  elseif storage.sk_hover[e.player_index]==e.element then SK.clear_hover(e.player_index) end
   if tags.ssk_sk == "ribbon" then return true end
   local st = rstate(e.player_index, tags.fx and "focus" or nil)
   local key = entering and tags.key or st.selected

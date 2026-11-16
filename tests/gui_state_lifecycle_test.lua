@@ -1,0 +1,115 @@
+-- Exercise persisted hover through module reload, configuration changes, and
+-- deletion of one player without relying on module-local tables.
+return function(handlers)
+  local UI,SK,H,C=TREQ('scripts.ui'),TREQ('scripts.sankey_ui'),TREQ('scripts.history_ui'),TREQ('scripts.canvas')
+  local p,us=game.players[1],storage.ui[1]
+  local function find(e,predicate)
+    if predicate(e) then return e end
+    for _,child in ipairs(e.children) do local hit=find(child,predicate);if hit then return hit end end
+  end
+  local function reload(path)
+    local old=require;require=TREQ
+    local module=dofile(path)
+    require=old
+    return module
+  end
+  us.tab_id='focus';local fx=SK.focus_state(us);fx.focus='item/iron-plate';fx.live=true
+  UI.open(p)
+  local panel=p.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_focus.ssk_chart
+  local icon=assert(find(panel,function(e)return e.type=='sprite-button' and e.tags.ssk_sk=='node' end))
+  assert(SK.on_hover({element=icon,player_index=p.index},true))
+  assert(storage.sk_hover[p.index]==icon,'Hovered GUI reference must be persisted')
+  local order,canvas=fx.last_order,panel.ssk_sp.ssk_canvas
+  local fresh=reload('scripts/sankey_ui.lua')
+  fresh.fill(p,panel,fx,fx.canvas_w,fx.canvas_h,false,true)
+  UI.auto_refresh()
+  assert(icon.valid and fx.last_order==order and panel.ssk_sp.ssk_canvas==canvas,
+    'Reloading mid-hover changed the saved auto-refresh skip decision')
+  assert(fresh.on_hover({element=icon,player_index=p.index},false))
+  fresh.fill(p,panel,fx,fx.canvas_w,fx.canvas_h,false,true)
+  assert(not icon.valid and fx.last_order~=order,'Leaving persisted hover must permit the next refresh')
+
+  local history=p.gui.screen.add{type='frame',name='ssk_history_reload_fixture',direction='vertical'}
+  local hs={period=600,sidx=1,bal_height=700}
+  local data={start_tick=0,end_tick=6000,seconds=15,bucket_seconds=15,
+    points={{start_tick=3000,end_tick=3900,seconds=15,made=10,used=8,net=2,uses={},usage_detail={}}},
+    usage_keys={},usage_totals={},stock_supported=true,stock={{tick=3000,count=30,measured=true}}}
+  local history_data=TREQ('scripts.history')
+  local previous_build=history_data.build
+  history_data.build=function()return data end
+  H.fill(p,history,hs,'item/iron-plate',900,700,56)
+  local target=assert(find(history,function(e)return e.tags.ssk_history_bucket end))
+  H.on_hover({element=target,player_index=p.index},true)
+  local saved=storage.history_hover[p.index]
+  assert(saved.target==target and type(saved.ox)=='number' and saved.painter==nil,
+    'Saved History hover must use coordinates and LuaObjects instead of painter closures')
+  local new_history=reload('scripts/history_ui.lua')
+  new_history.on_hover({element=target,player_index=p.index},false)
+  for _,band in ipairs(saved.bands) do assert(not band.rect.visible,'Reloaded leave did not hide a saved band') end
+  new_history.on_hover({element=target,player_index=p.index},true)
+  local left=saved.bands[1].rect.left_top[1]
+  for _,band in ipairs(saved.bands) do assert(band.rect.visible and band.rect.left_top[1]==left) end
+  new_history.fill(p,history,hs,'item/iron-plate',900,700,56)
+  local refreshed=storage.history_hover[p.index]
+  assert(refreshed.target==target and target.valid,'Reloaded History refresh lost the persisted target')
+  H.on_hover({element=target,player_index=p.index},false)
+  for _,band in ipairs(refreshed.bands) do assert(not band.rect.visible,'Old/new modules disagree on current saved bands') end
+  new_history.clear_hover(p.index);history.destroy()
+  history_data.build=previous_build
+
+  UI.close(p)
+  local original_item,original_fluid=prototypes.item,prototypes.fluid
+  local function without_removed(original)
+    return setmetatable({},{__index=function(_,key)
+      if key:find('^removed%-') then return nil end
+      return original[key]
+    end})
+  end
+  prototypes.item,prototypes.fluid=without_removed(original_item),without_removed(original_fluid)
+  local previous={sel=us.sel,fx=us.fx,bal_fx=us.bal_fx}
+  us.sel='item/removed-material#use'
+  us.fx={focus='fluid/removed-fluid',focus_hist={'item/iron-plate','fluid/removed-fluid'}}
+  us.bal_fx={focus='item/removed-material',focus_forward={'item/iron-plate'}}
+  storage.ui[98]={sel='recipe/removed-recipe',fx={focus='item/removed-material'}}
+  handlers.cc()
+  assert(us.sel==nil and us.fx.focus==nil and us.bal_fx.focus==nil and #us.fx.focus_hist==1,
+    'Configuration change must sanitize saved states even when the window is closed')
+  assert(storage.ui[98].sel==nil and storage.ui[98].fx.focus==nil,
+    'Configuration change must sanitize disconnected players too')
+  us.sel='recipe/iron-plate';storage.ui[98].sel='group/user-2'
+  UI.sanitize_saved_states()
+  assert(us.sel=='recipe/iron-plate' and storage.ui[98].sel=='group/user-2',
+    'Valid recipe and internal group identities must survive sanitation')
+  us.sel='group/user-1';UI.sanitize_saved_states();assert(us.sel=='group/user-1')
+  storage.ui[98]=nil;us.sel,us.fx,us.bal_fx=previous.sel,previous.fx,previous.bal_fx
+  prototypes.item,prototypes.fluid=original_item,original_fluid
+
+  local pi=99
+  C.begin(p,200,100);local survivor=storage.canvas[p.index].objs[1]
+  C.begin({index=pi,force=p.force},200,100);local removed=storage.canvas[pi].objs[1]
+  storage.ui[pi]={bal_watches={}};storage.pgroups=storage.pgroups or {};storage.pgroups[pi]={custom={}}
+  storage.material_picker=storage.material_picker or {};storage.material_picker[pi]={names={}}
+  storage.sk_hover=storage.sk_hover or {};storage.sk_hover[pi]={valid=false}
+  storage.history_hover=storage.history_hover or {};storage.history_hover[pi]={bands={{rect=removed}}}
+  storage.sk_render=storage.sk_render or {};storage.sk_render[pi]={};storage.sk_render[pi..':focus']={}
+  local other_ui,other_render,other_groups=storage.ui[p.index],storage.sk_render[p.index],storage.pgroups[p.index]
+  handlers.on_player_removed{player_index=pi}
+  handlers.on_player_removed{player_index=pi}
+  for _,name in ipairs({'ui','pgroups','canvas','sk_hover','history_hover','material_picker'}) do
+    assert(storage[name][pi]==nil,'Player deletion retained '..name)
+  end
+  assert(storage.sk_render[pi]==nil and storage.sk_render[pi..':focus']==nil and not removed.valid)
+  assert(survivor.valid and storage.ui[p.index]==other_ui and storage.sk_render[p.index]==other_render
+    and storage.pgroups[p.index]==other_groups,'Player deletion changed another player')
+  local sampler,transfers=TREQ('scripts.sampler'),TREQ('scripts.transfers')
+  local old_sampler,old_transfers=sampler.on_surface_deleted,transfers.on_surface_deleted
+  local calls={};local deleted={surface_index=77}
+  sampler.on_surface_deleted=function(index) assert(index==77);calls[#calls+1]='sampler' end
+  transfers.on_surface_deleted=function(event) assert(event==deleted);calls[#calls+1]='transfers' end
+  handlers.on_pre_surface_deleted(deleted)
+  sampler.on_surface_deleted,transfers.on_surface_deleted=old_sampler,old_transfers
+  assert(calls[1]=='sampler' and calls[2]=='transfers' and #calls==2,
+    'Surface deletion must dispatch the numeric index before the cargo event')
+  UI.open(p)
+  print('GUI STATE LIFECYCLE OK: saved hover across reload, configuration sanitation, and isolated repeated player cleanup')
+end

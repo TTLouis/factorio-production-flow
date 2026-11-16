@@ -12,11 +12,25 @@ local C = {}
 C.SURFACE = "ssk-canvas"
 local PX = 1 / 32
 local REGION = 512 -- tiles between player regions (one region = 16k px wide)
+-- The engine returns this limit when unlimited (zero) dimensions are assigned.
+local MAP_LIMIT = 2000000
 
 local function surface()
   local s = game.get_surface(C.SURFACE)
-  if s then return s end
+  if s then
+    -- Older canvases inherited finite dimensions from the save. Player regions
+    -- start at x=512, so those bounds can prevent their chunks from generating.
+    local settings = s.map_gen_settings
+    if (settings.width > 0 and settings.width < MAP_LIMIT) or
+        (settings.height > 0 and settings.height < MAP_LIMIT) then
+      settings.width, settings.height = 0, 0
+      s.map_gen_settings = settings
+      storage.canvas_chunks = nil
+    end
+    return s
+  end
   s = game.create_surface(C.SURFACE, {
+    width = 0, height = 0,
     default_enable_all_autoplace_controls = false,
     autoplace_settings = {
       tile = { treat_missing_as_default = false, settings = {} },
@@ -44,7 +58,9 @@ local function prepare_area(player, s, x0, y0, x1, y1)
   for cx = cx0, cx1 do
     for cy = cy0, cy1 do
       local k = cx .. "," .. cy
-      if not done[k] then
+      -- Other mods can remove backing chunks or recreate this surface. A saved
+      -- coordinate cache does not prove that the current chunk still exists.
+      if not done[k] or not s.is_chunk_generated({ cx, cy }) then
         new[#new + 1] = { cx, cy }
         s.request_to_generate_chunks({ cx * 32 + 16, cy * 32 + 16 }, 0)
       end
@@ -61,7 +77,10 @@ local function prepare_area(player, s, x0, y0, x1, y1)
       done[c[1] .. "," .. c[2]] = true
     end
   end
-  pcall(function() player.force.chart(s, { { x0, y0 }, { x1, y1 } }) end)
+  -- Match the complete generated chunks, including the camera's edge chunks.
+  -- A partial-area chart request can leave saved-map cameras behind fog even
+  -- though their player-filtered rendering objects already exist.
+  pcall(function() player.force.chart(s, { { cx0 * 32, cy0 * 32 }, { (cx1 + 1) * 32, (cy1 + 1) * 32 } }) end)
 end
 C.surface = surface
 

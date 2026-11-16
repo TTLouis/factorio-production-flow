@@ -70,7 +70,7 @@ rendering = {
   draw_rectangle = function(a) return obj({ k = "rect", a = a.left_top, b = a.right_bottom, c = a.color }) end,
   draw_polygon = function(a) return obj({ k = "poly", v = a.vertices, c = a.color }) end,
 }
-local surf = { index = 99, name = "ssk-canvas", request_to_generate_chunks = function() end, force_generate_chunk_requests = function() end, set_tiles = function() end }
+local surf = { index = 99, name = "ssk-canvas", map_gen_settings = {width=0,height=0}, is_chunk_generated = function() return true end, request_to_generate_chunks = function() end, force_generate_chunk_requests = function() end, set_tiles = function() end }
 player.force = { chart = function() end }
 game.get_surface = function(n) return game._s end
 game.create_surface = function() game._s = surf; return surf end

@@ -65,8 +65,9 @@ end
 function UI.ensure_button(player)
   local flow = mod_gui.get_button_flow(player)
   if flow.ssk_toggle then flow.ssk_toggle.destroy() end
-  flow.add { type = "sprite-button", name = "ssk_toggle", sprite = "ssk-icon",
-             style = mod_gui.button_style, tooltip = Loc("ui-production-flow") }
+  local supported=player.force==game.forces.player
+  flow.add { type = "sprite-button", name = "ssk_toggle", sprite = "ssk-icon",enabled=supported,
+             style = mod_gui.button_style, tooltip = supported and Loc("ui-production-flow") or Loc("ui-player-force-only") }
 end
 
 ---------------------------------------------------------------------------
@@ -261,6 +262,7 @@ function UI.close(player)
   MaterialPicker.close(player)
   Help.close(player)
   HistoryUI.clear_hover(player.index)
+  SK.clear_hover(player.index)
   local f = player.gui.screen[WIN]
   if f then
     Canvas.clear(player.index)
@@ -268,8 +270,31 @@ function UI.close(player)
   end
 end
 
+function UI.sanitize_saved_states()
+  for _,us in pairs(storage.ui or {}) do
+    MaterialPicker.sanitize_state(us)
+    for _,field in ipairs({"fx","bal_fx"}) do
+      if type(us[field])=="table" then MaterialPicker.sanitize_state(us[field]) end
+    end
+  end
+end
+
+function UI.on_player_removed(index)
+  HistoryUI.clear_hover(index)
+  SK.clear_hover(index)
+  if storage.canvas and storage.canvas[index] then Canvas.clear(index) end
+  for _,field in ipairs({"ui","pgroups","canvas","material_picker"}) do
+    if storage[field] then storage[field][index]=nil end
+  end
+  if storage.sk_render then
+    storage.sk_render[index]=nil
+    storage.sk_render[Loc.join(index,":focus")]=nil
+  end
+end
+
 function UI.open(player)
   UI.close(player)
+  if player.force~=game.forces.player then player.print(Loc("ui-player-force-only"));return end
   local us = ustate(player.index)
   close_chart_settings(us)
   local res, sc = player.display_resolution, player.display_scale
@@ -461,7 +486,12 @@ function UI.on_selection(e)
       if target == us.tab_id and (target == "focus" or target == "balance") then
         local chart = chart_state(us)
         local previous = chart.focus
-        SK.select_focus(chart, key)
+        if target == "focus" then
+          chart.focus, chart.sel, chart.pinned = key, nil, nil
+          chart.focus_hist, chart.focus_forward = {}, {}
+        else
+          SK.select_focus(chart, key)
+        end
         refresh_material(player, chart, previous, false)
       end
     end
@@ -642,6 +672,12 @@ function UI.on_surface_changed(player)
   if not UI.is_open(player) then return end
   local us = ustate(player.index)
   if us.sidx ~= sidx_for(player, us) then UI.refresh(player, false, true) end
+end
+
+function UI.on_force_changed(player)
+  UI.ensure_button(player)
+  if player.force~=game.forces.player then UI.close(player)
+  elseif UI.is_open(player) then UI.open(player) end
 end
 
 return UI

@@ -33,6 +33,7 @@ end })
 us.tab_id = "focus"
 local fresh_focus = SK.focus_state(us)
 fresh_focus.focus = nil
+fresh_focus.focus_hist, fresh_focus.focus_forward = {}, {}
 UI.open(player)
 local search_slot = find(player.gui.screen.ssk_main, function(e) return e.tags.ssk_picker == "open" end)
 assert(search_slot.sprite == "utility/search" and search_slot.tags.current == "")
@@ -44,6 +45,42 @@ assert(UI.on_text_changed { element = query, player_index = 1 })
 local wood = find(fresh_dialog, function(e) return e.tags.ssk_picker == "pick" and e.tags.key == "item/wood" end)
 assert(UI.on_click { element = wood, player_index = 1 })
 assert(fresh_focus.focus == "item/wood" and not fresh_dialog.valid)
+assert(#fresh_focus.focus_hist == 0 and #fresh_focus.focus_forward == 0,
+  "choosing the first Focus root must start without a navigation trail")
+local first_main = player.gui.screen.ssk_main
+local first_clear = action(first_main, "f_clear_history")
+assert(first_clear.enabled, "a first selected root must be clearable before any navigation")
+fresh_focus.sel, fresh_focus.pinned = "item/wood", "item/wood"
+local bins, preferences = storage.bins, {}
+for _, field in ipairs({ "focus_steps", "renderer", "heights", "lines", "zoom", "live", "show_labels", "hidden", "collapsed", "pos" }) do
+  preferences[field] = fresh_focus[field]
+end
+UI.on_click { element = first_clear, player_index = 1 }
+assert(not fresh_focus.focus and not fresh_focus.sel and not fresh_focus.pinned and storage.bins == bins,
+  "Clear must remove the first root and its highlights without resetting production data")
+for field, value in pairs(preferences) do assert(fresh_focus[field] == value, "Clear reset chart preference " .. field) end
+assert(not action(first_main, "f_clear_history").enabled and not action(first_main, "f_history").enabled)
+assert(find(first_main, function(e) return e.type == "label" and LOC(e.caption):find("Pick an item or fluid above", 1, true) end),
+  "Clear must show the empty Focus selection prompt")
+UI.refresh(player, true)
+UI.open(player)
+search_slot = find(player.gui.screen.ssk_main, function(e) return e.tags.ssk_picker == "open" end)
+assert(not fresh_focus.focus and search_slot.sprite == "utility/search" and search_slot.tags.current == "",
+  "refresh/reopen resurrected a cleared root or selected slot")
+-- Picking the current root also starts fresh, even after Back created a forward path.
+SK.select_focus(fresh_focus, "item/wood")
+SK.select_focus(fresh_focus, "fluid/water")
+SK.select_focus(fresh_focus, "item/wood")
+SK.step_history(fresh_focus, -1)
+assert(#fresh_focus.focus_hist == 1 and #fresh_focus.focus_forward == 1,
+  "same-root picker fixture must begin with both navigation directions populated")
+fresh_focus.sel, fresh_focus.pinned = "fluid/water", "fluid/water"
+UI.refresh(player, false, false, true)
+UI.on_click { element = find(player.gui.screen.ssk_main, function(e) return e.tags.ssk_picker == "open" end), player_index = 1 }
+fresh_dialog = player.gui.screen.ssk_material_picker
+UI.on_click { element = assert(find(fresh_dialog, function(e) return e.tags.ssk_picker == "pick" and e.tags.key == "fluid/water" end)), player_index = 1 }
+assert(fresh_focus.focus == "fluid/water" and #fresh_focus.focus_hist == 0 and #fresh_focus.focus_forward == 0
+  and not fresh_focus.sel and not fresh_focus.pinned, "choosing the same Focus root must clear navigation and highlights")
 setmetatable(prototypes, nil)
 
 for _, tab in ipairs({ "balance", "focus" }) do
@@ -143,7 +180,12 @@ for _, tab in ipairs({ "balance", "focus" }) do
     assert(chosen.type == "sprite-button" and not find(dialog, function(e) return e.type == "list-box" end), "materials must use an icon grid")
     assert(UI.on_click { element = chosen, player_index = 1 })
     assert(fx.focus == "fluid/water" and fx.live == false and not dialog.valid, "typed selection or paused chart failed")
+    assert(#fx.focus_hist == 0 and #fx.focus_forward == 0, "a direct Focus picker choice must start a fresh root")
     assert(player.gui.screen.ssk_main == main, "picker selection reopened window")
+    -- Chart navigation still builds a trail from the newly selected root.
+    fx.focus = "item/iron-plate"
+    SK.select_focus(fx, "fluid/water")
+    UI.refresh(player, false, false, true)
     local history = action(main, "f_history")
     history.selected_index = 2
     UI.on_selection { element = history, player_index = 1 }
@@ -152,12 +194,16 @@ for _, tab in ipairs({ "balance", "focus" }) do
     assert(fx.focus == "fluid/water", "Forward lost the viewed fluid")
     UI.on_click { element = action(main, "f_trail"), player_index = 1 }
     assert(fx.focus == "item/iron-plate" and #fx.focus_forward == 1, "trail must retain the forward path")
-    local bins, focus = storage.bins, fx.focus
+    local bins, zoom, live, hidden, pos = storage.bins, fx.zoom, fx.live, fx.hidden, fx.pos
+    fx.sel, fx.pinned = fx.focus, fx.focus
     UI.on_click { element = action(main, "f_clear_history"), player_index = 1 }
-    assert(#fx.focus_hist == 0 and #fx.focus_forward == 0 and fx.focus == focus and storage.bins == bins, "clear history changed current material/production data")
+    assert(#fx.focus_hist == 0 and #fx.focus_forward == 0 and not fx.focus and not fx.sel and not fx.pinned
+      and storage.bins == bins and fx.zoom == zoom and fx.live == live and fx.hidden == hidden and fx.pos == pos,
+      "Clear must remove root/navigation/highlights while preserving production data and chart preferences")
     assert(not action(main, "f_clear_history").enabled, "empty history clear must be disabled")
     assert(not action(main, "f_history").enabled and not action(main, "f_back").enabled
       and not action(main, "f_forward").enabled, "cleared history still navigates")
+    SK.select_focus(fx, "item/iron-plate")
     local focus = fx.focus
     SK.select_focus(fx, "fluid/water"); SK.select_focus(fx, "item/wood")
     assert(SK.step_history(fx, -2) and fx.focus == focus and #fx.focus_forward == 2, "multi-step trail failed")
@@ -214,8 +260,42 @@ assert(player.gui.screen.ssk_material_picker.ssk_material_inner.ssk_slot_frame.s
   "a tall screen gives the grid up to twelve rows")
 MaterialPickerTest.close(player)
 for _, name in ipairs(extra) do rawset(prototypes.item, name, nil) end
+
+-- Removing a mod can leave saved selections and visits with no prototype.
+-- Native sprite controls cannot use those stale item/fluid paths.
+local item_lookup, fluid_lookup = getmetatable(prototypes.item), getmetatable(prototypes.fluid)
+setmetatable(prototypes.item, nil)
+setmetatable(prototypes.fluid, nil)
+local stale = {
+  focus = "item/removed-by-configuration-change",
+  focus_hist = { "item/wood", "item/removed-by-configuration-change", "recipe/iron-plate", "fluid/water" },
+  focus_forward = { "fluid/removed-fluid", "fluid/water", "invalid-key" },
+}
+MaterialPickerTest.sanitize_state(stale)
+assert(stale.focus == nil and #stale.focus_hist == 2 and stale.focus_hist[1] == "item/wood"
+  and stale.focus_hist[2] == "fluid/water" and #stale.focus_forward == 1
+  and stale.focus_forward[1] == "fluid/water", "removed material keys must be pruned without losing valid visits")
+stale.focus = "item/wood"
+MaterialPickerTest.sanitize_state(stale)
+assert(stale.focus == "item/wood", "a valid material without recorded production must remain selectable")
+local stale_controls = player.gui.screen.add { type = "flow", name = "ssk_stale_material_test" }
+local stale_button = MaterialPickerTest.button(stale_controls, "item/removed-by-configuration-change", "focus")
+assert(stale_button.sprite == "utility/search" and stale_button.tags.current == "",
+  "obsolete selections must render the search control instead of an invalid sprite path")
+stale_controls.destroy()
+local saved_state = {
+  fx = { focus = "item/removed-by-configuration-change", focus_hist = { "item/wood", "fluid/removed-fluid" } },
+  bal_fx = { focus = "fluid/removed-fluid", focus_forward = { "fluid/water", "item/removed-by-configuration-change" } },
+}
+assert(SK.focus_state(saved_state).focus == nil and #saved_state.fx.focus_hist == 1,
+  "Focus must sanitize saved materials before building its chart and toolbar")
+assert(SK.balance_state(saved_state).focus == nil and #saved_state.bal_fx.focus_forward == 1,
+  "Balance must sanitize saved materials before choosing its initial selection")
+setmetatable(prototypes.item, item_lookup)
+setmetatable(prototypes.fluid, fluid_lookup)
+
 for kind, names in pairs(originals) do
   for _, name in ipairs(fixture_names) do rawset(prototypes[kind], name, names[name]) end
 end
 player.locale, player.request_translations = original_locale, original_translate
-print("MATERIAL PICKER OK: combined catalog, hidden filtering, translated search, live stability, history and clear")
+print("MATERIAL PICKER OK: combined catalog, translated search, Balance continuity, fresh Focus roots, same-root reset, navigation and empty-root Clear")

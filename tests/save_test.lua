@@ -850,6 +850,7 @@ function T.tick(UI, Sampler)
         or case.name=="full-nauvis-proportional" or case.name=="full-nauvis-sprites" then
       local root=player.gui.screen.ssk_main.ssk_inner.ssk_tabs["content_"..case.tab]
       local ribbon=assert(find_action(root,"ribbon"),"Rendered Sankey has no ribbon hover target")
+      assert(ribbon.raise_hover_events,"Ribbon must opt into native hover/leave events before handler tests")
       local tip=LOC(ribbon.tooltip)
       assert(not ribbon.ignored_by_interaction and tip:find("Flow by recipe",1,true) and tip:find("Total flow",1,true),
         "Sankey ribbon is missing its item and rate breakdown")
@@ -1132,6 +1133,14 @@ function T.tick(UI, Sampler)
         end
         UI.on_click{player_index=player.index,element=assert(material_button(dialog),"Material absent from icon grid")}
         assert(fx.focus==c.pick and not dialog.valid,"Native material choice failed")
+        assert(#fx.focus_hist==0 and #fx.focus_forward==0 and not fx.sel and not fx.pinned,
+          "Direct Focus picker choice must start a fresh root without navigation or highlights")
+        assert(find_action(root,"f_clear_history").enabled,"A first root without history must still be clearable")
+        -- Build chart navigation independently of direct picker selection.
+        fx.focus=c.focus
+        SK.select_focus(fx,"item/copper-plate")
+        SK.select_focus(fx,c.pick)
+        UI.refresh(player,false,false,true)
         local previous=fx.focus_hist[#fx.focus_hist]
         UI.on_click{player_index=player.index,element=find_action(root,"f_back")}
         assert(fx.focus==previous and #fx.focus_forward==1,"Back lost forward material")
@@ -1141,10 +1150,15 @@ function T.tick(UI, Sampler)
         assert(fx.focus==c.focus and #fx.focus_forward==2,"Trail did not restore parent path")
         UI.on_click{player_index=player.index,element=find_action(root,"f_forward")}
         if c.clear then
-          local bins,focus=storage.bins,fx.focus
+          local bins,zoom,live=storage.bins,fx.zoom,fx.live
+          fx.sel,fx.pinned=fx.focus,fx.focus
           UI.on_click{player_index=player.index,element=find_action(root,"f_clear_history")}
-          assert(fx.focus==focus and #fx.focus_hist==0 and #fx.focus_forward==0 and storage.bins==bins,"Clear history changed material or production data")
+          assert(not fx.focus and not fx.sel and not fx.pinned and #fx.focus_hist==0 and #fx.focus_forward==0
+            and storage.bins==bins and fx.zoom==zoom and fx.live==live,"Clear did not reset root/navigation while preserving data and preferences")
           assert(not find_action(root,"f_back").enabled and not find_action(root,"f_forward").enabled,"Cleared history still navigates")
+          local slot=find_named(root,"ssk_material_slot")
+          assert(slot.sprite=="utility/search" and slot.tags.current=="" and not find_action(root,"f_clear_history").enabled,
+            "Cleared Focus must show an empty search slot")
         end
       else
         assert(#grid.tags.keys>0,"Native search returned no materials")

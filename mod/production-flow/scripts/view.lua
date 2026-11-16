@@ -148,6 +148,22 @@ local function build_graph(pi, m, us)
       local inr, outr = {}, {}
       for _, e in ipairs(x.ins) do inr[e.from] = (inr[e.from] or 0) + e.rate end
       for _, e in ipairs(x.outs) do outr[e.to] = (outr[e.to] or 0) + e.rate end
+      local ignored_in, ignored_out = {}, {}
+      local name = string.sub(r, 8)
+      local recipe = Graph.get().recipes[name]
+      local rate = m.rates and m.rates.recipes[name]
+      if recipe and rate then
+        local normal = rate.normal_cps or 0
+        local bonus = math.max(0, (rate.cps or normal) - normal)
+        for _, ingredient in ipairs(recipe.ingredients) do
+          ignored_in[ingredient.key] = (ignored_in[ingredient.key] or 0) + (ingredient.ignored_by_stats or 0) * normal
+        end
+        for _, product in ipairs(recipe.products) do
+          ignored_out[product.key] = (ignored_out[product.key] or 0) + (product.ignored_by_stats or 0) * normal
+            + (product.ignored_stats_productivity or 0) * bonus
+        end
+      end
+      x.catalyst_ignored_in, x.catalyst_ignored_out = ignored_in, ignored_out
       local ni, no = {}, {}
       for _, e in ipairs(x.ins) do
         local both = outr[e.from]
@@ -184,6 +200,10 @@ local function build_graph(pi, m, us)
       for k, amt in pairs(x.catalyst) do
         local nn = node(k)
         nn.catalyst = (nn.catalyst or 0) + amt
+        -- Statistics may already exclude some circulating material. Remove
+        -- only the catalyst that is still present in each measured side.
+        nn.catalyst_in = (nn.catalyst_in or 0) + math.max(0, amt - (x.catalyst_ignored_out[k] or 0))
+        nn.catalyst_out = (nn.catalyst_out or 0) + math.max(0, amt - (x.catalyst_ignored_in[k] or 0))
       end
     end
     if x.reversing then
@@ -675,8 +695,8 @@ function V.build(player, us, W, viewH)
   local lab_inputs = Graph.lab_inputs()
   for _, n in pairs(nodes) do
     local f = factor_of(n)
-    local cat = n.catalyst or 0
-    n.stub_out = (n.kind == "item" or n.kind == "fluid") and math.max(0, n.cons - n.sout - (n.loop_out or 0) - cat) or 0
+    local cat_in, cat_out = n.catalyst_in or n.catalyst or 0, n.catalyst_out or n.catalyst or 0
+    n.stub_out = (n.kind == "item" or n.kind == "fluid") and math.max(0, n.cons - n.sout - (n.loop_out or 0) - cat_out) or 0
     -- production that reaches this node through a drawn link; the rest is "other sources"
     local shown = 0
     local looped = {}
@@ -687,7 +707,7 @@ function V.build(player, us, W, viewH)
         if links[f .. ">" .. n.key] or looped[f] then shown = shown + c.rate; break end
       end
     end
-    n.stub_in = (n.kind == "item" or n.kind == "fluid") and math.max(0, n.prod - shown - cat) or 0
+    n.stub_in = (n.kind == "item" or n.kind == "fluid") and math.max(0, n.prod - shown - cat_in) or 0
     if n.stub_out < EPS then n.stub_out = 0 end
     local key = n.group_key or n.key
     local measured = lab_inputs[key] and m.residuals[key]
@@ -794,6 +814,20 @@ function V.build(player, us, W, viewH)
     end
   end
 
+  -- Raw inputs can move beside a later-tier consumer, leaving their former
+  -- column empty. Compact all aligned column indexes before either layout.
+  if not focused and us.split_raw ~= false then
+    local occupied, remap, compact_tiers = {}, {}, {}
+    for _, n in pairs(nodes) do occupied[n.ci] = true end
+    for ci, tier in ipairs(col_tiers) do
+      if occupied[ci] then
+        compact_tiers[#compact_tiers + 1] = tier
+        remap[ci] = #compact_tiers
+      end
+    end
+    col_tiers = compact_tiers
+    for _, n in pairs(nodes) do n.ci = remap[n.ci] end
+  end
   local cols = {}
   for i = 1, #col_tiers do cols[i] = {} end
   for _, k in ipairs(sorted_keys(nodes)) do

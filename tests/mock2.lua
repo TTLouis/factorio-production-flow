@@ -6,6 +6,10 @@ local Elem = {}
 local RESERVED = {}
 for w in ("name caption value style visible text state tabs children children_names parent type index gui player_index tooltip sprite tags location direction elem_value items selected_index enabled selected_tab_index badge_text drag_target auto_center number position surface zoom column_count resize_to_sprite clicked_sprite hovered_sprite elem_type horizontal_scroll_policy vertical_scroll_policy entity anchor"):gmatch("%S+") do RESERVED[w] = true end
 LABELS = 0
+local function invalidate_tree(element)
+  for _, child in ipairs(element.children) do invalidate_tree(child) end
+  element.valid = false
+end
 local function new_elem(spec, parent)
   local e = { children = {}, style = {}, valid = true, tags = spec.tags or {}, name = spec.name, type = spec.type,
               parent = parent, spec = spec, state = spec.state, selected_tab_index = 1 }
@@ -13,11 +17,14 @@ local function new_elem(spec, parent)
   setmetatable(e, Elem)
   e.add = function(sp) assert(sp.type, "no type")
     if sp.name then assert(not RESERVED[sp.name], "reserved GUI name: " .. sp.name) end
-    if sp.type == "label" then LABELS = LABELS + 1 end local c = new_elem(sp, e); table.insert(e.children, c); return c end
-  e.clear = function() for _, c in ipairs(e.children) do c.valid = false end; e.children = {} end
+    if sp.type == "label" then LABELS = LABELS + 1 end local c = new_elem(sp, e); table.insert(e.children, sp.index or #e.children+1, c); return c end
+  e.clear = function() Elem.clear(e) end
   e.scroll_to_element = function(target) assert(target.valid); e.last_scroll_target=target end
-  e.destroy = function() e.valid = false
-    if e.parent then for i, c in ipairs(e.parent.children) do if c == e then table.remove(e.parent.children, i) break end end end end
+  e.scroll_to_top = function() e.last_scroll_target="top" end
+  e.get_index_in_parent = function()
+    if e.parent then for i,c in ipairs(e.parent.children) do if c==e then return i end end end
+  end
+  e.destroy = function() Elem.destroy(e) end
   e.add_tab = function() end
   return e
 end
@@ -25,12 +32,13 @@ Elem.__index = function(t, k)
   for _, c in ipairs(rawget(t, "children")) do if c.name == k and c.valid then return c end end
   return nil
 end
-function Elem.add(self, spec) assert(spec.type, "no type"); local c = new_elem(spec, self); table.insert(self.children, c); return c end
-function Elem.clear(self) for _, c in ipairs(self.children) do c.valid = false end; self.children = {} end
-function Elem.destroy(self) self.valid = false
+function Elem.add(self, spec) assert(spec.type, "no type"); local c = new_elem(spec, self); table.insert(self.children, spec.index or #self.children+1, c); return c end
+function Elem.clear(self) for _, c in ipairs(self.children) do invalidate_tree(c) end; self.children = {} end
+function Elem.destroy(self) invalidate_tree(self)
   if self.parent then for i, c in ipairs(self.parent.children) do if c == self then table.remove(self.parent.children, i) break end end end end
 function Elem.add_tab(self, t, c) end
 local function root() return new_elem({ type = "root" }) end
+dofile(TESTDIR .. "/gui_mock_lifecycle_test.lua")(root)
 
 -- ---------- mock prototypes ----------
 local function R(name, ings, prods, cat, sub, energy)
@@ -112,6 +120,8 @@ local player = { index = 1, mod_settings = { ["ssk-min-ribbon-px"] = { value = 6
 FORCE = { logistic_networks = { nauvis = { { get_contents = function() return { { name = "iron-plate", count = math.max(0, 5000 - game.tick / 10), quality = "normal" }, { name = "electronic-circuit", count = 200 + game.tick / 50, quality = "normal" } } end } } }, get_item_production_statistics = function() return fstats end,
                 get_fluid_production_statistics = function() return FSTATS end,
                 recipes = setmetatable({}, { __index = function() return { productivity_bonus = 0 } end }) }
+player.force=FORCE
+for _,machine in ipairs(machines) do machine.force=FORCE end
 game = { tick = 0, surfaces = setmetatable({ nauvis }, { __index = function(t, k) if k == "nauvis" then return rawget(t, 1) end end }), players = { player }, connected_players = { player },
          forces = { player = FORCE }, get_player = function() return player end,
          create_random_generator = function(seed) local s = seed
@@ -246,6 +256,8 @@ dofile(TESTDIR .. "/bal_test.lua")
 dofile(TESTDIR .. "/groups_test.lua")
 dofile(TESTDIR .. "/fx_test.lua")
 dofile(TESTDIR .. "/drawing_test.lua")
+dofile(TESTDIR .. "/gui_hit_test.lua")
+dofile(TESTDIR .. "/tooltip_position_test.lua")
 dofile(TESTDIR .. "/hover_labels_test.lua")
 dofile(TESTDIR .. "/split_test.lua")
 dofile(TESTDIR .. "/history_test.lua")
@@ -263,5 +275,7 @@ dofile(TESTDIR .. "/material_picker_test.lua")
 dofile(TESTDIR .. "/watch_test.lua")
 dofile(TESTDIR .. "/tab_visibility_test.lua")(handlers)
 dofile(TESTDIR .. "/transfers_ui_test.lua")
+dofile(TESTDIR .. "/gui_state_lifecycle_test.lua")(handlers)
+dofile(TESTDIR .. "/force_scope_test.lua")(handlers)
 dofile(TESTDIR .. "/localization_test.lua")
 print("ALL OK")

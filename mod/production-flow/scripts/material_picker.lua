@@ -27,7 +27,38 @@ local function label(key)
     proto and proto.localised_name or name:gsub("%-", " ") }
 end
 
+local function valid_material(key)
+  if type(key) ~= "string" then return false end
+  local kind, name = key:match("^(%a+)/(.+)$")
+  return (kind == "item" or kind == "fluid") and prototypes[kind][name] ~= nil
+end
+
+-- A mod configuration change can remove a material that was selected or saved
+-- in the visit trail. Keep those obsolete keys out of native sprite controls.
+function P.sanitize_state(s)
+  if not valid_material(s.focus) then s.focus = nil end
+  if s.sel~=nil and type(s.sel)~="string" then s.sel=nil end
+  if type(s.sel)=="string" then
+    local base=s.sel:gsub("#.*$","")
+    local kind,name=base:match("^(%a+)/(.+)$")
+    -- Group keys are view identities, rather than prototype names.
+    if (kind=="item" or kind=="fluid" or kind=="recipe")
+      and not (prototypes[kind] and prototypes[kind][name]) then s.sel=nil end
+  end
+  for _, field in ipairs({ "focus_hist", "focus_forward" }) do
+    local list = s[field]
+    if type(list) == "table" then
+      local kept = {}
+      for _, key in ipairs(list) do
+        if valid_material(key) then kept[#kept + 1] = key end
+      end
+      s[field] = kept
+    end
+  end
+end
+
 local function update_button(button, key, target)
+  if not valid_material(key) then key = nil end
   button.sprite = key or "utility/search"
   button.tags = { ssk_picker = "open", target = target, current = key or "" }
   button.tooltip = key and { "", label(key), Loc("material-picker-choose-an-item-or-fluid") } or Loc("material-picker-choose-an-item-or-fluid-2")

@@ -199,6 +199,12 @@ right sound.
     and bottom divider. Do not add an upper category-heading band. Header and row
     cells share the same widths; reserve an 8 px gutter before the scrollbar.
 
+19. Absolute chart overlays need tight wrapper bounds. Cancel height and vertical
+    position separately with an ignored zero-size reset: GUI lengths round
+    individually at fractional scales. Ignoring a parent also disables its child
+    targets, so keep interactive icon/bar parents active and preserve native hover
+    flags on transparent ribbon hits.
+
 ## Known exceptions to fix
 
 These predate the rules and are developer tools only. Fix them when that code is next touched, one area at a

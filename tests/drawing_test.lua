@@ -88,6 +88,7 @@ local function headers(us, width)
     local target = wrapper.type == "flow" and wrapper.children[1] or wrapper
     if target and target.tags.ssk_sk == "ribbon" then
       assert(not target.ignored_by_interaction and type(target.tooltip) == "table", "ribbon needs a native tooltip")
+      assert(target.raise_hover_events, "ribbon must receive native hover/leave events before handler tests")
       hits[target.tags.from .. ">" .. target.tags.to] = true
       first_hit = first_hit or target
     end
@@ -95,7 +96,9 @@ local function headers(us, width)
     if icon and icon.type == "sprite-button" and icon.tags.ssk_sk == "node" then
       local n = assert(layout.nodes[icon.tags.key])
       local pos = bounds(wrapper, icon)
-      local label_wrapper = assert(canvas.children[i + 1])
+      local next_index=i+1
+      while canvas.children[next_index] and canvas.children[next_index].tags.ssk_position_reset do next_index=next_index+1 end
+      local label_wrapper = assert(canvas.children[next_index])
       local label = assert(label_wrapper.children[1])
       assert(label.type == "label" and label.style.single_line, "name must stay on one line")
       assert(label.style.width == label_wrapper.style.width, "name must be clipped to its reserved width")
