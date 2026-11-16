@@ -6,6 +6,24 @@ Release history is maintained in the [Factorio changelog](mod/production-flow/ch
 Run `python tools/changelog.py --write` after editing it.
 See [validation and engineering notes](docs/validation.md) for historical test details.
 
+## 0.2.9 — 2026-11-16
+
+### Bugfixes
+
+- Fix chart labels, item icons, hover details and click targets becoming misaligned or obscured. Thanks to HorizonBeta for reporting issue #2. (https://github.com/TTLouis/factorio-production-flow/issues/2)
+- Focus Clear now removes the root selection and navigation history. Choosing a material from the selector starts a fresh root and history.
+- Correct recipe flow estimates for probabilistic products and catalyst inputs and outputs.
+- Clear stale selections and deleted-surface data safely after save or mod changes.
+
+### Gui
+
+- Dim unrelated nodes in Full Sankey when highlighting a selected chain, while keeping them clickable.
+
+### Changes
+
+- Show labels by default in Balance and Focus; leave them off by default in Full Sankey. Preserve existing preferences.
+- Production tracking supports the default player force; other forces cannot open the interface.
+
 ## 0.2.8 — 2026-11-15
 
 ### Changes
