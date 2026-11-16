@@ -10,7 +10,8 @@ See [validation and engineering notes](docs/validation.md) for historical test d
 
 ### Bugfixes
 
-- Fix chart labels, item icons, hover details and click targets becoming misaligned or obscured. Thanks to HorizonBeta for reporting issue #2. (https://github.com/TTLouis/factorio-production-flow/issues/2)
+- Fix only the bottom row being selectable in Balance, Focus and Full Sankey. Thanks to HorizonBeta for reporting issue #3. (https://github.com/TTLouis/factorio-production-flow/issues/3)
+- Keep chart labels, item icons and hover details aligned and visible.
 - Focus Clear now removes the root selection and navigation history. Choosing a material from the selector starts a fresh root and history.
 - Correct recipe flow estimates for probabilistic products and catalyst inputs and outputs.
 - Clear stale selections and deleted-surface data safely after save or mod changes.
