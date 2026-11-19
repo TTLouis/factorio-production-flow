@@ -41,7 +41,7 @@ function P.sanitize_state(s)
   if type(s.sel)=="string" then
     local base=s.sel:gsub("#.*$","")
     local kind,name=base:match("^(%a+)/(.+)$")
-    -- Group keys are view identities, rather than prototype names.
+    -- Group/transport keys are view identities, rather than prototype names.
     if (kind=="item" or kind=="fluid" or kind=="recipe")
       and not (prototypes[kind] and prototypes[kind][name]) then s.sel=nil end
   end

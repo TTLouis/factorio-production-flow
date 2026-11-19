@@ -1,9 +1,14 @@
 # Development and native validation
 
-Accounting supports the default `player` force. Foreign machines remain as
-candidates in the bounded registry, with counters reset when an ownership change
-is observed. Other-force players receive an unavailable message. Historical craft
-bins have no force identity; earlier mixed-force samples remain until they expire.
+Manufacturing rates, capacity, stock and charts currently support Factorio's
+default `player` force. Other-force players cannot open the window. Foreign
+machines remain only as candidates in the bounded round-robin registry, so an
+observed ownership change can reset the craft-counter baseline before sampling
+resumes. The engine exposes no generic entity-force-change event; a round trip
+between sampled visits cannot be distinguished from uninterrupted ownership.
+Existing historical craft bins have no force identity, so earlier mixed-force
+samples cannot be separated retroactively. They are preserved until they age
+out; this change does not reset production history.
 
 Install `requirements-dev.txt`, then run `python tests/run_lua.py`.
 The offline suite uses synthetic data and does not need a Factorio installation.
@@ -13,8 +18,8 @@ The focused suites run separately with `python tests/run_lua.py` followed by
 
 Optional native checks (Windows, a local licensed Factorio installation required):
 
-Keep review/test audio muted: use `--disable-audio`, or `[sound]`
-`master-volume=0` and `master-muted=true` in an isolated interactive profile.
+Keep test and review sessions muted. Automated clients use `--disable-audio`;
+interactive isolated profiles set `[sound]` `master-volume=0` and `master-muted=true`.
 
 ```powershell
 python tests/engine_smoke.py "C:/path/to/Factorio/bin/x64/Factorio.exe"
@@ -34,7 +39,9 @@ grouped activity counts), `warmup` (fresh-install defaults and incomplete histor
 zoom and remote view), `history-view` (Balance's Flow and History selector,
 material and metric changes, shared time axes, and measured and estimated stock),
 `transfer-view` (native cargo arrivals and route and material filters), and
-`ribbon-view` (itemised hover details in Balance History, Focus, Full Sankey and Transfers at 100% scale).
+`ribbon-view` (itemised hover details in Balance History, Focus, Full Sankey and Transfers at 100% scale),
+and `portal` (Mod Portal gallery images 30–37 from real save data: it records another 20 game
+minutes, then picks the busiest real platforms and writes the choice to `portal-platforms.json`).
 Phase-specific evidence records native image hashes and the clean archive hash.
 Release packages contain Balance with Flow and History, Focus, Full Sankey and
 Transfers (when Space Age and its cargo events are available). Local diagnostic and render fixtures live under `tests/development/`.
@@ -42,31 +49,50 @@ The native harness
 injects its diagnostic helper into an isolated test copy after creating the clean
 candidate archive. These helpers and test hooks are excluded from release ZIPs.
 
-`python tests/gui_interaction.py --scales 1.25` checks native chart geometry,
-hover flags and handler routing at 125% scale on a disposable vanilla map. Its
-synthetic recipe rates make it a focused rendering regression, not a factory
-validation. `python tests/gui_simulation.py --scales 1` complements it with 18
-actual engine mouse clicks through Balance, Focus and Full Sankey, both renderers
-and top/middle/bottom targets. Neither runner sends desktop input. Normal-window
-captures use actual GUI scale; main-menu simulation players report scale one.
-Native screenshots still require visual inspection, including large-chart scroll
-viewports. Both runners preserve source/profile hashes and clean candidates under
-ignored `tests/out` stages.
-
-For user-authorized modded saves, `python tests/modded_gui.py --save PATH --mods MODS`
-uses actual sampled production history and private save/mod copies. Synchronize
-dependencies into an isolated profile first. Never copy credentials into the
-validation stage or claim compatible mod updates exactly reproduce the old set.
-
 GUI changes follow the vanilla button, frame and label rules in
 [ui-style.md](ui-style.md).
+
+`python tests/gui_interaction.py` runs a vanilla chart regression using launch
+arguments and isolated mod/config copies at 100%, 125% and 150% scale. It checks
+native wrapper geometry, ribbon event flags and top/middle/bottom node hit regions
+in Balance, Focus and Full Sankey with both renderers, then records screenshots.
+Its hit model and separately reported handler dispatches do not constitute engine
+mouse input. `--source-ref TAG --expect-obstruction` checks the historical row
+obstruction without changing the working checkout. The fixture uses synthetic
+vanilla recipe rates; it is not a working-factory or modded-save validation.
+
+`python tests/gui_simulation.py` complements those captures with actual engine
+mouse events. A private main-menu simulation captions existing fixed-size chart
+icons for lookup, moves Factorio's simulation cursor and clicks through the
+normal mod event handler. It checks top/middle/bottom selection in all three
+charts with both renderers at configured 100%, 125% and 150% scale. Virtual
+simulation players report scale 1, so the test uses a fixed chart panel rather
+than asserting full-window sizing; `gui_interaction.py` covers normal windows.
+Both runners keep clean candidate archives, source hashes and logs in fresh
+ignored stages, and leave the live profile and source saves untouched. The Lua
+suite additionally checks Transfer hover geometry, target reuse and hidden
+targets at fractional scales, and normal-window native checks cover indexed GUI insertion.
+
+For an authorized modded save, use Factorio's `--sync-mods` with an isolated
+`--config` and `--mod-directory` first. Then run
+`python tests/modded_gui.py --save PATH --mods SYNCED_MOD_DIRECTORY`.
+The default capture is 2560×1440 at 125%. This runner copies the save and selected
+mods, adds the current Production Flow source, collects at least 600 seconds of
+real production history, and captures the three charts with both renderers.
+It accelerates and unpauses only the private copy during warmup, then returns to
+normal speed and suppresses other mods' screen dialogs for the captures. Its
+evidence identifies actual mod versions and distinguishes native geometry checks
+from engine mouse-input tests. Save, profile and source hashes are checked after
+the run. Mod synchronization can select newer compatible releases; record those
+differences instead of claiming the reporter's original mod set is identical.
 
 Player-facing text follows [localization.md](localization.md). The normal Lua
 runner also validates locale keys, parameters and catalog coverage, runs the
 validator's Python regression tests, and exercises native LocalisedString shapes
 in the Lua UI tests. Native graphical save phases additionally translate every
 key and plural test case through Factorio itself. Use `--language zh-CN` with a
-fresh stage to validate Simplified Chinese; the default is English. The runner
+fresh stage to validate Simplified Chinese, or `--language zh-TW` for Traditional
+Chinese; the default is English. The runner
 records the actual client locale and preserves phase-specific screenshots.
 
 The prototype rename to production-flow makes it a separate mod from the old
@@ -192,3 +218,13 @@ rescheduling through the real setting-change event, and retention of an active
 scan. This is a functional check, not a performance benchmark. Offline tests also
 verify the setting declaration (1-minute minimum, 5-minute default), increasing
 and decreasing the cooldown, and applying a new interval after a scan finishes.
+
+`python tests/transport_benchmark.py --open-tab balance --baseline-fixes combined`
+builds a disposable native save with 32,768 transfer boundaries and ten real
+empty surfaces, then compares closed and open Balance cases for three 40,000-update
+runs each. Its private baseline restores full-retention transfer queries and the
+previous statistics allocation functions; the report names the exact baseline
+commit and records source, settings, save and raw timing hashes. This measures
+the combined changes, rather than attributing the timing difference to either
+change individually. Use `--baseline-fixes f2` or `f6` for isolated comparisons.
+`--offline-check` validates fixtures and hooks without launching Factorio.

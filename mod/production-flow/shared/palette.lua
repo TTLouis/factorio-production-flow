@@ -41,6 +41,18 @@ for i, c in ipairs(P.colors) do
   P.quiet[i] = {math.floor(c[1]*0.52+40*0.48), math.floor(c[2]*0.52+42*0.48), math.floor(c[3]*0.52+44*0.48)}
 end
 function P.muted(i) return i <= P.NCAT and P.DIM + i or i end
+-- Transfers ribbon shades (shared/ribbon_shades.lua), appended after the quiet
+-- range so the Sankey colour indices above stay unchanged. Night-vision GUI
+-- plots draw curves with these exact colours instead of the nearest Sankey hue.
+local plot = require("shared.plot_colors")
+P.RIBBON = P.count
+P.ribbon = {}
+for _, key in ipairs({ "ribbon_in_1", "ribbon_in_2", "ribbon_in_3", "ribbon_in_4", "ribbon_out_1",
+    "ribbon_out_2", "ribbon_out_3", "ribbon_out_4", "ribbon_made", "ribbon_item_other" }) do
+  local c = plot[key]
+  P.ribbon[#P.ribbon + 1] = { math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5) }
+end
+P.count = P.RIBBON + #P.ribbon
 local materials = {
   ["iron-ore"]=4, ["iron-plate"]=4, ["steel-plate"]=4, ["molten-iron"]=4,
   ["copper-ore"]=5, ["copper-plate"]=5, ["copper-cable"]=5, ["molten-copper"]=5,
@@ -60,6 +72,7 @@ end
 function P.rgb(i)
   if i == P.GREY then return P.grey.color end
   if i == P.DIM then return P.dim.color end
+  if i > P.RIBBON then return P.ribbon[i-P.RIBBON] end
   if i > P.DIM then return P.quiet[i-P.DIM] end
   return P.colors[i]
 end

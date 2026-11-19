@@ -68,7 +68,47 @@ end
 
 local function base_key(key) return (string.gsub(key, "#.*$", "")) end
 
+local function transport_caption(transport)
+  local kind,name=transport.material:match("^(%a+)/(.+)$")
+  local prototype=prototypes[kind] and prototypes[kind][name]
+  return Loc(transport.direction=="imports" and "transport-flow-import-material" or "transport-flow-export-material",
+    prototype and prototype.localised_name or name)
+end
+local function transport_tags(transport,node,us)
+  local tags={ssk_ui="transport_history",ssk_sk=node and "node" or "ribbon",key=node and node.key,fx=us and us.view=="focus"}
+  for key,value in pairs(transport.history or {}) do tags[key]=value end
+  return tags
+end
+local function method_name(method)
+  if method=="cargo-pod" then return Loc("transport-history-cargo-pods") end
+  return Loc(method=="cannon" and "se-ui-cannon" or "se-ui-rocket")
+end
+local function transport_tooltip(transport,clickable)
+  local evidence=transport.evidence
+  local parts={transport_caption(transport),"\n",
+    Loc("transport-flow-sent",evidence.sent~=nil and string.format("%.0f",evidence.sent) or "—"),"\n",
+    Loc("transport-flow-received",evidence.received~=nil and string.format("%.0f",evidence.received) or "—"),"\n",
+    transport.rate~=nil and Loc("transport-flow-boundary-rate",fmt(transport.rate)) or Loc("transport-flow-unknown")}
+  for i,route in ipairs(evidence.routes or {}) do
+    if i>8 then parts[#parts+1]=Loc.join("\n",Loc("transport-flow-more-routes",#evidence.routes-8));break end
+    parts[#parts+1]=Loc.join("\n",method_name(route.method)," · ",route.remote_name or Loc("se-ui-unknown-surface"))
+  end
+  if evidence.sent_partial or evidence.received_partial then parts[#parts+1]=Loc.join("\n",Loc("transport-flow-partial")) end
+  if clickable then parts[#parts+1]=Loc.join("\n",Loc("transport-flow-open-history")) end
+  return Tooltip.lines(parts)
+end
+local function external_supply(n)
+  if not n.external_imports then return nil end
+  local parts={Loc("transport-flow-external-supply")}
+  for _,entry in ipairs(n.external_imports) do
+    parts[#parts+1]="\n"
+    parts[#parts+1]=transport_tooltip({direction="imports",material=entry.material,evidence=entry.evidence,rate=entry.evidence.received_rate})
+  end
+  return Tooltip.lines(parts)
+end
+
 local function display_name(n)
+  if n.transport then return transport_caption(n.transport) end
   if n.kind == "group" then return Loc(n.flow_kind == "fluid" and "group-fluid-count" or "group-item-count", n.ginfo.localised_name or n.ginfo.name, #n.members) end
   local kind, name = base_key(n.key):match("^(%a+)/(.+)$")
   local proto = prototypes[kind] and prototypes[kind][name]
@@ -81,6 +121,7 @@ local function units(n)
 end
 
 local function sprite_for(n)
+  if n.transport then return n.transport.material end
   if n.kind == "group" then
     local t, name = string.match(n.members[1], "^(%a+)/(.+)$")
     return Loc.join(t, "/", name)
@@ -89,6 +130,7 @@ local function sprite_for(n)
 end
 
 local function localised_name(n)
+  if n.transport then return transport_caption(n.transport) end
   if n.kind == "group" then return n.ginfo.localised_name or n.ginfo.name end
   local kind, name = base_key(n.key):match("^(%a+)/(.+)$")
   local proto = prototypes[kind] and prototypes[kind][name]
@@ -96,6 +138,7 @@ local function localised_name(n)
 end
 
 local function ribbon_tooltip(link)
+  if link.transport then return transport_tooltip(link.transport,true) end
   local function name(node)
     return { "", rt(sprite_for(node)), " ", localised_name(node) }
   end
@@ -686,7 +729,8 @@ local function draw(canvas, L, us, st, player, W, H)
     st.paths[#st.paths + 1] = { from = l.from, to = l.to, pieces = pieces }
     local link = l.link or l
     if not tooltips[link] then tooltips[link] = ribbon_tooltip(link) end
-    hover[#hover + 1] = { pieces = pieces, tip = tooltips[link], from = l.from, to = l.to }
+    hover[#hover + 1] = { pieces = pieces, tip = tooltips[link], from = l.from, to = l.to,
+      tags=link.transport and transport_tags(link.transport) }
     if POLY then
       local key = Loc.join(l.from, ">", l.to)
       if not meshes[key] then
@@ -730,7 +774,7 @@ local function draw(canvas, L, us, st, player, W, H)
     st.ribbons[#st.ribbons + 1] = r
   end
   for _, target in ipairs(hover) do
-    Tooltip.ribbon(canvas, target.pieces, target.tip, { ssk_sk = "ribbon", from = target.from, to = target.to }, nil,
+    Tooltip.ribbon(canvas, target.pieces, target.tip, target.tags or { ssk_sk = "ribbon", from = target.from, to = target.to }, nil,
       function(spec, x, y, w, h)
         local hit = wrapped(canvas, x, y, w, h, spec)
         hit.style.width, hit.style.height = w, h
@@ -808,7 +852,7 @@ local function draw(canvas, L, us, st, player, W, H)
       local details = Loc.join_list(tip, "\n")
       local shown = (n.prod > 0) and n.prod or n.cons
       local rate = n.kind == "recipe" and Loc("machine-status-recipe") or (Loc.join(fmt(shown), " ", units(n)))
-      local usage = us.neighborhood and n.selected_usage
+      local usage = not n.transport and us.neighborhood and n.selected_usage
       if usage then
         local material=L.nodes[us.focus]
         rate=Loc.join(fmt(usage), " ", units(material))
@@ -820,6 +864,19 @@ local function draw(canvas, L, us, st, player, W, H)
         if n.kind~="recipe" then tooltip[#tooltip+1]=Loc("sankey-consumer-production", fmt(n.prod), units(n)) end
       end
       if lab_tip then tooltip[#tooltip + 1] = Loc.join("\n", lab_tip) end
+      local imports=external_supply(n)
+      if imports then
+        -- Append flat (at most 11 parts) so the rate and selected-material
+        -- lines keep their positions for the Uses label.
+        tooltip[#tooltip+1]="\n\n"
+        tooltip[#tooltip+1]=imports
+        details=Tooltip.lines({details,"\n\n",imports})
+      end
+      if n.transport then
+        tooltip=transport_tooltip(n.transport,true)
+        details=tooltip
+        rate=Loc.join(fmt(n.transport.rate)," ",Loc("history-items-s"))
+      end
       local bar
       if POLY then
         local color = n.color or n.ginfo.color
@@ -832,7 +889,7 @@ local function draw(canvas, L, us, st, player, W, H)
       end
       place(bar, n.x, n.y, View.NODE_W, n.h)
       bar.raise_hover_events = true
-      bar.tags = { ssk_sk = "node", key = n.key, fx = (us.view == "focus"), part = "bar" }
+      bar.tags = n.transport and transport_tags(n.transport,n,us) or { ssk_sk = "node", key = n.key, fx = (us.view == "focus"), part = "bar" }
       count = count + 1
       local iy = n.y - View.NODE_W - View.ICON_GAP
       local stem = add_sprite(canvas, S.bar(n.color or n.ginfo.color))
@@ -841,9 +898,9 @@ local function draw(canvas, L, us, st, player, W, H)
       stem.ignored_by_interaction = true
       late[#late + 1] = { n.x, iy, View.NODE_W, View.NODE_W,
         { type = "sprite-button", sprite = sprite_for(n), tooltip = tooltip, style = "slot_button",
-          raise_hover_events = true, tags = { ssk_sk = "node", key = n.key, fx = (us.view == "focus") } }, toggled = (us.sel == n.key), fill = true, node_icon=n.key }
+          raise_hover_events = true, tags = n.transport and transport_tags(n.transport,n,us) or { ssk_sk = "node", key = n.key, fx = (us.view == "focus") } }, toggled = (us.sel == n.key), fill = true, node_icon=n.key }
       local show_label = us.show_labels or n.key == us.sel or n.key == us.pinned
-        or n.kind == "group"
+        or n.kind == "group" or n.transport~=nil
         or (us.view == "focus" and base_key(n.key) == us.focus)
       if L.label_above then
         late[#late + 1] = { n.x, n.top or (iy - 18), math.min(260, (L.label_w and L.label_w[n.ci]) or 260), 16,
@@ -1078,6 +1135,7 @@ end
 
 function SK.on_click(e, us)
   local tags = e.element.tags
+  if tags and tags.ssk_ui=="transport_history" then return nil end
   local a = tags and tags.ssk_sk
   if not a then return nil end
   SK.defaults(us)

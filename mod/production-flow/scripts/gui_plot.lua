@@ -113,6 +113,7 @@ function G.begin(parent,width,height,name)
   function P.curve(xa,xb,ya,yb,thickness,color)
     local colors={}
     for i,c in ipairs(Palette.colors) do colors[i]={r=c[1]/255,g=c[2]/255,b=c[3]/255} end
+    for i,c in ipairs(Palette.ribbon) do colors[Palette.RIBBON+i]={r=c[1]/255,g=c[2]/255,b=c[3]/255} end
     local index=closest(colors,color)
     for _,piece in ipairs(Geometry.route({t=thickness},xa,xb,ya,yb)) do
       local name=piece.kind=='bar' and S.bar(index) or piece.kind=='elbow' and S.elbow_name(piece.corner,piece.k,index)

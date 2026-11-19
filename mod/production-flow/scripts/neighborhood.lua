@@ -29,6 +29,7 @@ function N.build(nodes, links, model, focus, depth)
     end
     edge.rate = edge.rate + original.rate
     edge.note = note or edge.note
+    edge.transport = original.transport
     for _, detail in ipairs(original.details or {}) do edge.details[#edge.details + 1] = detail end
   end
   local visited = {}

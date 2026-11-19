@@ -390,7 +390,7 @@ local function stock_events(result,scans,sidx,key,first,last)
       end
       if metadata and metadata.provider then
         local coverage, seconds = metadata.coverage or {}, metadata.period_seconds or (last-first)/60
-        if metadata.truncated or metadata.received_partial or not metadata.coverage_known
+        if metadata.truncated or metadata.provider=="se" or metadata.received_partial or not metadata.coverage_known
           or (coverage.sent or 0) < seconds or (coverage.received or 0) < seconds then
           result.stock_transport_incomplete=true
         end

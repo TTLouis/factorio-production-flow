@@ -19,6 +19,7 @@ local Default = require("shared.groups_default")
 local palette = require("shared.palette")
 local S = require("shared.sprites")
 local Neighborhood = require("scripts.neighborhood")
+local Transport = require("scripts.transport_flows")
 
 local V = {}
 V.MAX_INPUT_DEPTH = Neighborhood.MAX_DEPTH
@@ -111,6 +112,39 @@ local function remap_link(links, link, from, to)
   local merged = add_link(links, from, to, link.rate)
   for _, detail in ipairs(link.details) do merged.details[#merged.details + 1] = detail end
   merged.note = merged.note or link.note
+  merged.transport = link.transport
+end
+
+local function add_transport(nodes, links, crossings)
+  for _, key in ipairs(sorted_keys(crossings.materials or {})) do
+    local evidence = crossings.materials[key]
+    local exports = evidence.exports
+    local rate = exports and exports.activity and exports.sent_rate
+    if rate and rate > EPS then
+      nodes[key] = nodes[key] or { key=key, kind=kind(key), prod=0, cons=0, shown_in=0, loops={} }
+      local history = exports.history or {}
+      local transport = { direction="exports", material=key, evidence=exports, rate=rate,
+        history={provider=history.provider or evidence.provider or crossings.provider,
+          surface_index=history.surface_index or crossings.surface_index, material=history.material or key:sub(6),
+          direction="exports", method=history.method} }
+      local id = "transport/exports/" .. key
+      nodes[id] = { key=id, kind="transport", prod=0, cons=0, shown_in=0, loops={}, transport=transport }
+      add_link(links, key, id, rate).transport = transport
+    end
+    local material = nodes[key]
+    if material then
+      material.transport_material = true
+      if evidence.imports and evidence.imports.activity then
+        material.external_imports = { { material=key, evidence=evidence.imports } }
+      end
+    end
+  end
+end
+
+local function collect_imports(target, source)
+  if not source.external_imports then return end
+  target.external_imports = target.external_imports or {}
+  for _, entry in ipairs(source.external_imports) do target.external_imports[#target.external_imports + 1] = entry end
 end
 
 local function build_graph(pi, m, us)
@@ -257,6 +291,7 @@ local function apply_preset(pi, nodes, links, preset)
       if not keep[p] then keep[p] = true; stack[#stack + 1] = p end
     end
   end
+  for _, l in pairs(links) do if l.transport and keep[l.from] then keep[l.to] = true end end
   drop_nodes(nodes, links, function(k) return keep[k] end)
 end
 
@@ -265,7 +300,7 @@ local function apply_collapse(pi, nodes, links, collapsed)
   local map = {}
   for k in pairs(nodes) do
     local g = Gr.of(pi, k)
-    if collapsed[g] and nodes[k].kind ~= "recipe" then
+    if collapsed[g] and nodes[k].kind ~= "recipe" and not nodes[k].transport then
       map[k] = "group/" .. g .. (nodes[k].kind == "fluid" and "#fluid" or "")
     end
   end
@@ -283,6 +318,7 @@ local function apply_collapse(pi, nodes, links, collapsed)
       end
       g.prod = g.prod + n.prod
       g.cons = g.cons + n.cons
+      collect_imports(g, n)
       table.insert(g.members, k)
       for _, lp in ipairs(n.loops) do table.insert(g.loops, lp) end
     else
@@ -347,7 +383,7 @@ local function apply_overview(pi, nodes, links, opened)
   for k, n in pairs(nodes) do
     local g = Gr.of(pi, k)
     local info = Gr.info(pi, g)
-    if n.kind ~= "recipe" and info.super ~= "raw" and not exposed[k] then
+    if n.kind ~= "recipe" and not n.transport and info.super ~= "raw" and not exposed[k] then
       map[k] = "group/@" .. info.super .. (n.kind == "fluid" and "#fluid" or "")
     end
   end
@@ -365,6 +401,7 @@ local function apply_overview(pi, nodes, links, opened)
       if n.kind ~= "recipe" then
         g.prod = g.prod + n.prod
         g.cons = g.cons + n.cons
+        collect_imports(g, n)
       end
       table.insert(g.members, k)
     else
@@ -406,7 +443,7 @@ local function node_era(g, n)
     end
     return (e == math.huge) and 0 or e
   end
-  local nd = g.nodes[n.key]
+  local nd = g.nodes[n.transport and n.transport.material or n.key]
   return nd and nd.era or 0
 end
 
@@ -611,6 +648,7 @@ function V.build(player, us, W, viewH)
   local m = Model.build(sidx, us.period)
 
   local nodes, links = build_graph(pi, m, us)
+  add_transport(nodes, links, Transport.query(player.force, game.surfaces[sidx], game.tick, us.period))
   local ff = player.mod_settings["ssk-fluid-scale"].value
   local focused
   if us.neighborhood and us.focus then
@@ -618,7 +656,9 @@ function V.build(player, us, W, viewH)
     focused = true
   else focused = (us.view == "focus") and apply_focus(nodes, links, us.focus, us.focus_steps or 2) end
   if not focused then apply_preset(pi, nodes, links, us.preset) end
-  drop_nodes(nodes, links, function(k) return not us.hidden[k] or k == us.focus end)
+  drop_nodes(nodes, links, function(k)
+    return k == us.focus or not us.hidden[k] and not (nodes[k].transport and us.hidden[nodes[k].transport.material])
+  end)
   local kmap
   if us.view == "overview" then
     nodes, links, kmap = apply_overview(pi, nodes, links, us.overview_open)
@@ -674,8 +714,10 @@ function V.build(player, us, W, viewH)
     local a, b = nodes[l.from], nodes[l.to]
     l.a, l.b = a, b
     table.insert(a.outs, l); table.insert(b.ins, l)
-    a.sout = a.sout + l.rate
-    b.sin = b.sin + l.rate
+    if not l.transport then
+      a.sout = a.sout + l.rate
+      b.sin = b.sin + l.rate
+    end
     link_list[#link_list + 1] = l
   end
 
@@ -736,6 +778,8 @@ function V.build(player, us, W, viewH)
       local best, bw = nil, -1
       for _, l in ipairs(n.outs) do if l.rate > bw then best, bw = l.to, l.rate end end
       n.group = best and Gr.of(pi, best) or "recipes"
+    elseif n.transport then
+      n.group = Gr.of(pi, n.transport.material)
     else
       n.group = Gr.of(pi, n.group_key or n.key)
     end
@@ -876,7 +920,7 @@ end
 function V.split_raw(nodes, links, pi)
   for _, key in ipairs(sorted_keys(nodes)) do
     local n = nodes[key]
-    local raw = (n.kind == "item" or n.kind == "fluid") and #n.outs > 0
+    local raw = not n.transport_material and (n.kind == "item" or n.kind == "fluid") and #n.outs > 0
                 and (n.lane == "raw" or (n.kind == "fluid" and #n.ins == 0))
     if (n.kind == "item" or n.kind == "fluid") and n.lane == "raw" and #n.outs == 0 and #n.ins > 0 then
       -- a raw item that is only produced here: show it next to its producer

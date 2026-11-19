@@ -73,6 +73,13 @@ function C.request(tick)
     -- waiting at a platform hatch has already left hub_main, but has not yet
     -- dispatched. Discover it before fixing this scan's bounded registry.
     for _,pod in pairs(surface.find_entities_filtered{type="cargo-pod",force=game.forces.player}) do C.add(pod) end
+    -- SE creates surviving padless cargo containers without a built event.
+    -- Read the public entity prototype/inventory; this is physical stock,
+    -- never an inferred received-shipment manifest.
+    if script and script.active_mods and script.active_mods["space-exploration"]
+      and prototypes.entity and prototypes.entity["se-cargo-rocket-cargo-pod"] then
+      for _,pod in pairs(surface.find_entities_filtered{name="se-cargo-rocket-cargo-pod",force=game.forces.player}) do C.add(pod) end
+    end
   end
   s.batch = {start=tick, cursor=1, limit=#s.list, s=surfaces, reads=0}
 end

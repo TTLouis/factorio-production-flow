@@ -59,3 +59,7 @@ and release procedures are maintained in [docs/development.md](docs/development.
 - Record which source, archive and screenshots were checked. Keep old evidence
   intact, distinguish historical measurements from new runs, and report material
   validation gaps plainly.
+- Leave one short report per fix under ignored test output. Include the change
+  and the checks that passed. For UI fixes, put native screenshots of the main
+  tabs and the affected area's subtabs in that same report, using the existing
+  capture harnesses.

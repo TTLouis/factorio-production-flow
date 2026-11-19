@@ -6,6 +6,8 @@ local Sampler = require("scripts.sampler")
 local UI = require("scripts.ui")
 local Canvas = require("scripts.canvas")
 local Transfers = require("scripts.transfers")
+local SERockets = require("scripts.se_rockets")
+local SECannons = require("scripts.se_cannons")
 
 local STATS_EVERY = 60
 local UI_REFRESH_EVERY = 300
@@ -15,8 +17,23 @@ local function setup(rescan)
   storage.ui = storage.ui or {}
   Graph.build()
   Sampler.init()
+  if SERockets.available() then SERockets.init(game.tick) end
+  if SECannons.available() then SECannons.init(game.tick) end
   if rescan then Sampler.rescan() end
   for _, p in pairs(game.players) do UI.ensure_button(p) end
+end
+
+if SECannons.available() then
+  script.on_event(defines.events.on_script_trigger_effect, function(e) SECannons.on_effect(e) end)
+end
+
+-- SE declares public custom events in the data stage. Registration occurs on
+-- every control load (including save reload), with no private SE state access.
+if SERockets.available() then
+  script.on_event(defines.events.se_on_cargo_rocket_launched, SERockets.on_launch)
+  if type(defines.events.se_on_cargo_rocket_padless)=="number" then
+    script.on_event(defines.events.se_on_cargo_rocket_padless, SERockets.on_padless)
+  end
 end
 
 script.on_init(function() setup(true) end)
@@ -71,8 +88,9 @@ script.on_event(defines.events.on_entity_cloned, function(e) Sampler.add(e.desti
 
 local track_cargo = Transfers.available()
 if track_cargo then
-  local platform_changed = defines.events.on_space_platform_changed_state
-  if platform_changed then script.on_event(platform_changed, Transfers.on_platform_changed_state) end
+  if defines.events.on_space_platform_changed_state then
+    script.on_event(defines.events.on_space_platform_changed_state, Transfers.on_platform_changed_state)
+  end
   -- Platform cargo leaves the hub when ascent starts. Capture that manifest
   -- before a storage scan can establish a newer, already-unloaded baseline.
   if defines.events.on_cargo_pod_started_ascending then
@@ -98,8 +116,15 @@ end)
 ---------------------------------------------------------------------------
 -- ticking
 ---------------------------------------------------------------------------
+-- Mod set and SE version are fixed for a loaded session. Both SE hooks return
+-- immediately when nothing is in flight. Production Flow loads after SE, so
+-- these run after SE's own on_tick handlers in the same tick.
+local se_rockets_active = SERockets.available()
+local se_cannons_active = SECannons.available()
 script.on_event(defines.events.on_tick, function(e)
   Sampler.on_tick(e.tick)
+  if se_rockets_active then SERockets.on_tick(e.tick) end
+  if se_cannons_active then SECannons.on_tick(e.tick) end
 end)
 
 script.on_nth_tick(STATS_EVERY, function(e) Sampler.on_stats(e.tick) end)
@@ -107,6 +132,8 @@ script.on_nth_tick(UI_REFRESH_EVERY, function() UI.auto_refresh() end)
 script.on_nth_tick(600, function(e)
   Sampler.on_stock(e.tick)
   if track_cargo then Transfers.on_housekeeping(e.tick) end
+  if SERockets.available() then SERockets.prune(e.tick) end
+  if SECannons.available() then SECannons.prune(e.tick) end
 end)
 
 ---------------------------------------------------------------------------

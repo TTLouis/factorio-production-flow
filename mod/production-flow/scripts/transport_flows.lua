@@ -1,6 +1,8 @@
 -- Read-only physical transport evidence. These measures never alter production
 -- statistics, recipe models, stock scans, or another mod's private state.
 local Transfers=require("scripts.transfers")
+local Rockets=require("scripts.se_rockets")
+local Data=require("scripts.se_transfer_data")
 local Sampler=require("scripts.sampler")
 local F={}
 local RETENTION=Sampler.PERIODS[#Sampler.PERIODS]
@@ -9,6 +11,10 @@ local function finite(n) return type(n)=="number" and n==n and n~=math.huge and 
 local function valid(force,surface,tick,seconds)
   return force and force.valid and surface and surface.valid and finite(tick) and tick>=0
     and finite(seconds) and seconds>=0
+end
+local function provider()
+  if Transfers.available() then return "sa" end
+  if Rockets.available() then return "se" end
 end
 local function inside(tick,first,last) return finite(tick) and tick>=first and tick<=last end
 local function endpoint_direction(from,to,surface)
@@ -42,6 +48,7 @@ local function sa_records(boundaries,surface)
     if boundary.to then record.to=boundary.to end
     record.sender=record.sender or boundary.sender
     record.receiver=record.receiver or boundary.receiver
+    record.exchange_id=record.exchange_id or boundary.exchange_id
     record.quality_exact=record.quality_exact and boundary.quality_exact~=false
     if boundary.kind=="sent" then record.sent=contents(boundary);record.tick=boundary.tick;record.departure_known=true
     elseif boundary.kind=="received" then
@@ -63,98 +70,12 @@ local function sa_records(boundaries,surface)
   end
   return result
 end
-local function copy_table(source)
-  if not source then return nil end
-  local out={}
-  for k,v in pairs(source) do out[k]=v end
-  if source.position then
-    out.position={x=source.position.x or source.position[1],y=source.position.y or source.position[2]}
-  end
-  return out
-end
-
-local function copy_manifest(source,filters)
-  if source==nil then return nil end
-  local out={}
-  for _,item in ipairs(source) do
-    local quality=item.quality or "normal"
-    if type(quality)~="string" then quality=quality.name end
-    if (not filters.material or item.name==filters.material)
-      and (not filters.quality or quality==filters.quality) then
-      out[#out+1]={name=item.name,quality=quality,count=item.count}
-    end
-  end
-  return out
-end
-
-local function copy_record(record,filters)
-  local out=copy_table(record)
-  out.from=copy_table(record.from)
-  out.to=copy_table(record.to)
-  out.remote=copy_table(record.remote)
-  out.sender=copy_table(record.sender)
-  out.receiver=copy_table(record.receiver)
-  out.sent=copy_manifest(record.sent,filters)
-  out.received=copy_manifest(record.received,filters)
-  return out
-end
-
-local function boundary_tick(record,timing)
-  if timing=="arrival" then
-    -- An endpoint/arrival notification alone is not receipt quantity evidence.
-    return record.received~=nil and record.arrival_tick or nil
-  end
-  return record.tick
-end
-
-local function in_range(tick,first,last,last_exclusive)
-  return finite(tick) and (not first or tick>=first)
-    and (not last or (last_exclusive and tick<last or not last_exclusive and tick<=last))
-end
-
--- Default timing is departure. History may request "either" and then plot
--- each independently observed boundary. Bucket intervals are half-open.
-local function filter_records(records,filters)
-  filters=filters or {}
-  local out={}
-  local first,last=filters.from_tick,filters.to_tick
-  local bucket=filters.bucket
-  local bucket_ticks=filters.bucket_ticks or 60
-  if bucket~=nil and (not finite(bucket) or not finite(bucket_ticks) or bucket_ticks<=0) then return out end
-  local timing=filters.timing or "departure"
-  if timing~="departure" and timing~="arrival" and timing~="either" then return out end
-  local function matches_time(tick)
-    return in_range(tick,first,last,false)
-      and (bucket==nil or in_range(tick,bucket,bucket+bucket_ticks,true))
-  end
-  for _,record in ipairs(records or {}) do
-    local matches=not filters.method or record.method==filters.method
-    matches=matches and (not filters.direction or record.direction==filters.direction)
-    matches=matches and (not filters.route or record.route_id==filters.route)
-    local time=boundary_tick(record,timing)
-    local time_matches=timing=="either"
-      and (matches_time(record.tick) or matches_time(boundary_tick(record,"arrival")))
-      or timing~="either" and matches_time(time)
-    if matches and time_matches then
-      local copy=copy_record(record,filters)
-      local material_match=not (filters.material or filters.quality)
-        or (copy.sent and #copy.sent>0) or (copy.received and #copy.received>0)
-      if material_match then out[#out+1]=copy end
-    end
-  end
-  table.sort(out,function(a,b)
-    if a.tick~=b.tick then return a.tick>b.tick end
-    return a.key<b.key
-  end)
-  return out
-end
-
 local function filter_sa(records,filters)
   local eligible={}
   for _,record in ipairs(records) do
     if not filters.quality or record.quality_exact~=false then eligible[#eligible+1]=record end
   end
-  local result=filter_records(eligible,filters)
+  local result=Data.filter(eligible,filters)
   for _,record in ipairs(result) do
     if record.quality_exact==false then
       for _,manifest in pairs({sent=record.sent,received=record.received}) do
@@ -169,10 +90,16 @@ function F.history(force,surface,tick,seconds,filters)
   local empty={provider=nil,records={},materials={},qualities={},groups={imports={},exports={}},
     from_tick=0,to_tick=finite(tick) and tick or 0,seconds=0,period_seconds=0,truncated=false,coverage={}}
   if not valid(force,surface,tick,seconds) then return empty end
-  if not Transfers.available() then return empty end
+  local selected=provider()
+  if not selected then return empty end
   local active={};for key,value in pairs(filters or {}) do active[key]=value end
   active.timing=active.timing or "either"
   if active.quality=="all" then active.quality=nil end
+  if selected=="se" then
+    local result=Data.query(force,surface,tick,seconds,active)
+    result.provider="se";result.period_seconds=result.seconds
+    return result
+  end
   local first=math.max(0,tick-math.min(seconds,RETENTION)*60)
   local boundaries=Transfers.boundaries(force,surface,tick,seconds,{companions=true})
   local raw=sa_records(boundaries,surface)
@@ -232,15 +159,19 @@ local function add_route(boundary,record)
   boundary.routes=boundary.routes or {}
   boundary.routes[#boundary.routes+1]={method=record.method,
     remote_name=surface and surface.valid and (surface.localised_name or surface.name)
-      or remote and (remote.name)}
+      or remote and (remote.name or remote.zone and remote.zone.name)}
 end
 local function add_event(result,record,kind,tick,manifest)
   for index,item in ipairs(manifest or {}) do
     if finite(item.count) and item.count>0 then
       local stats_included
+      if result.provider=="se" and record.method=="rocket" and result._stats_excluded then stats_included=false end
+      -- SE cannons: packing is an ordinary crafting recipe, so the sent plates
+      -- are already in production statistics; the landing insert is not.
+      if result.provider=="se" and record.method=="cannon" and result._stats_excluded then stats_included=kind=="sent" end
       -- Native 2.1.24 cargo-pod probes leave item production/consumption
       -- statistics unchanged at dispatch, landing and delivery.
-      if result._stats_excluded then stats_included=false end
+      if result.provider=="sa" and result._stats_excluded then stats_included=false end
       result.events[#result.events+1]={key=record.key..":"..kind..":"..index,tick=tick,
         material="item/"..item.name,delta=(kind=="sent" and -1 or 1)*item.count,kind=kind,
         provider=result.provider,surface_index=result.surface_index,quality=item.quality,quality_exact=record.quality_exact~=false,
@@ -265,10 +196,13 @@ function F.query(force,surface,tick,seconds)
   -- LuaBootstrap.active_mods returns a full table. Read it once per query,
   -- rather than marshalling every installed mod for every manifest stack.
   local active_mods=script.active_mods
-  result._stats_excluded=active_mods["space-age"]=="2.1.24"
+  result._stats_excluded=result.provider=="se" and active_mods["space-exploration"]=="0.7.64"
+    or result.provider=="sa" and active_mods["space-age"]=="2.1.24"
+  result.unknown=result.provider=="se" and {cannon_payloads=true,rocket_receipts=true,spaceships=true,
+    unpaired_cannon_observations=#(history.unpaired or {})} or {}
   local complete={}
   for _,kind in ipairs({"sent","received"}) do
-    complete[kind]=result.coverage_known and not result.truncated
+    complete[kind]=result.provider=="sa" and result.coverage_known and not result.truncated
       and (result.coverage[kind] or 0)>=result.period_seconds and result.period_seconds>0
       and not (kind=="received" and result.received_partial)
   end

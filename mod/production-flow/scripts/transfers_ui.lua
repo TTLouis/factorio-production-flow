@@ -3,7 +3,6 @@ local Canvas = require("scripts.canvas")
 local Graph = require("scripts.graph")
 local GuiPlot = require("scripts.gui_plot")
 local Sampler = require("scripts.sampler")
-local Sprites = require("shared.sprites")
 local Transfers = require("scripts.transfers")
 local Tooltip = require("scripts.tooltip")
 local Surfaces = require("scripts.surfaces")
@@ -13,19 +12,21 @@ local HistoryLayout = require("scripts.transfer_history_layout")
 local Manifest = require("scripts.transfer_manifest_ui")
 
 local UI = {}
-local LOADED = { r = 0.28, g = 0.59, b = 0.73, a = 1 }
-local UNLOADED = { r = 0.80, g = 0.53, b = 0.29, a = 1 }
-local MADE = { r = 0.55, g = 0.82, b = 0.65, a = 1 }
+local Shades = require("shared.ribbon_shades")
+local LOADED, UNLOADED, MADE = Shades.color("in", 1), Shades.color("out", 1), Shades.color("made")
 local GRID = { r = 0.25, g = 0.25, b = 0.26, a = 1 }
 local AXIS = { r = 0.49, g = 0.48, b = 0.46, a = 1 }
 local TICK = { r = 0.75, g = 0.74, b = 0.71, a = 1 }
 local HIGHLIGHT = { r = 0.28, g = 0.24, b = 0.18, a = 1 }
-local CARD_ROW, CARD_HEADER, CARD_GAP = 25, 34, 12
+local CARD_ROW, CARD_HEADER, CARD_GAP = 30, 34, 12
 local DIRECTIONS = { "loaded", "unloaded" }
-local LAYOUT_VERSION = 23
+local LAYOUT_VERSION = 24 -- above 0.2.10's 23: upgrades rebuild the platform node
 local SPLIT_GAP, PANEL_INSET = 12, 8
 local LIST_HEADER_HEIGHT, TAB_HEIGHT, TAB_CHROME = 36, 36, 48
-local GRAPH_TOP, PLATFORM_HEIGHT = 34, 124
+-- Platform node: 2 px padding, 34 px strip, four 25 px stat rows.
+local GRAPH_TOP, PLATFORM_HEIGHT, STAT_ROW = 34, 138, 25
+-- The Made ribbon meets the middle of the second stat row (Made aboard).
+local MADE_PORT = 2 + 34 + 25 + 12
 local SCROLLBAR_WIDTH = 12
 -- Platform list: 28 px rows (a 24 px star with 2 px around it) flush with the
 -- panel, and a scrollbar lane plus 8 px gutter only when it scrolls.
@@ -331,46 +332,64 @@ local function card_height(items)
   return CARD_HEADER + CARD_ROW * math.min(5, #items) + (#items > 5 and 22 or 0) + 6
 end
 
-local function ranking(parent, name, icon, data, x, y, width, colour)
+-- A surface card: name, mass and pod count in the strip, then up to five items.
+-- Each row carries a count ("×406") and a bar under the name, scaled to the
+-- card's largest item, so items compare at a glance. A 3 px stripe in the
+-- ribbon colour marks the edge where the ribbon attaches (side "left"/"right").
+local function ranking(parent, name, icon, data, x, y, width, colour, side)
   local tip = manifest_tooltip(name, Loc("transfers-cargo-mass", mass(data)), data.items)
+  local height = card_height(data.items)
   local wrapper = parent.add { type = "flow", direction = "horizontal" }
-  place(wrapper, x, y, width, card_height(data.items))
+  place(wrapper, x, y, width, height)
   local card = wrapper.add { type = "frame", name = "ssk_transfer_surface_card", style = "inside_deep_frame",
     direction = "vertical", tooltip = tip, tags = { transfer_surface = name, transfer_rank_count = math.min(5, #data.items) } }
   card.style.width, card.style.padding = width, 2
   local header = strip(card, "heading", CARD_HEADER)
+  -- Keep the header text clear of the ribbon-colour stripe on the ribbon side.
+  header.style.left_padding = side == "left" and 11 or 8
+  header.style.right_padding = side == "right" and 11 or 8
+  local pods = (data.pods or 0) > 0 and data.pods or nil
   if icon then sprite(header, icon, 23) end
-  local header_w = width - (icon and 132 or 104)
-  plain(label(header, "surface_name", name, "subheader_caption_label", header_w)).tooltip = tip
+  local name_label = plain(label(header, "surface_name", name, "subheader_caption_label"))
+  name_label.style.maximal_width, name_label.tooltip = width - 4 - 19 - (icon and 27 or 0) - 84 - (pods and 64 or 0), tip
   spacer(header)
-  local weight = label(header, "weight", mass(data), "subheader_semibold_label", 72)
-  weight.style.horizontal_align, weight.tooltip = "right", tip
+  label(header, "weight", mass(data), "subheader_semibold_label").tooltip = tip
+  if pods then
+    local count = label(header, "pods", Loc("cargo-pod-count", pods, number(pods)), "grey_label")
+    count.style.left_margin, count.tooltip = 8, tip
+  end
 
+  local rows = card.add { type = "table", name = "rows", column_count = 1, style = "ssk_balance_grid",
+    draw_horizontal_lines = true }
+  rows.style.horizontal_spacing, rows.style.vertical_spacing = 0, 0
+  rows.style.top_cell_padding, rows.style.bottom_cell_padding = 0, 0
+  rows.style.left_cell_padding, rows.style.right_cell_padding = 0, 0
+  local name_w = width - 4 - 12 - 19 - 52 - 12
   for i = 1, math.min(5, #data.items) do
     local item = data.items[i]
-    local line = row(card, Loc.join("rank_", i))
+    local line = row(rows, Loc.join("rank_", i))
     line.tags = { transfer_rank = item.name, count = item.count }
-    line.style.height, line.style.horizontal_spacing = CARD_ROW, 4
+    line.style.width, line.style.height, line.style.horizontal_spacing = width - 4, CARD_ROW, 6
     line.style.left_padding, line.style.right_padding = 6, 6
     line.tooltip = tip
     sprite(line, Loc.join("item/", item.name), 19)
-    local bar_w = width >= 180 and math.min(48, math.floor(width / 6)) or 0
-    local name_w = width - bar_w - (bar_w > 0 and 95 or 92)
-    label(line, nil, item_name(item.name), nil, name_w).tooltip = tip
-    if bar_w > 0 then
-      local bar = row(line)
-      bar.style.width = bar_w
-      local size = math.max(1, math.floor(bar_w * item.count / data.items[1].count + 0.5))
-      local image = sprite(bar, Sprites.bar(colour), size)
-      image.style.height, image.style.stretch_image_to_widget_size = 4, true
-    end
-    local count = label(line, nil, number(item.count), "bold_label", 48)
+    local text = line.add { type = "flow", direction = "vertical" }
+    text.style.vertical_spacing, text.style.width = 2, name_w
+    label(text, nil, item_name(item.name), nil, name_w).tooltip = tip
+    local size = math.max(1, math.floor(name_w * item.count / data.items[1].count + 0.5))
+    local bar = sprite(text, colour, size)
+    bar.style.height, bar.style.stretch_image_to_widget_size = 3, true
+    local count = label(line, nil, Loc.join("×", number(item.count)), "bold_label", 52)
     count.style.horizontal_align, count.tooltip = "right", tip
   end
   if #data.items > 5 then
     local foot = label(card, nil, Loc("transfers-more-hover-for-all-items", (#data.items - 5)), "grey_label", width - 8)
-    foot.style.left_margin, foot.tooltip = 4, tip
+    foot.style.left_margin, foot.tooltip = 6, tip
   end
+  local edge = parent.add { type = "flow", direction = "horizontal" }
+  place(edge, side == "left" and x or x + width - 3, y, 3, height)
+  local stripe = sprite(edge, colour, 3)
+  stripe.style.height, stripe.style.stretch_image_to_widget_size = height, true
 end
 
 local function ribbon_shape(x0, y0, x1, y1, width, linear)
@@ -390,7 +409,7 @@ local function draw_ribbon(painter, x0, y0, x1, y1, data, highest, color)
 end
 
 local function flow_signature(result)
-  local parts = { result.platform.id, result.platform.name, result.made.seconds or 0 }
+  local parts = { result.platform.id, result.platform.name, result.platform.location or "", result.made.seconds or 0 }
   local function manifest(data)
     -- Cache identities depend on raw data, never a per-player LocalisedString.
     parts[#parts + 1] = data.weight or 0
@@ -457,18 +476,18 @@ local function flow_graph(player, parent, result, width, viewport)
   end
   for i, cell in ipairs(left) do
     local offset = (i / (#left + 1) - 0.5) * 34
-    local shape = draw_ribbon(painter, x_left + card_w, left_top + cell.center, x_center, middle + offset, cell.route, highest, LOADED)
+    local shape = draw_ribbon(painter, x_left + card_w, left_top + cell.center, x_center, middle + offset, cell.route, highest, Shades.color("in", i))
     route_hover(shape, Loc.join(endpoint_name(cell.route.endpoint), " → ", platform_name), cell.route, "loaded", i)
   end
   for i, cell in ipairs(right) do
     local offset = (i / (#right + 1) - 0.5) * 34
-    local shape = draw_ribbon(painter, x_center + center_w, middle + offset, x_right, right_top + cell.center, cell.route, highest, UNLOADED)
+    local shape = draw_ribbon(painter, x_center + center_w, middle + offset, x_right, right_top + cell.center, cell.route, highest, Shades.color("out", i))
     route_hover(shape, Loc.join(platform_name, " → ", endpoint_name(cell.route.endpoint)), cell.route, "unloaded", i)
   end
   if made then
     local x, y = x_left + card_w, made_y + made_height / 2
-    painter.line(x, y, x_center, center_y + 94, MADE, 2, true)
-    local shape = ribbon_shape(x, y, x_center, center_y + 94, 2, true)
+    painter.line(x, y, x_center, center_y + MADE_PORT, MADE, 2, true)
+    local shape = ribbon_shape(x, y, x_center, center_y + MADE_PORT, 2, true)
     local tip = manifest_tooltip(Loc("transfers-made-aboard", platform_name), Loc("transfers-recorded-platform-production"), result.made.items, result.made.seconds)
     Tooltip.ribbon(parent, { shape }, tip, { transfer_ribbon = "made" }, "ssk_transfer_ribbon_made_")
   end
@@ -479,32 +498,62 @@ local function flow_graph(player, parent, result, width, viewport)
   canvas_label(parent, Loc("transfers-unloading-surfaces"), "heading_2_label", x_right, 2, card_w)
   if #left == 0 then canvas_label(parent, Loc("transfers-no-recorded-loads"), "grey_label", x_left, empty_y, card_w) end
   if #right == 0 then canvas_label(parent, Loc("transfers-no-recorded-unloads"), "grey_label", x_right, empty_y, card_w) end
-  for _, entry in ipairs({ { left, x_left, 7, left_top }, { right, x_right, 5, right_top } }) do
-    for _, cell in ipairs(entry[1]) do
+  -- Each card's stripe and item bars take its own ribbon's shade.
+  for _, entry in ipairs({ { left, x_left, "in", left_top, "right" }, { right, x_right, "out", right_top, "left" } }) do
+    for i, cell in ipairs(entry[1]) do
       local name, icon = endpoint_name(cell.route.endpoint)
-      ranking(parent, name, icon, cell.route, entry[2], math.floor(entry[4] + cell.y + 0.5), card_w, entry[3])
+      ranking(parent, name, icon, cell.route, entry[2], math.floor(entry[4] + cell.y + 0.5), card_w, Shades.sprite(entry[3], i), entry[5])
     end
   end
-  if made then ranking(parent, Loc("transfers-made-aboard-2"), nil, result.made, x_left, math.floor(made_y + 0.5), card_w, 15) end
+  if made then ranking(parent, Loc("transfers-made-aboard-2"), nil, result.made, x_left, math.floor(made_y + 0.5), card_w, Shades.sprite("made"), "right") end
 
   local wrapper = parent.add { type = "flow", direction = "horizontal" }
   place(wrapper, x_center, center_y, center_w, PLATFORM_HEIGHT)
   local platform = wrapper.add { type = "frame", name = "ssk_transfer_platform_node", style = "inside_deep_frame",
     direction = "vertical" }
   platform.style.width, platform.style.height, platform.style.padding = center_w, PLATFORM_HEIGHT, 2
+  -- Name and where the platform is in the strip; stats in flow order (in, made,
+  -- out), then the net mass kept aboard. A zero shows as a grey dash.
   local header = strip(platform, "heading", 34)
-  sprite(header, result.platform.icon, 23)
-  label(header, nil, result.platform.name, "subheader_semibold_label", center_w - 44).tooltip = result.platform.name
-  for _, stat in ipairs({ { Loc("transfers-loaded"), result.loaded, 7 }, { Loc("transfers-unloaded"), result.unloaded, 5 },
-      { Loc("transfers-made"), result.made, 15 } }) do
-    local line = row(platform)
-    line.style.height, line.style.left_padding, line.style.right_padding = 25, 8, 8
-    sprite(line, Sprites.bar(stat[3]), 7)
-    label(line, nil, stat[1])
+  local where = result.platform.location
+  local place_name = where and prototypes.space_location and prototypes.space_location[where]
+    and prototypes.space_location[where].localised_name or where or Loc("transfers-in-transit")
+  local caption = platform_caption(result.platform)
+  label(header, "platform_name", caption, "subheader_semibold_label", center_w - 96).tooltip = caption
+  spacer(header)
+  local location = label(header, "platform_location", place_name, "grey_label", 72)
+  location.style.horizontal_align, location.tooltip = "right", place_name
+  local stats = platform.add { type = "table", name = "stats", column_count = 1, style = "ssk_balance_grid",
+    draw_horizontal_lines = true }
+  stats.style.horizontal_spacing, stats.style.vertical_spacing = 0, 0
+  stats.style.top_cell_padding, stats.style.bottom_cell_padding = 0, 0
+  stats.style.left_cell_padding, stats.style.right_cell_padding = 0, 0
+  local no_history = result.made.seconds == 0
+  local unknown = no_history or result.loaded.unknown_weight or result.unloaded.unknown_weight or result.made.unknown_weight
+  local kept = (result.loaded.weight or 0) + (result.made.weight or 0) - (result.unloaded.weight or 0)
+  for _, stat in ipairs({ { "loaded", Loc("transfers-loaded"), result.loaded, Shades.sprite("in") },
+      { "made", Loc("transfers-made-aboard-2"), result.made, Shades.sprite("made") },
+      { "unloaded", Loc("transfers-unloaded"), result.unloaded, Shades.sprite("out") }, { "kept", Loc("transfers-kept-aboard") } }) do
+    local line = row(stats, stat[1])
+    line.style.width, line.style.height = center_w - 4, STAT_ROW
+    line.style.left_padding, line.style.right_padding, line.style.horizontal_spacing = 8, 8, 6
+    if stat[4] then sprite(line, stat[4], 7) else line.add { type = "empty-widget" }.style.width = 7 end
+    local data, value, tip = stat[3], nil, nil
+    if stat[1] == "kept" then
+      value = unknown and Loc("transfers-unknown") or Loc.join(kept > 0 and "+" or kept < 0 and "−" or "", mass({ weight = math.abs(kept) }))
+      tip = Loc("transfers-kept-aboard-help")
+    elseif stat[1] == "made" and no_history then
+      value, tip = "—", Loc("transfers-no-production-history-is-available-for-this")
+    elseif (data.weight or 0) == 0 and not data.unknown_weight then
+      value = "—"
+    else
+      value = mass(data)
+    end
+    local muted = value == "—"
+    label(line, "stat_caption", stat[2], muted and "grey_label" or nil).tooltip = tip
     spacer(line)
-    local unavailable = stat[1] == Loc("transfers-made") and result.made.seconds == 0
-    local weight = label(line, nil, unavailable and "—" or mass(stat[2]), "bold_label")
-    if unavailable then weight.tooltip = Loc("transfers-no-production-history-is-available-for-this") end
+    local weight = label(line, "stat_value", value, muted and "grey_label" or "bold_label")
+    weight.tooltip = tip
   end
 end
 
@@ -519,8 +568,8 @@ local function render_flow(player, body, result, note)
     local legend = row(body, "legend")
     legend.style.width, legend.style.height = width, 26
     legend.style.left_padding, legend.style.right_padding = 8, 8
-    for _, key in ipairs({ { Loc("transfers-loaded"), 7 }, { Loc("transfers-unloaded"), 5 }, { Loc("transfers-made-aboard-2"), 15 } }) do
-      sprite(legend, Sprites.bar(key[2]), 8)
+    for _, key in ipairs({ { Loc("transfers-loaded"), "in" }, { Loc("transfers-unloaded"), "out" }, { Loc("transfers-made-aboard-2"), "made" } }) do
+      sprite(legend, Shades.sprite(key[2]), 8)
       label(legend, nil, key[1], "grey_label").style.right_margin = 8
     end
     spacer(legend)
@@ -662,7 +711,7 @@ end
 local function detail_row(parent, items, width)
   local detail = parent.add { type = "frame", style = "inside_shallow_frame", direction = "vertical" }
   detail.style.width, detail.style.padding = width, 8
-  Manifest.section(detail, "delivered_contents", Loc("shipment-received-manifest"), items, width - 16, number,
+  Manifest.section(detail, "delivered_contents", Loc("se-ui-received-manifest"), items, width - 16, number,
     "ssk_transfer_manifest")
 end
 
@@ -703,7 +752,7 @@ local function render_log(body, result, state, width)
     local direction = row(line)
     direction.style.width = columns[2]
     local loaded = pod.direction == "loaded"
-    sprite(direction, Sprites.bar(loaded and 7 or 5), 8)
+    sprite(direction, Shades.sprite(loaded and "in" or "out"), 8)
     label(direction, nil, loaded and Loc("transfers-loaded") or Loc("transfers-unloaded"), "bold_label")
     local endpoint = row(line)
     endpoint.style.width = columns[3]
@@ -765,7 +814,7 @@ local function render_history(player, body, result, state, note)
   heading.axis.switch_state=events and "right" or "left"
   heading.previous_exchanges.visible,heading.next_exchanges.visible,heading.exchange_pages.visible=events,events,events
   heading.previous_exchanges.enabled,heading.next_exchanges.enabled=page>1,page<pages
-  heading.exchange_pages.caption=Loc("shipment-page",page,pages)
+  heading.exchange_pages.caption=Loc("se-ui-page",page,pages)
   heading.units.caption = Loc("transfers-confirmed-pods-2", period)
   heading.units.visible=not events
   heading.units.tooltip = note or Loc("transfers-select-a-time-bucket-to-filter-delivered")
@@ -777,28 +826,6 @@ end
 
 local function reset_log(state)
   state.bucket, state.page, state.expanded,state.exchange = nil, nil, nil,nil
-end
-
-function UI.compact_viewport(parent,width,height)
-  local min_width,min_height=900,420
-  local pad_x,pad_y,rail=12,8,12
-  local w,h=width-2*pad_x,height-2*pad_y
-  if min_width>w or min_height>h then
-    -- Leave room for the native tab frame's bottom inset so the horizontal rail stays visible.
-    height=height-2*pad_y
-    h=height-2*pad_y
-  end
-  local horizontal=min_width>w or (min_height>h and min_width>w-rail)
-  local vertical=min_height>h or (horizontal and min_height>h-rail)
-  local viewport=parent.add{type="scroll-pane",name="viewport",style="naked_scroll_pane",direction="vertical",
-    horizontal_scroll_policy=horizontal and "auto" or "never",vertical_scroll_policy=vertical and "auto" or "never"}
-  viewport.style.width,viewport.style.height=width,height
-  viewport.style.left_padding,viewport.style.right_padding=pad_x,pad_x
-  viewport.style.top_padding,viewport.style.bottom_padding=pad_y,pad_y
-  w,h=math.max(min_width,w-(vertical and rail or 0)),math.max(min_height,h-(horizontal and rail or 0))
-  local body=viewport.add{type="flow",name="body",direction="vertical",tags={width=w,height=h}}
-  body.style.width,body.style.height=w,h
-  body.style.vertical_spacing=4
 end
 
 function UI.render(content, player, period, state, width, height)

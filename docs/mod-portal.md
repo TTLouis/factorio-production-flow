@@ -4,11 +4,13 @@ This file supplies the next Mod Portal description. The screenshots are native F
 
 ## Short description
 
-Spot production shortages with interactive Sankey charts, item and fluid history, and chest stock tracking. In Space Age, follow cargo deliveries between planets and space platforms.
+Spot production shortages with interactive Sankey charts, item and fluid history, and chest stock tracking. Transfers follows Space Age cargo deliveries and Space Exploration cargo rockets and delivery cannons.
 
 ## Mod page description
 
 **Where did all your green circuits go?** Follow the recipes using them, see whether production is keeping up, and check how long your chest stock will last. In Space Age, follow cargo from the surface that loaded it to the one where it landed.
+
+**Supported game setups** include base Factorio, Space Age, and Space Exploration. Balance, Focus, and Full Sankey are available in all three. The optional Space Age and Space Exploration integrations add their own **Transfers** views.
 
 Available in English, Simplified Chinese (简体中文), and Traditional Chinese (繁體中文). All views, mod settings, help, tooltips, and alerts follow your Factorio language setting.
 
@@ -30,17 +32,29 @@ Switch to **History** to compare Made, Used, Net, estimated use by product and c
 
 ![Balance History aligns production rates, net rate and chest stock](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/31-balance-history.png)
 
-### Follow cargo in Space Age
+### Follow platform cargo in Space Age
 
-Pick a space platform in **Transfers** to see where it loaded and unloaded cargo. Follow the ribbons for each route and inspect what it carried. Star your regular platforms to keep them at the top.
+Pick a space platform in **Transfers → Flow** to see where it loads and unloads cargo. Follow the ribbons to inspect what moved on each route. The platform card shows how much was loaded, made aboard, unloaded, and kept aboard. Star your regular platforms to keep them at the top.
 
-![Transfers Flow shows Vulcanus exports to Fulgora, Gleba and Nauvis, plus iron plates made aboard](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/32-transfers-export.png)
+![Transfers Flow shows a platform loading at four planets, unloading at five and processing ore aboard](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/32-transfers-export.png)
 
 ![Transfers Flow shows a science-pack route from Vulcanus to Nauvis](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/33-transfers-science.png)
 
-Switch to **History** to see when cargo arrived. Select a time bucket to narrow the delivery log and expand a cargo pod to see its manifest.
+Open **History** to see when cargo moved. Switch to **Time** to see the gaps between deliveries, or **Events** to put recorded cargo exchanges side by side. Expand a delivery in the log to see what was in the pod.
 
 ![Transfers History shows the delivery timeline and an expanded cargo manifest](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/34-transfers-history.png)
+
+### Track shipments in Space Exploration
+
+- **Flow** maps cargo rocket and delivery cannon routes into and out of the selected surface. Group routes by **Transport** or **Items**, then click a ribbon to open its shipment history.
+- **Items** compares quantities sent and received with local production, usage, and chest stock. Select a material to see how its supply and stock changed over time.
+- **History** shows shipments by elapsed **Time** or as a compact sequence of **Events**. Expand a shipment to see its contents and any measured losses. Jump to the sender or receiver when its location is available.
+
+![Space Exploration Transfers Flow shows cargo rocket and delivery cannon routes into and out of Nauvis, with zone details](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/38-se-transfers-flow.png)
+
+![Space Exploration Transfers Items shows shipment materials alongside production and stock history](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/39-se-transfers-items.png)
+
+Received quantities are measured when a rocket lands on a pad with enough room or a delivery chest catches a cannon package. Receipts stay unknown for full-pad landings, off-pad landings, and spilled packages. Delivery cannon tracking requires Space Exploration 0.7.64.
 
 ### Explore recipes and inspect machines
 
@@ -69,6 +83,8 @@ Open the **?** button in-game for help with controls, measurements and chart lim
 
 ### Compatibility and scope
 
-Requires **Factorio 2.1**. Space Age enables Transfers. Production history and cargo tracking fill as the mod observes activity. Production charts show recipe relationships on a single surface, and Transfers records confirmed cargo deliveries between surfaces. Broader modpack compatibility, multiplayer and large-factory performance are still being tested.
+Requires **Factorio 2.1**. Space Age and Space Exploration are optional integrations that enable Transfers. Production history and cargo tracking fill as the mod observes activity. Production charts show recipe relationships on a single surface, and Transfers records observed cargo shipments between surfaces, with the measurement limits described above. Broader modpack compatibility, multiplayer and large-factory performance are still being tested.
+
+**Remove night vision tint** is enabled by default under **Settings → Mod settings → Startup**. It uses neutral colours throughout the game while night vision equipment is active. Night vision still brightens the scene, and the neutral palette can look brighter than the equipment's original palette. Turn it off and restart Factorio to restore the original look. Production Flow charts use their own palette in either mode.
 
 Created by **TTLouis** under the **MIT license**. [Source code](https://github.com/TTLouis/factorio-production-flow)

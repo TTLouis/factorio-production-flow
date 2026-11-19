@@ -3,15 +3,15 @@
 **Production balances and interactive Sankey charts for Factorio.**
 
 Production Flow shows what your factory makes, what it consumes, and how recipes
-connect on the selected surface. In Space Age, it also tracks cargo deliveries
-between planets and space platforms.
+connect on the selected surface. Its optional Transfers integrations cover
+Space Age cargo deliveries and Space Exploration shipment activity.
 
 **Feedback needed:** Help shape the beta by sharing what works, what is confusing,
 and what needs improving. Report bugs or suggest improvements on
 [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues) or the
 [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion).
 
-The beta includes Balance History and Space Age Transfers.
+The beta includes Balance History and Transfers for Space Age and Space Exploration.
 See [the changelog](CHANGELOG.md).
 
 ## Views
@@ -22,8 +22,8 @@ the layout of dense charts are still being refined.
 - **Balance.** Find shortages and explore what makes and uses the selected item
   or fluid. Switch from Flow to History to compare production, use, net rate
   and chest stock on the same timeline.
-- **Transfers.** Follow confirmed Space Age cargo deliveries by platform.
-  Explore route manifests or switch to History to see when each pod arrived.
+- **Transfers.** Follow confirmed Space Age cargo deliveries by platform, or
+  browse observed Space Exploration cargo rocket routes, items and shipment history.
 - **Focus.** Trace upstream and downstream recipe connections for one material.
 - **Full Sankey.** Explore the broader recipe network on the selected surface.
 
@@ -40,8 +40,9 @@ has been recorded so far.
 
 ## Install
 
-Requires **Factorio 2.1**. Tested with Factorio **2.1.24** and a Space Age save,
-including planetary and local space-platform production.
+Requires **Factorio 2.1**. Tested with Factorio **2.1.24** in base Factorio,
+Space Age, and Space Exploration 0.7.64. Space Age and Space Exploration are
+optional integrations.
 
 Install [Production Flow from the Mod Portal](https://mods.factorio.com/mod/production-flow),
 or download the ZIP from the
@@ -54,7 +55,9 @@ In Focus, use the magnifier in the toolbar to search for an item or fluid.
 ## What the charts measure
 
 Production charts show recipe relationships based on observed crafting and
-production statistics. Transfers tracks cargo delivered between surfaces.
+production statistics. Transfers records confirmed Space Age cargo deliveries
+and observed Space Exploration launches. Space Exploration received quantities
+and cannon manifests remain unknown until measured.
 Stock covers ordinary and logistic chests on the selected surface, including
 requester and buffer chests, across all qualities. Chests outside a logistic
 network count too. Production measurements work independently of chest storage.
@@ -73,6 +76,10 @@ Dense charts can still cross or require scrolling. Modpack compatibility,
 multiplayer and large-factory performance need broader testing.
 
 ## Development
+
+The [Base / Space Age / Space Exploration feature matrix](docs/feature-matrix.md)
+tracks the current development scope, provider limitations and packaging work.
+It distinguishes unpublished changes from published-release claims.
 
 Python 3.11+ is sufficient for the offline test and packaging commands:
 

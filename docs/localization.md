@@ -1,15 +1,22 @@
 # Localization
 
 English is the source catalog in `mod/production-flow/locale/en/locale.cfg`.
-The mod ships English (`en`) and Simplified Chinese (`zh-CN`). Additional languages
-can be selected and reviewed separately without changing the runtime interface code.
+The mod includes English (`en`), Simplified Chinese (`zh-CN`) and Traditional
+Chinese (`zh-TW`). Additional languages can be selected and reviewed separately
+without changing the runtime interface code.
 
-The original 528 keys are translated in Simplified Chinese. One shared rate
+The original 528 keys are translated in both Chinese catalogs. One shared rate
 format key also localizes the History usage readout, bringing each catalog to 529
-keys. Chinese rate units use `/秒` (and `/分钟` for per-minute values); explanations
-use “每秒”. The narrow Balance time column uses “时/分/秒”, while longer durations
-use “小时/分钟/秒”. SI prefixes and mass symbols such as `k`, `M`, `G`, `g`, `kg`
+keys. Both Chinese catalogs use `/秒` and “每秒”. Simplified Chinese uses `/分钟`
+for per-minute values, compact durations in 时/分/秒 and longer durations in
+小时/分钟/秒. SI prefixes and mass symbols such as `k`, `M`, `G`, `g`, `kg`
 and `t` remain conventional symbols.
+
+Traditional Chinese uses `/秒` and `/分鐘`, with compact durations in 時/分/秒.
+It follows the installed `zh-TW` game catalogs, including 實驗室, 進貨箱,
+轉運箱, 武卡努斯星, 弗戈拉星, 葛萊芭星 and 阿魁洛星. These terms differ
+from the Simplified Chinese names; the translation is reviewed beyond character
+conversion. Player-entered names and the Production Flow brand remain literal.
 
 Simplified Chinese follows the installed Factorio 2.1.24 catalogs under
 `data/core/locale/zh-CN/`, `data/base/locale/zh-CN/` and
@@ -116,7 +123,8 @@ client renders Chinese. All resolvers and probes are injected only into the
 isolated test copy after its clean candidate archive is created, and are excluded
 from installable packages.
 
-The native runner defaults to English. Select Chinese with `--language zh-CN`
+The native runner defaults to English. Select Simplified Chinese with `--language zh-CN`
+or Traditional Chinese with `--language zh-TW`
 when creating a fresh stage and keep that argument on later phases:
 
 ```powershell
@@ -125,6 +133,8 @@ python tests/save_test.py --stage "$saveStage" --language zh-CN --phase ux
 python tests/save_test.py --stage "$saveStage" --language zh-CN --phase picker
 python tests/save_test.py --stage "$saveStage" --language zh-CN --phase history-view
 ```
+
+Use `--language zh-TW` throughout a separate fresh stage for Traditional Chinese.
 
 Use the actual stage printed by the runner. Reusing a stage with a different
 language is rejected to preserve its earlier evidence. Screenshots are retained

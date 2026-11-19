@@ -416,7 +416,7 @@ assert(#H.build(1, 6, material).stock == 0)
 -- backwards through the earlier production/transport history.
 local function event(tick, delta, surface, included, name)
   return {key=tostring(#crossings+1),tick=tick,delta=delta,surface_index=surface or 1,
-    material=name or material,stats_included=included,kind=delta<0 and "sent" or "received",provider="sa"}
+    material=name or material,stats_included=included,kind=delta<0 and "sent" or "received",provider="se"}
 end
 reset(600)
 for sec=0,9 do fine(sec,stats(2,1),stats(0,0)) end
@@ -453,6 +453,11 @@ h=H.build(1,10,material)
 near(stock_at(h,600).count,110)
 assert(h.stock_transport_incomplete and not stock_at(h,150),
   "unverified statistics accounting is disclosed, never guessed")
+crossings={};crossing_metadata={provider="se"}
+h=H.build(1,10,material)
+near(stock_at(h,600).count,110)
+assert(h.stock_transport_incomplete and #h.stock_events==0,
+  "an unknown SE receipt cannot create a positive stock event")
 crossings={};crossing_metadata={provider="sa",received_partial=true}
 h=H.build(1,10,material)
 near(stock_at(h,600).count,110)
@@ -558,6 +563,9 @@ storage.stock={}
 h=H.build(1,5,material)
 assert(#h.stock==0 and #h.import_receipts==1,"receipts must remain visible before the first stock scan")
 assert(not H.build(1,5,"fluid/water").import_receipts,"item receipts leaked into fluid history")
+crossings={};crossing_metadata={provider="se"}
+h=H.build(1,5,material)
+assert(#h.import_receipts==0,"unknown SE receipts must never invent an import marker")
 crossings={};crossing_metadata={provider="sa",received_partial=true}
 h=H.build(1,5,material)
 assert(#h.import_receipts==0,"unknown cargo receipts must never invent an import marker")

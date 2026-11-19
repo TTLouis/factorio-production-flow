@@ -32,6 +32,7 @@ local topics={
     {Loc("help-scope"), Loc("help-balance-focus-and-full-sankey-each-cover")},
   }},
   {name=Loc("help-transfers"),sections={
+    {Loc("se-logistics"), Loc("se-help")},
     {Loc("help-flow"), Loc("help-select-a-space-platform-to-see-where")},
     {Loc("help-history"), Loc("help-the-upper-lane-shows-pods-delivered-to")},
     {Loc("help-recording-limits"), Loc("help-transfers-retains-observed-deliveries-for-up-to")},

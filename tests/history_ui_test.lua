@@ -329,6 +329,13 @@ UI.refresh(player, true)
 assert(not gui_plot.valid and target.valid and storage.history_hover[player.index].bands[1].sprite.visible,
   "A GUI plot refresh must preserve the active tooltip target and redraw its highlight")
 player.get_inventory = get_inventory
+local active_mods=script.active_mods
+script.active_mods={["space-exploration"]="0.7.64"}
+UI.refresh(player, true)
+local se_plot=named(root,"ssk_history_gui_plot")
+assert(not se_plot.parent.ssk_history_camera and #objects()==0,
+  "SE Balance History must bypass world-camera colour lookup even when equipped armor is unavailable")
+script.active_mods=active_mods
 UI.refresh(player, true)
 camera = assert(named(root, "ssk_history_camera"))
 assert(camera.parent.children[1] == camera and target.valid,

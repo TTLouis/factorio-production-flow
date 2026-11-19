@@ -5,6 +5,7 @@ local NativeLocale = require("scripts.test_locale_native")
 T.on_string_translated = NativeLocale.on_translated
 local mode = require("scripts.save_test_mode")
 local full_view = mode=="full" or mode=="ribbon-view"
+local PORTAL_EXTRA_TICKS = 72000
 local SK = require("scripts.sankey_ui")
 local Model = require("scripts.model")
 local View = require("scripts.view")
@@ -205,6 +206,19 @@ elseif mode=="transfer-view" then
   cases={
     {name="transfers-flow",surface="nauvis",tab="transfers"},
     {name="transfers-history",surface="nauvis",tab="transfers",history=true},
+  }
+elseif mode=="portal" then
+  -- Mod Portal gallery (docs/screenshots 30-37). Real save data only: no seeded
+  -- manifests or fixture platforms. Transfers pick the busiest real platforms.
+  cases={
+    {name="30-balance-flow",surface="nauvis",tab="balance",focus="item/electronic-circuit",depth=1,flow_only=true},
+    {name="31-balance-history",surface="nauvis",tab="balance",focus="item/electronic-circuit",portal_history=true},
+    {name="32-transfers-export",surface="nauvis",tab="transfers",platform="routes",period=3600},
+    {name="33-transfers-science",surface="nauvis",tab="transfers",platform="science",period=3600},
+    {name="34-transfers-history",surface="nauvis",tab="transfers",platform="routes",period=3600,history=true},
+    {name="35-focus-circuit",surface="nauvis",tab="focus",focus="item/electronic-circuit"},
+    {name="36-machine-status",surface="nauvis",tab="balance",focus="item/electronic-circuit",depth=1,machine_status=true},
+    {name="37-full-sankey",surface="nauvis",tab="sankey",view="overview"},
   }
 elseif mode=="ribbon-view" then
   cases={
@@ -606,9 +620,12 @@ local function exercise_transfers(UI, player, root, us, case)
     assert(#result.made.items>0 and not us.transfers.show_all_production,
       "Export-only production must still show materials unloaded to a matching destination")
     local card=assert(find_named(panel,"ssk_transfer_surface_card"),"Flow is missing ranked surface cards")
-    assert(card.tags.transfer_rank_count==5 and card.rank_5 and not card.rank_6 and card.tooltip,
+    assert(card.tags.transfer_rank_count==5 and card.rows.rank_5 and not card.rows.rank_6 and card.tooltip,
       "Flow must show the first five items with a full manifest on hover")
-    assert(find_named(panel,"ssk_transfer_platform_node") and find_named(panel,"ssk_transfer_plot"),
+    local node=assert(find_named(panel,"ssk_transfer_platform_node"))
+    assert(node.stats.loaded and node.stats.made and node.stats.unloaded and node.stats.kept
+      and node.stats.children[2]==node.stats.made,"Platform node stats must run in flow order and end with Kept aboard")
+    assert(find_named(panel,"ssk_transfer_plot"),
       "Flow needs its platform node and native ribbon rendering")
     local arrow=assert(find_named(panel,"ssk_transfer_ribbon_loaded_1_1"),"Transfers is missing its ribbon hover target")
     local tip=LOC(arrow.tooltip)
@@ -628,6 +645,70 @@ local function exercise_transfers(UI, player, root, us, case)
     assert(not us.transfers.favourites[platform_id] and us.transfers.platform==platform_id,
       "Removing a favourite must retain the current platform")
     log("TRANSFERS FLOW NATIVE PASS native tabs, platform, production and ribbon tooltips")
+  end
+end
+
+-- Portal gallery: choose real platforms from recorded cargo in the window.
+local portal_platforms
+local function portal_choose(force, seconds)
+  local routes, science = {}, {}
+  for _, platform in pairs(force.platforms or {}) do
+    if platform.valid then
+      local view = Transfers.platform_view(force, game.tick, seconds, {platform=platform.index, view="flow"})
+      local count, sci = view.loaded.count + view.unloaded.count, 0
+      for _, route in ipairs(view.unloading) do
+        for _, item in ipairs(route.items) do
+          if item.name:find("science-pack", 1, true) then sci = sci + item.count end
+        end
+      end
+      if count > 0 then
+        routes[#routes+1] = {platform=platform, score=(#view.loading + #view.unloading) * 1e9 + count,
+          loading=#view.loading, unloading=#view.unloading, count=count}
+      end
+      if sci > 0 then science[#science+1] = {platform=platform, score=sci, count=count} end
+    end
+  end
+  table.sort(routes, function(a, b) return a.score > b.score end)
+  table.sort(science, function(a, b) return a.score > b.score end)
+  assert(routes[1], "Portal capture needs at least one real platform with recorded cargo")
+  local pick = {routes=routes[1].platform}
+  for _, entry in ipairs(science) do
+    if entry.platform ~= pick.routes then pick.science = entry.platform; break end
+  end
+  pick.science = pick.science or (science[1] and science[1].platform)
+  assert(pick.science, "Portal capture needs a real platform that unloaded science packs")
+  local report = {tick=game.tick, seconds=seconds, routes={}, science={}}
+  for i = 1, math.min(5, #routes) do
+    local r = routes[i]
+    report.routes[i] = {name=r.platform.name, loading=r.loading, unloading=r.unloading, count=r.count}
+  end
+  for i = 1, math.min(5, #science) do report.science[i] = {name=science[i].platform.name, packs=science[i].score} end
+  report.chosen = {routes=pick.routes.name, science=pick.science.name}
+  helpers.write_file("save-test/portal-platforms.json", helpers.table_to_json(report), false)
+  log("PORTAL platforms routes="..pick.routes.name.." science="..pick.science.name)
+  return pick
+end
+
+local function portal_transfers(UI, player, root, us, case)
+  portal_platforms = portal_platforms or portal_choose(player.force, case.period)
+  local platform = assert(portal_platforms[case.platform])
+  local panel = root.ssk_inner.ssk_tabs.content_transfers
+  -- Keep both gallery platforms in the visible Favourites section.
+  assert(us.transfers, "Transfers state was not initialised")
+  us.transfers.favourites = {[portal_platforms.routes.index]=true, [portal_platforms.science.index]=true}
+  us.transfers.expanded, us.transfers.bucket, us.transfers.page = nil, nil, nil
+  UI.refresh(player, true)
+  local list = assert(find_named(panel, "ssk_transfer_platforms"))
+  assert(UI.on_click{player_index=player.index, element=assert(list["platform_"..platform.index])},
+    "Platform selection was not handled")
+  local pane = assert(find_named(panel, "ssk_transfer_tabs"))
+  pane.selected_tab_index = case.history and 2 or 1
+  assert(UI.on_tab_changed{player_index=player.index, element=pane})
+  assert(us.transfers.platform == platform.index, "Portal capture lost the chosen platform")
+  if case.history then
+    local expand = assert(find_named(panel, "ssk_transfer_delivery_1"), "History has no delivery to expand")
+    assert(UI.on_click{player_index=player.index, element=expand}, "Delivery expansion was not handled")
+    assert(us.transfers.expanded, "Delivery did not expand")
   end
 end
 
@@ -775,7 +856,7 @@ function T.tick(UI, Sampler)
       diagnostic_machine.set_recipe("iron-gear-wheel")
     end
     if mode=="transfer-view" or mode=="ribbon-view" then transfer_fixture=start_transfer_fixture(mode=="ribbon-view") end
-    game.speed = mode=="transfer-view" and 8 or 1
+    game.speed = (mode=="transfer-view" and 8) or (mode=="portal" and 64) or 1
     local _, seconds = Sampler.rates(game.surfaces.nauvis.index, 600)
     if mode~="warmup" then assert(seconds == 600, "Ten-minute history did not survive save/reload")
     else assert(seconds<600,"Warm-up case must use a fresh installation's history") end
@@ -787,6 +868,14 @@ function T.tick(UI, Sampler)
     if elapsed==1800 then prepare_transfer_preview(transfer_fixture) end
     if elapsed<2100 then return end
     game.speed=1
+  elseif mode=="portal" then
+    -- Record another 20 game minutes of real cargo on top of the warmed history
+    -- so the 1H Transfers views show regular routes.
+    if elapsed<PORTAL_EXTRA_TICKS then
+      if elapsed%3600==0 then log("PORTAL recording progress="..elapsed.."/"..PORTAL_EXTRA_TICKS) end
+      return
+    end
+    if game.speed~=1 then game.speed=1 end
   elseif mode=="ribbon-view" and elapsed==64 then
     -- Rendering checks use seeded manifests. Native arrivals are exercised in transfer-view.
     Transfers.on_housekeeping(game.tick)
@@ -920,7 +1009,12 @@ function T.tick(UI, Sampler)
   local tabs=player.gui.screen.ssk_main.ssk_inner.ssk_tabs
   assert(#tabs.tabs==4 and tabs.content_transfers,"Release needs Balance, Focus, Full Sankey and Transfers")
   local us = storage.ui[player.index]
-  assert(us.period == 600, "10m is not the initial default")
+  assert(mode=="portal" or us.period == 600, "10m is not the initial default")
+  if mode=="portal" then
+    us.period=c.period or 600
+    us.bal_filter,us.bal_group,us.bal_sort,us.bal_details="problems",nil,"priority",false
+    us.bal_mode="flow" -- History is selected after the shared live-refresh checks.
+  end
   us.surface, us.tab_id, us.view = c.surface, c.tab, c.view or "overview"
   us.live = false
   us.renderer = c.renderer or ((mode=="history-view" or c.usage_history) and "sprites" or "poly")
@@ -937,7 +1031,7 @@ function T.tick(UI, Sampler)
     us.bal_mode="flow"
     us.bal_favs={items={[c.focus]=true},groups={}}
   end
-  if full_view or mode=="names" then
+  if full_view or mode=="names" or mode=="portal" then
     us.preset=c.preset or "all"; us.sel=nil; us.layout_snapshot=nil; us.auto_rank=nil
     us.show_labels=true; us.heights=c.heights or "sqrt"; us.color_mode="destination"
     us.layout="clean"; us.tier_mode="depth"; us.tier_lo=nil; us.tier_hi=nil
@@ -955,12 +1049,13 @@ function T.tick(UI, Sampler)
   elseif c.tab == "focus" then
     local fx=SK.focus_state(us); if c.focus then fx.focus=c.focus end; fx.live=false
     if mode=="focus" then fx.renderer=c.renderer or "poly"; fx.show_labels=true; fx.focus_steps=3 end
-    if full_view or mode=="names" then fx.show_labels=true; fx.focus_steps=2; fx.layout_snapshot=nil; fx.auto_rank=nil end
+    if full_view or mode=="names" or mode=="portal" then fx.show_labels=true; fx.focus_steps=2; fx.layout_snapshot=nil; fx.auto_rank=nil end
   end
   UI.open(player)
   if c.tab~="transfers" then assert(us.sidx==game.surfaces[c.surface].index,"Wrong rendered surface") end
   if c.tab=="transfers" then
-    exercise_transfers(UI,player,player.gui.screen.ssk_main,us,c)
+    if mode=="portal" then portal_transfers(UI,player,player.gui.screen.ssk_main,us,c)
+    else exercise_transfers(UI,player,player.gui.screen.ssk_main,us,c) end
     capture=c.name
     return
   end
@@ -999,7 +1094,23 @@ function T.tick(UI, Sampler)
     local preset_picker=find_action(player.gui.screen.ssk_main,"preset")
     assert(us.preset_ids[preset_picker.selected_index]==us.preset,"Preset picker does not identify the displayed copper chain")
     local L=View.build(player,us,us.canvas_w,us.canvas_h)
-    assert(L.nodes["item/copper-plate"] and L.nodes["fluid/molten-copper"],"plain copper chain lost its material names")
+    -- The copper chain is only required when the surface made copper plate in
+    -- the window; a platform that stopped smelting copper must chart nothing.
+    local saved_preset, saved_snapshot=us.preset, us.layout_snapshot
+    us.preset="all"
+    local everything=View.build(player,us,us.canvas_w,us.canvas_h)
+    us.preset, us.layout_snapshot=saved_preset, saved_snapshot
+    if everything.nodes["item/copper-plate"] then
+      if not (L.nodes["item/copper-plate"] and L.nodes["fluid/molten-copper"]) then
+        local keys={}
+        for key in pairs(L.nodes) do keys[#keys+1]=key end
+        table.sort(keys)
+        error("plain copper chain lost its material names on "..c.surface.."; nodes: "..table.concat(keys,", "))
+      end
+    else
+      assert(not next(L.nodes) and #L.links==0,"Copper roots charted materials the surface did not make")
+      log("SANKEY SAVE SKIP "..c.name..": no copper plate in the window on "..c.surface)
+    end
     for _,n in pairs(L.nodes) do assert(n.kind~="group","plain copper chain still has a category node") end
   end
   assert(us.surface_names[find_scope(player.gui.screen.ssk_main).selected_index]==c.surface,"Surface picker does not identify rendered surface")
@@ -1248,6 +1359,13 @@ function T.tick(UI, Sampler)
   end
   if mode=="diagnostics" then
     exercise_diagnostics(UI,player,player.gui.screen.ssk_main,us,c)
+  elseif mode=="portal" and c.portal_history then
+    local tabs=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_focus.ssk_balance_inspector_tabs
+    tabs.selected_tab_index=2
+    assert(UI.on_tab_changed{player_index=player.index,element=tabs} and us.bal_mode=="history","Balance History did not open")
+  elseif mode=="portal" and c.machine_status then
+    assert(UI.on_click{player_index=player.index,element=assert(find_ui(player.gui.screen.ssk_main,"machine_status"))})
+    assert(player.gui.screen.ssk_machine_status,"Machine status did not open")
   elseif (mode=="history-view" or c.usage_history) and not c.flow_only then
     exercise_history(UI,player,player.gui.screen.ssk_main,us,c)
   end

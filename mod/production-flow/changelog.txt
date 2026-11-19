@@ -1,4 +1,18 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.3.10
+Date: 2026-11-19
+  Features:
+    - Added optional Space Exploration support, with Transfers views for observed cargo rocket launches and delivery cannon shipments.
+    - Measure Space Exploration receipts when a cargo rocket lands on its landing pad, including cargo lost in flight, and when a delivery chest catches a cannon package. Off-pad landings and spilled packages stay unknown and are marked as unavailable in History charts instead of drawn as full deliveries. Balance History and chest-stock estimates include measured Space Exploration receipts.
+    - Browse Space Exploration shipment History by time or event, with filters and shortcuts to recorded launch pads, landing pads, delivery cannons and receiver chests.
+    - Focus and Full Sankey show observed exports to other surfaces as transport nodes. Click one to open its transfer history.
+  Gui:
+    - The Space Exploration Flow card shows the selected surface's details from Space Exploration: zone type, its moon, planet and star, primary resource, environment, threat, robot interference, solar, hazards, day/night cycle, radius and its top five resources with size and richness.
+    - Switch Space Exploration Flow between Transport and Items. Grouped by item, each side lists its eight most transported items, and an item keeps the same colour on both sides and in every card.
+    - Expanded shipment History rows list each item's sent, lost and received amounts in one table. Delivery cannon shots that no chest caught are marked on the shipment row.
+    - Estimate remaining Space Exploration rocket cargo from launch-time safety research and the route when available. The chart explains when it shows a dispatch quantity and why a receipt is unknown.
+    - Space Age platform cards list Loaded, Made aboard, Unloaded and Kept aboard in flow order.
+---------------------------------------------------------------------------------------------------
 Version: 0.2.10
 Date: 2026-11-18
   Bugfixes:

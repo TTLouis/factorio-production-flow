@@ -601,8 +601,10 @@ local function platform_choices(force, selected_id)
   local choices, selected = {}, nil
   for _, platform in pairs(force.platforms or {}) do
     if platform.valid then
+      local location = platform.space_location
       local choice = { id = platform.index, name = platform.name,
-        icon = "item/space-platform-hub", surface = platform.surface }
+        icon = "item/space-platform-hub", surface = platform.surface,
+        location = location and location.name or nil }
       choices[#choices + 1] = choice
       if choice.id == selected_id then selected = choice end
     end

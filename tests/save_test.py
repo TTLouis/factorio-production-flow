@@ -223,7 +223,7 @@ def main():
     parser.add_argument('--save', type=Path, default=PROFILE / 'saves/_autosave4.zip')
     parser.add_argument('--exe', type=Path, default=Path(r'D:\SteamLibrary\steamapps\common\Factorio\bin\x64\Factorio.exe'))
     parser.add_argument('--stage', type=Path, help='Reuse a previously isolated stage for iteration')
-    parser.add_argument('--phase', choices=['all', 'history', 'gui', 'balance', 'full', 'focus', 'selection', 'picker', 'scroll', 'names', 'audit', 'ux', 'warmup', 'diagnostics', 'history-view', 'transfer-view', 'ribbon-view'], default='all')
+    parser.add_argument('--phase', choices=['all', 'history', 'gui', 'balance', 'full', 'focus', 'selection', 'picker', 'scroll', 'names', 'audit', 'ux', 'warmup', 'diagnostics', 'history-view', 'transfer-view', 'ribbon-view', 'portal'], default='all')
     parser.add_argument('--timeout', type=int, default=1200)
     languages = sorted(p.name for p in (ROOT / 'mod/production-flow/locale').iterdir() if p.is_dir())
     parser.add_argument('--language', choices=languages, default='en', help='Client language for native rendering and translation probes')

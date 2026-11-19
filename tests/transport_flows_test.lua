@@ -1,22 +1,105 @@
 local F=require("scripts.transport_flows")
 local T=require("scripts.transfers")
+local R=require("scripts.se_rockets")
+local C=require("scripts.se_cannons")
 local force={index=1,valid=true,platforms={}}
 local other={index=2,valid=true}
 local local_surface={index=1,name="Nauvis",valid=true}
 local remote_surface={index=2,name="Orbit",valid=true}
-defines={events={on_cargo_pod_finished_ascending=1,on_cargo_pod_finished_descending=2,on_cargo_pod_delivered_cargo=3},
+local replacement={index=1,name="Replacement",valid=true}
+defines={events={se_on_cargo_rocket_launched=10,on_script_trigger_effect=11,
+  on_cargo_pod_finished_ascending=1,on_cargo_pod_finished_descending=2,on_cargo_pod_delivered_cargo=3},
   inventory={cargo_unit=1,chest=2},cargo_destination={station=1,surface=2}}
 script={active_mods={}}
 game={tick=1200,forces={player=force}}
 storage={}
 prototypes={item={['iron-plate']={},['copper-plate']={},['water-barrel']={}}}
 local function near(a,b)assert(a and math.abs(a-b)<1e-9,tostring(a).." ~= "..tostring(b))end
-local function endpoint(surface,id)return{surface=surface,id=id,name=surface.name}end
+local function endpoint(surface,id)return{surface=surface,id=id,zone=id,name=surface.name}end
 local function stack(name,count,quality)return{name=name,count=count,quality=quality or "normal"}end
+local function rocket(id,from,to,tick,sent,received,arrival,owner)
+  local s=storage.se_rockets
+  s.count=s.count+1;s.history[s.count]={id=id,key=tostring(id),force=owner or force,
+    from=endpoint(from,from.index),to=endpoint(to,to.index),departure_tick=tick,
+    sent=sent,received=received,arrival_tick=arrival}
+end
+
 assert(F.query(force,local_surface,1200,10).provider==nil)
+script.active_mods['space-exploration']='0.7.64'
+R.init(0);C.init(0)
+rocket(1,local_surface,remote_surface,700,{stack('iron-plate',100),stack('iron-plate',20,'rare')},
+  {stack('iron-plate',90)},900)
+rocket(2,remote_surface,local_surface,500,{stack('copper-plate',80)},
+  {stack('copper-plate',70)},800) -- Departure is outside the selected window.
+rocket(3,remote_surface,local_surface,850,{stack('iron-plate',50)},nil,nil)
+rocket(4,local_surface,local_surface,900,{stack('iron-plate',1000)},nil,nil)
+rocket(5,local_surface,remote_surface,1250,{stack('iron-plate',1000)},nil,nil)
+rocket(6,local_surface,remote_surface,900,{stack('iron-plate',1000)},nil,nil,other)
+rocket(7,replacement,remote_surface,900,{stack('iron-plate',1000)},nil,nil)
+rocket(8,local_surface,remote_surface,1000,{stack('water-barrel',5)},nil,nil)
+storage.se_cannons.count=1;storage.se_cannons.history[1]={id=1,tick=900,sender={surface=local_surface,force=force}}
+local q=F.query(force,local_surface,1200,10)
+assert(q.provider=='se' and q.period_seconds==10 and q.unknown.unpaired_cannon_observations==1)
+local iron=q.materials['item/iron-plate']
+assert(iron.exports.activity and iron.exports.sent_known and iron.exports.received_known)
+near(iron.exports.sent,120);near(iron.exports.received,90)
+near(iron.exports.sent_rate,12);near(iron.exports.received_rate,9)
+assert(#iron.exports.routes==1 and iron.exports.routes[1].method=='rocket' and iron.exports.routes[1].remote_name=='Orbit',
+  'Hover route metadata lost method/surface or duplicated qualities as routes')
+iron.exports.routes[1].remote_name='mutated presentation'
+assert(F.query(force,local_surface,1200,10).materials['item/iron-plate'].exports.routes[1].remote_name=='Orbit',
+  'Presentation route metadata mutated the provider')
+assert(iron.exports.sent_partial and iron.exports.received_partial,
+  'known rocket evidence must not claim complete all-method SE coverage')
+near(iron.imports.sent,50);assert(iron.imports.received==nil and iron.imports.received_rate==nil)
+assert(iron.imports.history.material=='iron-plate' and iron.imports.history.method=='rocket')
+local copper=q.materials['item/copper-plate']
+assert(copper.imports.sent==nil);near(copper.imports.received,70)
+assert(not copper.exports.activity and copper.exports.sent==nil)
+assert(q.materials['item/water-barrel'] and not q.materials['fluid/water'], 'barrels remain item cargo')
+assert(#q.events==4)
+local net=0
+for _,event in ipairs(q.events) do
+  net=net+event.delta
+  assert(event.surface_index==1 and event.stats_included==false)
+  assert(not(event.material=='item/iron-plate' and event.delta>0), 'incoming source dispatch is not a local receipt')
+end
+near(net,-55) -- -120 iron +70 copper -5 barrels; destination receipts are not local stock.
+local events=F.events(force,local_surface,1200,10,{material='iron-plate'})
+assert(#events==2 and events[1].quality=='normal' and events[2].quality=='rare')
+local h=F.history(force,local_surface,1200,10,{material='iron-plate',direction='exports'})
+assert(#h.records==1 and #h.materials==3 and h.records[1].sent[2].quality=='rare')
+assert(#F.query(force,replacement,1200,10).events==1)
+rocket(9,remote_surface,local_surface,1000,{stack('stone',10)},{},1100)
+local empty_receipt=F.query(force,local_surface,1200,10).materials['item/stone'].imports
+assert(empty_receipt.received_known and empty_receipt.received==0,
+  'an explicitly measured empty receipt is distinct from an unknown receipt')
+storage.se_rockets.history[storage.se_rockets.count]=nil;storage.se_rockets.count=storage.se_rockets.count-1
 assert(not next(F.query({index=1,valid=false},local_surface,1200,10).materials))
 assert(not next(F.query(force,local_surface,1200,-1).materials))
 assert(not next(F.query(force,local_surface,0/0,10).materials))
+local at_start=F.query(force,local_surface,600,100)
+near(at_start.period_seconds,10)
+storage.se_rockets.dropped[1]={force=force,tick=900}
+assert(F.query(force,local_surface,1200,10).truncated)
+-- Paired SE cannon shots: packing is already in statistics, the landing insert is not.
+storage.se_cannons.count=2;storage.se_cannons.history[2]={id=2,tick=1000,arrival_tick=1100,status='received',
+  sender={surface=local_surface,force=force,zone=1},
+  destination={surface=remote_surface,zone=2,name='Orbit',position={x=0,y=0}},
+  sent={stack('copper-plate',100)},received={stack('copper-plate',100)}}
+local function cannon_events(surface)
+  local out={}
+  for _,event in ipairs(F.query(force,surface,1200,10).events) do if event.method=='cannon' then out[#out+1]=event end end
+  return out
+end
+local cannon_sent,cannon_received=cannon_events(local_surface),cannon_events(remote_surface)
+assert(#cannon_sent==1 and cannon_sent[1].kind=='sent' and cannon_sent[1].stats_included==true,'Cannon packing counted twice')
+assert(#cannon_received==1 and cannon_received[1].kind=='received' and cannon_received[1].stats_included==false
+  and cannon_received[1].delta==100,'Cannon landing insert omitted from stock estimates')
+storage.se_cannons.history[2]=nil;storage.se_cannons.count=1
+script.active_mods['space-exploration']='0.7.65'
+assert(F.query(force,local_surface,1200,10).events[1].stats_included==nil,
+  'a version without audited statistics semantics cannot inherit the exclusion flag')
 
 -- Real SA event handlers retain distinct origin and destination inventories.
 script.active_mods={['space-age']='2.1.24'};storage={}
@@ -48,9 +131,9 @@ local up=depart(1,700,silo,{stack('iron-plate',20),stack('iron-plate',4,'rare')}
 deliver(up,800,hub,{stack('iron-plate',18),stack('iron-plate',2,'rare')})
 local lost=depart(2,900,silo,{stack('copper-plate',7)})
 lost.valid=false;T.on_housekeeping(1000)
-local q=F.query(force,local_surface,1200,10)
+q=F.query(force,local_surface,1200,10)
 assert(q.provider=='sa' and q.coverage_known)
-local iron=q.materials['item/iron-plate']
+iron=q.materials['item/iron-plate']
 near(iron.exports.sent,24);near(iron.exports.received,20)
 assert(iron.exports.routes[1].method=='cargo-pod' and iron.exports.routes[1].remote_name=='Orbit',
   'SA hover route metadata lost the remote surface or transport method')
@@ -58,14 +141,10 @@ assert(not iron.exports.sent_partial and not iron.exports.received_partial)
 near(q.materials['item/copper-plate'].exports.sent,7)
 assert(q.materials['item/copper-plate'].exports.received==nil)
 near(F.query(force,remote_surface,1200,10).materials['item/iron-plate'].imports.received,20)
-local events=F.events(force,local_surface,1200,10,{material='item/iron-plate'})
+events=F.events(force,local_surface,1200,10,{material='item/iron-plate'})
 assert(#events==2 and events[1].stats_included==false)
-script.active_mods["space-age"]="2.1.25"
-assert(F.events(force,local_surface,1200,10)[1].stats_included==nil,
-  "A version without audited statistics semantics cannot inherit the exclusion flag")
-script.active_mods["space-age"]="2.1.24"
 near(events[1].delta+events[2].delta,-24)
-local h=F.history(force,remote_surface,1200,7,{material='iron-plate'})
+h=F.history(force,remote_surface,1200,7,{material='iron-plate'})
 assert(#h.records==1 and h.records[1].tick==700 and h.records[1].arrival_tick==800)
 near(h.records[1].sent[1].count,20)
 assert(F.query(other,local_surface,1200,10).materials['item/iron-plate']==nil)
@@ -150,4 +229,4 @@ assert(#F.history(force,remote_surface,1998,1,{material='copper-plate'}).records
 package.loaded['scripts.transfers']=nil;T=require('scripts.transfers')
 local rebuilt=T.boundaries(force,local_surface,2000,1,{companions=true})
 assert(#rebuilt.records==4,'Reload lost a retained companion or duplicated a boundary')
-print('TRANSPORT FLOWS PASS: scoped independent boundaries, quality-aware stock events, SA dispatch/legacy receipts and selected-window rates')
+print('TRANSPORT FLOWS PASS: scoped independent boundaries, quality-aware stock events, SA dispatch/legacy receipts, SE unknowns and selected-window rates')

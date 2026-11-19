@@ -15,6 +15,10 @@ local Canvas = require("scripts.canvas")
 local HistoryUI = require("scripts.history_ui")
 local TransfersUI = require("scripts.transfers_ui")
 local Transfers = require("scripts.transfers")
+local SERockets = require("scripts.se_rockets")
+local SELogisticsUI = require("scripts.se_logistics_ui")
+local TransportHistoryUI = require("scripts.transport_history_ui")
+local TransferPanels = require("scripts.se_transfer_panels")
 
 local UI = {}
 local TAB_CAPTIONS = { balance = Loc("ui-balance"), focus = Loc("ui-focus"), sankey = Loc("ui-full-sankey"), transfers = Loc("help-transfers") }
@@ -31,7 +35,7 @@ local MIN_SAFE_WINDOW_WIDTH = 396
 
 local function visible_tabs()
   local list = { "balance", "focus", "sankey" }
-  if Transfers.available() then list[#list + 1] = "transfers" end
+  if Transfers.available() or SERockets.available() then list[#list + 1] = "transfers" end
   return list
 end
 
@@ -117,10 +121,13 @@ local function scope_caption(player, us)
 end
 
 -- Surfaces with crafting activity or measured chest stock, busiest machines first.
-local function surface_choices(selected)
+local function surface_choices(selected, force)
   local n = {}
   for _, rec in pairs(storage.machines or {}) do n[rec.s] = (n[rec.s] or 0) + 1 end
   for index in pairs(Sampler.stock_surfaces()) do n[index]=n[index] or 0 end
+  if SERockets.available() then
+    for index in pairs(SERockets.surfaces(force)) do n[index]=n[index] or 0 end
+  end
   local chosen=selected and game.surfaces[selected]
   if chosen and chosen.valid and chosen.name~="ssk-canvas" then n[chosen.index]=n[chosen.index] or 0 end
   local list = {}
@@ -199,12 +206,21 @@ function fill.transfers(player, c, us)
   c.style.top_padding, c.style.bottom_padding = TAB_PAD_Y, TAB_PAD_Y
   local _, window_height = UI.dimensions(player.display_resolution, player.display_scale)
   local height = math.min(tab_pane_height(us), window_height - 96)
+  if us.transport_history then
+    TransportHistoryUI.render(c,player,us,us.canvas_w,height)
+    return
+  end
+  if SERockets.available() and not Transfers.available() then
+    us.se_logistics=us.se_logistics or {}
+    SELogisticsUI.render(c,player,game.surfaces[us.sidx],us.period,us.se_logistics,us.canvas_w,height)
+    return
+  end
   us.transfers = us.transfers or {}
   local parent, width, platform_height = c, us.canvas_w, tab_pane_height(us)
   if width < 850 then
     if not c.viewport then
       c.clear()
-      TransfersUI.compact_viewport(c, width, height)
+      TransferPanels.viewport(c, width, height, "platforms")
     end
     parent = c.viewport.body
     local size = parent.tags
@@ -233,7 +249,7 @@ local function update_header(player,us)
   local frame=player.gui.screen[WIN]
   local bar=frame and frame.ssk_window_bar
   if not bar then return end
-  local scoped = us.tab_id ~= "transfers"
+  local scoped = us.tab_id ~= "transfers" or us.transport_history~=nil or (SERockets.available() and not Transfers.available())
   bar.ssk_surface_label.visible = scoped
   bar.ssk_surface_picker.visible = scoped
   local label=bar.ssk_history
@@ -361,13 +377,13 @@ function UI.open(player)
   tb.add { type = "label", name = "ssk_surface_label", caption = Loc("ui-surface") }
   local sitems, ssel = { Loc("ui-where-i-am", Su.rich(player.surface)) }, 1
   us.surface_names = {}
-  for i, x in ipairs(surface_choices(us.surface)) do
+  for i, x in ipairs(surface_choices(us.surface,player.force)) do
     sitems[#sitems + 1] = x.label
     us.surface_names[i + 1] = x.name
     if us.surface == x.name then ssel = i + 1 end
   end
   local surface_picker = tb.add { type = "drop-down", name = "ssk_surface_picker", items = sitems, selected_index = ssel,
-           tags = { ssk_ui = "surface" }, tooltip = Loc("ui-surface-for-balance-focus-and-full-sankey") }
+           tags = { ssk_ui = "surface" }, tooltip = SERockets.available() and Loc("se-surface-help") or Loc("ui-surface-for-balance-focus-and-full-sankey") }
   surface_picker.style.width = math.min(240, math.floor(W * 0.22))
   local pl = tb.add { type = "label", caption = Loc("ui-period") }
   -- 16 px between each label + drop-down pair and the next group.
@@ -460,6 +476,22 @@ function UI.on_click(e)
   if el.name == "ssk_toggle" then UI.toggle(player); return true end
   if MachineStatus.on_click(player, el, UI.close) then return true end
   local us = ustate(e.player_index)
+  if el.tags and el.tags.ssk_ui=="transport_history" then
+    if TransportHistoryUI.open(player,us,el.tags) then UI.open(player) end
+    return true
+  end
+  if us.tab_id=="transfers" and us.transport_history then
+    local handled=TransportHistoryUI.on_click(e,us,UI.close)
+    if handled then
+      if handled=="reopen" then UI.open(player)
+      elseif UI.is_open(player) then UI.refresh(player) end
+      return true
+    end
+  end
+  if us.tab_id=="transfers" and SERockets.available() and SELogisticsUI.on_click(e,us.se_logistics or {},UI.close) then
+    if UI.is_open(player) then UI.refresh(player) end
+    return true
+  end
   if us.tab_id == "transfers" and TransfersUI.on_click(e, us.transfers, UI.close) then
     UI.refresh(player)
     return true
@@ -500,6 +532,7 @@ function UI.on_click(e)
     if root then root.tags={} end
     UI.refresh(player)
   elseif a == "refresh" then
+    if us.tab_id=="transfers" and us.se_logistics then us.se_logistics.rescan_endpoints=true end
     UI.refresh(player)
   elseif a == "bal_more" then
     us.bal_limit = (us.bal_limit or 200) + 200
@@ -547,6 +580,18 @@ function UI.on_selection(e)
   end
   local tags = e.element.tags
   local us = ustate(e.player_index)
+  if us.tab_id=="transfers" and us.transport_history then
+    local handled=TransportHistoryUI.on_selection(e,us)
+    if handled then
+      local player=game.get_player(e.player_index)
+      if handled=="reopen" then UI.open(player) else UI.refresh(player) end
+      return true
+    end
+  end
+  if us.tab_id=="transfers" and SERockets.available() and SELogisticsUI.on_selection(e,us.se_logistics or {}) then
+    UI.refresh(game.get_player(e.player_index))
+    return true
+  end
   if us.tab_id == "transfers" and TransfersUI.on_selection(e, us.transfers) then
     UI.refresh(game.get_player(e.player_index))
     return true
@@ -593,6 +638,10 @@ end
 
 function UI.on_checked(e)
   local u0 = ustate(e.player_index)
+  if u0.tab_id=="transfers" and SERockets.available() and SELogisticsUI.on_checked(e,u0.se_logistics or {}) then
+    UI.refresh(game.get_player(e.player_index))
+    return true
+  end
   if u0.tab_id == "transfers" and TransfersUI.on_checked(e, u0.transfers) then
     UI.refresh(game.get_player(e.player_index))
     return true
@@ -620,10 +669,26 @@ function UI.on_checked(e)
 end
 
 function UI.on_switch(e)
-  local us = ustate(e.player_index)
-  if us.tab_id ~= "transfers" or not TransfersUI.on_switch(e, us.transfers) then return false end
-  UI.refresh(game.get_player(e.player_index))
-  return true
+  local us=ustate(e.player_index)
+  if us.tab_id~="transfers" then return false end
+  local handled
+  if us.transport_history then
+    handled=TransferPanels.on_switch(e,us.transport_history)
+  elseif SERockets.available() and not Transfers.available() then
+    local state=us.se_logistics
+    handled=state and state.view=="history" and TransferPanels.on_switch(e,state)
+  else
+    handled=TransfersUI.on_switch(e,us.transfers)
+  end
+  if handled then
+    UI.refresh(game.get_player(e.player_index))
+    return true
+  end
+  if us.tab_id=="transfers" and SERockets.available() and SELogisticsUI.on_switch(e,us.se_logistics or {}) then
+    UI.refresh(game.get_player(e.player_index))
+    return true
+  end
+  return false
 end
 
 function UI.on_elem_changed(e)
@@ -646,6 +711,17 @@ function UI.on_tab_changed(e)
   if not f.valid then return false end
   local us = ustate(e.player_index)
   local player = game.get_player(e.player_index)
+  if us.tab_id=="transfers" and us.transport_history then
+    local handled=TransportHistoryUI.on_selection(e,us)
+    if handled then
+      if handled=="reopen" then UI.open(player) else UI.refresh(player) end
+      return true
+    end
+  end
+  if us.tab_id=="transfers" and SERockets.available() and SELogisticsUI.on_selection(e,us.se_logistics or {}) then
+    UI.refresh(player)
+    return true
+  end
   if f.name == "ssk_balance_inspector_tabs" then
     local c = content(player, "balance")
     local split = c and c.ssk_balance_split
@@ -710,8 +786,27 @@ function UI.on_value_changed(e)
   if e.element and e.element.valid then return MachineStatus.on_value_changed(game.get_player(e.player_index), e.element) end
 end
 
-function UI.on_text_changed(e) return MaterialPicker.on_text_changed(e) end
-function UI.on_string_translated(e) MaterialPicker.on_translated(e) end
+function UI.on_text_changed(e)
+  local us=ustate(e.player_index)
+  if us.tab_id=="transfers" and TransportHistoryUI.on_text_changed(e,us) then
+    UI.refresh(game.get_player(e.player_index));return true
+  end
+  if us.tab_id=="transfers" and SERockets.available() and SELogisticsUI.on_text_changed(e,us.se_logistics or {}) then
+    UI.refresh(game.get_player(e.player_index))
+    return true
+  end
+  return MaterialPicker.on_text_changed(e)
+end
+function UI.on_string_translated(e)
+  MaterialPicker.on_translated(e)
+  local us=ustate(e.player_index)
+  if TransportHistoryUI.on_translated(e,us) and us.tab_id=="transfers" then
+    UI.refresh(game.get_player(e.player_index));return
+  end
+  if us.se_logistics and SELogisticsUI.on_translated(e,us.se_logistics) and us.tab_id=="transfers" and us.se_logistics.view=="items" then
+    UI.refresh(game.get_player(e.player_index))
+  end
+end
 
 function UI.auto_refresh()
   for _, p in pairs(game.connected_players) do

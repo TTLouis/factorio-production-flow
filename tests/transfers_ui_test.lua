@@ -69,6 +69,14 @@ assert(not box.style.left_margin and not box.style.top_margin and box.style.widt
   "The platform rows must fill the panel edge to edge, with the scrollbar on its border")
 assert(list.children[1]==list.favourite_101 and list.children[2]==list.platform_101,
   "The favourite action must sit in a separate cell to the left of the platform entry")
+local node=find(player.gui.screen.ssk_main,"ssk_transfer_platform_node")
+if node then
+  local stats=node.stats.children
+  assert(stats[1]==node.stats.loaded and stats[2]==node.stats.made and stats[3]==node.stats.unloaded
+    and stats[4]==node.stats.kept and node.heading.platform_name and node.heading.platform_location,
+    "Platform node shows name and location, then loaded, made, unloaded and kept aboard in flow order")
+  assert(node.style.height==node.parent.style.height,"Platform node must fill its placed slot")
+end
 local pick=list.platform_101
 assert(pick.spec.type=="button" and pick.spec.style=="list_box_item" and LOC(pick.caption)=="Alpha"
   and pick.style.width+28==list.tags.row_width and pick.style.height==28,
@@ -177,4 +185,31 @@ UI.open(player)
 assert(not button().visible and not button().enabled, "No platform must hide Jump")
 force.platforms, us.tab_id, us.transfers, player.centered_on = saved_platforms, saved_tab, saved_transfers, saved_center
 UI.open(player)
+-- Shared ribbon shades: blue in, orange out, green made; four shades per side,
+-- appended after the Sankey colours so their indices stay unchanged.
+local Shades,Palette=TREQ("shared.ribbon_shades"),TREQ("shared.palette")
+assert(Shades.key("in",1)=="ribbon_in_1" and Shades.key("in",5)=="ribbon_in_1" and Shades.key("out",3)=="ribbon_out_3"
+  and Shades.key("made",2)=="ribbon_made" and Shades.sprite("out",2)=="ssk-plot-ribbon_out_2","Ribbon shades must cycle per side")
+assert(#Palette.colors==16 and Palette.RIBBON==Palette.DIM+16 and Palette.count==Palette.RIBBON+10
+  and Palette.rgb(Palette.RIBBON+1)[3]==math.floor(Shades.color("in",1).b*255+0.5),"Ribbon shades must follow the Sankey palette")
+-- SE item colours are exact muted Sankey colours, so night-vision curves reuse
+-- the Sankey sprites; iron and copper keep their Sankey blue and orange.
+for slot,index in ipairs(Shades.ITEM_SANKEY) do
+  local c,rgb=Shades.item_color(slot),Palette.rgb(index)
+  assert(math.floor(c.r*255+0.5)==rgb[1] and math.floor(c.g*255+0.5)==rgb[2] and math.floor(c.b*255+0.5)==rgb[3],
+    "Item colour "..slot.." must match Sankey colour "..index)
+end
+local both,out_only,in_only={imports=true,exports=true},{exports=true},{imports=true}
+local entries={{key="iron-plate/normal",sides=both},{key="copper-plate/normal",sides=out_only},
+  {key="steel-plate/normal",sides=out_only},{key="iron-plate/rare",sides=out_only}}
+for i=1,4 do entries[#entries+1]={key="filler-"..i.."/normal",sides=out_only} end
+entries[#entries+1]={key="wood/normal",sides=in_only}
+entries[#entries+1]={key="coal/normal",sides=in_only}
+local slots=Shades.assign_items(entries)
+assert(slots["iron-plate/normal"]==1 and slots["copper-plate/normal"]==2 and slots["steel-plate/normal"]==3
+  and slots["iron-plate/rare"]==4 and Shades.item_sprite(nil)=="ssk-plot-ribbon_item_other","Item colour slots")
+-- With all eight colours taken on exports, import-only items reuse colours
+-- that are still unique on the import side and never iron's.
+assert(slots["wood/normal"] and slots["coal/normal"] and slots["wood/normal"]~=slots["coal/normal"]
+  and slots["wood/normal"]~=1 and slots["coal/normal"]~=1,"Per-side colours must stay unique")
 print("TRANSFERS UI PASS: remote jump from Flow/History, selection, stale/deleted/foreign targets and empty state")

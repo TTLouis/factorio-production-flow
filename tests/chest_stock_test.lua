@@ -120,6 +120,23 @@ chest(999,"temporary-container",1,{{name="iron-plate",count=7}})
 storage.chest_stock.next_tick=0;C.tick(4)
 assert(storage.stock[4].s[1]["item/iron-plate"]==67,
   "Landed cargo's temporary container remains physical stock after receipt")
+local active,entity_prototypes=script.active_mods,prototypes.entity
+script.active_mods={["space-exploration"]="0.7.64"}
+prototypes.entity={["se-cargo-rocket-cargo-pod"]={}}
+local recovered={valid=true,type="container",name="se-cargo-rocket-cargo-pod",unit_number=1001,
+  surface=surface,force=game.forces.player,get_inventory=function(id)
+    assert(id==ids.chest)
+    return {valid=true,get_contents=function() return {{name="iron-plate",count=33}} end}
+  end}
+surface.find_entities_filtered=function(filter)
+  if filter.name=="se-cargo-rocket-cargo-pod" then return {recovered} end
+  if filter.type=="cargo-pod" then return pods end
+  return find_entities(filter)
+end
+storage.chest_stock.next_tick=0;C.tick(5)
+assert(storage.stock[5].s[1]["item/iron-plate"]==100 and storage.chest_stock.entities[1001]==recovered,
+  "SE's internally-created padless cargo containers must be discovered without a built event or invented receipt")
+script.active_mods,prototypes.entity=active,entity_prototypes
 surface.find_entities_filtered=find_entities;ids.cargo_unit=old_cargo
 ids.cargo_landing_pad_main,ids.hub_main,ids.rocket_silo_attached_cargo_unit=old_pad,old_hub,old_silo
 storage,game.tick=saved_storage,saved_tick

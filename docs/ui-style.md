@@ -73,6 +73,8 @@ right sound.
 | `gui_color.grey` {0.5, 0.5, 0.5} | Secondary text (`grey_label`) |
 | `gui_color.blue` {128, 206, 240} | Tips and information (`info_label`) |
 | `gui_color.red` {255, 142, 142} | Errors and warnings (`red_label`) |
+| Transfers ribbons (`shared/ribbon_shades.lua`) | Blue shades for cargo coming in, orange shades for cargo going out, green for made aboard, in both Space Age and Space Exploration. Neighbouring ribbons on one side take the next shade; a card's stripe, bars and legend square use its ribbon's exact shade. |
+| SE Flow grouped by Items | Each side lists its own eight most transported items (each quality separately, over that side's routes). An item keeps one colour in every card on both sides, colours stay unique within a side, taken from the muted Sankey palette so an item keeps its Sankey colour where possible. Everything else shares one grey Other row and band. |
 
 ## Frames, labels and other controls
 
@@ -167,7 +169,35 @@ right sound.
     directly below (Balance, Focus and Full Sankey all do this). The strip uses
     the same spacing on every tab: 12 px left/right and 8 px top/bottom padding,
     a 40 px first row (fits a slot button), 28 px rows after it and 8 px between
-    rows (`toolbar_strip` in `sankey_ui.lua`).
+    rows (`toolbar_strip` in `sankey_ui.lua`). Controls in a strip are 8 px apart.
+    Balance's left column, the Transfers Items list and the History entity list
+    follow the same pattern: their filters sit in a `subheader_frame` strip at
+    the top of a deep panel, and the column heading and rows sit together in
+    their own `inside_deep_frame` box inset 12 px, stretched down to the panel's
+    foot (or to a one-line note band along the bottom), so spare height reads as
+    list area rather than bare panel. The Transfers platform list has only a
+    one-line `subheader_frame` title strip ("Platforms" and the count) and no
+    column heading, so its rows sit directly on the panel without a second
+    bordered box, edge to edge and down to its foot, with the scrollbar against
+    the panel's right border. A
+    list that picks what the rest of the tab shows (the platform list) uses
+    vanilla `list_box_item` rows, 28 px high: the whole row is the click target,
+    and the selected entry is `toggled`, so it gets the list box's selected
+    highlight instead of only a bold font. Its star stays a separate 24 px
+    `tool_button` cell to the left. Do not repeat an icon that is the same on
+    every row.
+    Every main tab fills the same box: 12 px of padding on all four sides, so no
+    panel touches the window's border, and one shared content height
+    (`tab_pane_height` in `ui.lua`). Nested tab rows (Balance Flow / History,
+    the Transfers views) start at the same height. Nested tab frames subtract
+    the same 48 px of tab chrome, so they all end on one line. Row lists keep a
+    12 px scrollbar lane, with an 8 px gutter before it, only when their rows
+    need to scroll. A list that fits, with a row to spare, gives the lane and
+    gutter to its name column and hides the scrollbar
+    (`dont-show-but-allow-scrolling`, so the wheel still works); its rows then
+    meet the box's right edge as they meet its left one.
+    In the title bar, controls are 8 px apart, as in vanilla `frame_header_flow`.
+    Each label + drop-down pair has 16 px before the next group.
 16. Less-used chart settings open from a gear `tool_button` (toggled while open)
     as a fly-out: a `frame` with a `frame_title`, a `frame_action_button` close
     and an `inside_shallow_frame_with_padding`, drawn over the chart's top-right
@@ -198,12 +228,13 @@ right sound.
     padding and a compact 32 px height (52 px with Details). Keep the raised frame
     and bottom divider. Do not add an upper category-heading band. Header and row
     cells share the same widths; reserve an 8 px gutter before the scrollbar.
-
-19. Absolute chart overlays need tight wrapper bounds. Cancel height and vertical
-    position separately with an ignored zero-size reset: GUI lengths round
-    individually at fractional scales. Ignoring a parent also disables its child
-    targets, so keep interactive icon/bar parents active and preserve native hover
-    flags on transparent ribbon hits.
+19. Keep absolute-positioned chart wrappers tight around their children. A flow
+    extending from the canvas top to a lower row intercepts clicks on earlier
+    rows; `ignored_by_interaction` on that parent also disables its children.
+    Cancel scaled height and Y offset with separate equal lengths and a zero-height,
+    non-interactive reset sibling, so 125% and 150% scale cannot accumulate drift.
+    Retained targets must reuse their resets and hide/show both together. Check
+    real engine input with `tests/gui_simulation.py`, plus normal-window captures.
 
 ## Known exceptions to fix
 
