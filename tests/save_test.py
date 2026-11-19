@@ -115,9 +115,9 @@ def install_hook(stage, phase):
     assert control.count(needle) == 1
     control = 'local SaveTest = require("scripts.save_test")\n' + control.replace(
         needle, needle + '\n  SaveTest.tick(UI, Sampler)')
-    translation_hook = 'function(e) UI.on_string_translated(e) end'
+    translation_hook = 'UI.on_string_translated(e) end)'
     assert control.count(translation_hook) == 1
-    control = control.replace(translation_hook, 'function(e) SaveTest.on_string_translated(e); UI.on_string_translated(e) end')
+    control = control.replace(translation_hook, 'SaveTest.on_string_translated(e); ' + translation_hook)
     config = 'script.on_configuration_changed(function()'
     assert control.count(config) == 1
     control = control.replace(config, 'script.on_configuration_changed(function(event)\n'

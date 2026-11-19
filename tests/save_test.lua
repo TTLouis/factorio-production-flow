@@ -1007,7 +1007,7 @@ function T.tick(UI, Sampler)
   assert(not commands.commands["sankey-export"] and not commands.commands["sankey-probe"] and not commands.commands["sankey-test"],"Release has development commands")
   assert(not settings.global["ssk-auto-export-minutes"] and not player.mod_settings["ssk-debug-tabs"],"Release has development settings")
   local tabs=player.gui.screen.ssk_main.ssk_inner.ssk_tabs
-  assert(#tabs.tabs==4 and tabs.content_transfers,"Release needs Balance, Focus, Full Sankey and Transfers")
+  assert(#tabs.tabs==5 and tabs.content_cells and tabs.content_transfers,"Release needs Balance, Focus, Cells, Full Sankey and Transfers")
   local us = storage.ui[player.index]
   assert(mode=="portal" or us.period == 600, "10m is not the initial default")
   if mode=="portal" then
