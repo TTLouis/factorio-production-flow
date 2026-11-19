@@ -77,7 +77,11 @@ Run `python tests/cells_native.py` to validate manual production cell selection
 on a disposable vanilla map. The fixture dispatches registered handlers with
 native entities and GUI elements, checks that saving and replacing membership
 require confirmation, and captures the draft, saved list, and both Cells
-Sankey views at 100% UI scale. The Cells tab uses estimated recipe capacity
+Sankey views at 100% UI scale. It also replaces members in the engine: a
+fast-replace upgrade (raised as `script_raised_built`) and a ghost revival
+(`script_raised_revive`) must rejoin the cell, and the editor must report the
+missing machine in between. The offline `cells_membership_test.lua` covers the
+slot index, edit keep/forget, replacement drags, shared slots and deletion. The Cells tab uses estimated recipe capacity
 and groups the All view by surface. Its figures are separate from production
 history and recorded cargo.
 

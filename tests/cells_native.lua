@@ -2,6 +2,7 @@
 local T = {}
 local Selection = require("shared.cell_selection")
 local Flow = require("scripts.cell_flow")
+local Cells = require("scripts.cells")
 
 local function find(parent, key, value)
   if parent.tags[key] == value then return parent end
@@ -147,6 +148,63 @@ function T.tick(UI)
     cells.records[1].members[cable.unit_number] = cable
     assert(Flow.build().overlap and not Flow.build().links["recipe/cell-2>" .. copper .. "-output"])
     cells.records[1].members[cable.unit_number] = nil
+    storage.cell_test_phase = "replace"
+  elseif stage == "replace" then
+    -- Real engine replacements of cell 2's members: an upgrade (fast-replace, raised as
+    -- script_raised_built) and a destroyed machine that is later rebuilt from its ghost.
+    local cells, machines, surface = storage.production_cells, storage.cell_test_machines, player.surface
+    local gear, cable = machines[5], machines[1]
+    local gear_unit, cable_unit, cable_position = gear.unit_number, cable.unit_number, cable.position
+    local upgraded = assert(surface.create_entity{name = "assembling-machine-2", position = gear.position,
+      force = "player", fast_replace = true, spill = false, raise_built = true})
+    assert(not gear.valid and upgraded.valid, "Fast-replace must replace the old machine")
+    if not upgraded.get_recipe() then upgraded.set_recipe("iron-gear-wheel") end
+    local record = cells.records[2]
+    assert(record.members[upgraded.unit_number] == upgraded and not record.members[gear_unit],
+      "An upgraded member must stay in its cell")
+    assert(Cells.missing(record) == 0)
+    machines[5] = upgraded
+
+    assert(cable.die())
+    local ghost = surface.find_entity("entity-ghost", cable_position)
+    storage.cell_test_death_ghost = ghost ~= nil
+    ghost = ghost or assert(surface.create_entity{name = "entity-ghost", inner_name = "assembling-machine-1",
+      position = cable_position, force = "player"})
+    storage.cell_test_ghost = ghost
+    assert(Cells.missing(record) == 1 and record.members[cable_unit], "A destroyed member must be kept as missing")
+    assert(Flow.build(2).links["recipe/copper-cable>item/copper-cable"] == nil, "A missing member must not be charted")
+
+    UI.open(player)
+    click(player, assert(player.gui.screen.ssk_main), "ssk_ui", "cells")
+    local edit
+    local function find_edit(element)
+      if element.tags.ssk_cell == "edit" and element.tags.cell_id == 2 then edit = element end
+      for _, child in ipairs(element.children) do find_edit(child) end
+    end
+    find_edit(window())
+    script.get_event_handler(defines.events.on_gui_click){player_index = player.index, element = assert(edit)}
+    assert(window().ssk_cell_panel.children[1].ssk_cell_missing, "The editor must report the missing machine")
+    assert(find(window(), "ssk_cell", "forget"), "The editor must offer to forget missing machines")
+    storage.cell_test_phase = "capture-missing"
+  elseif stage == "capture-missing" then
+    screenshot(player, "missing")
+    storage.cell_test_phase = "rebuild"
+  elseif stage == "rebuild" then
+    local cells, machines = storage.production_cells, storage.cell_test_machines
+    click(player, window(), "ssk_cell", "list")
+    assert(cells.records[2] and Cells.missing(cells.records[2]) == 1, "Leaving the editor must not change the cell")
+    click(player, window(), "ssk_cell", "close")
+    local _, revived = storage.cell_test_ghost.revive{raise_revive = true}
+    assert(revived and revived.valid, "Ghost revival failed")
+    if not revived.get_recipe() then revived.set_recipe("copper-cable") end
+    local record = cells.records[2]
+    assert(record.members[revived.unit_number] == revived and Cells.missing(record) == 0,
+      "A member rebuilt from its ghost must rejoin the cell")
+    machines[1] = revived
+    log("CELL REPLACEMENT PASS: fast-replace upgrade and ghost revival re-attached; death ghost created by engine: "
+      .. tostring(storage.cell_test_death_ghost))
+    local copper = "item/copper-cable#surface-" .. player.surface.index
+    assert(Flow.build().links["recipe/cell-2>" .. copper .. "-output"].rate == 2, "Rebuilt member must be charted again")
 
     UI.open(player)
     local main = player.gui.screen.ssk_main

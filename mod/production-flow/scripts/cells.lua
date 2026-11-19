@@ -33,6 +33,81 @@ local function live_members(entities, surface_index)
   return members, count
 end
 
+-- Members are stored by unit number. A record also keeps each member's position so
+-- that a machine built where a member was removed (upgrade, fast-replace, ghost
+-- revival, manual re-placement) can take over its slot. Positions are half-tile
+-- keys because machine centres sit on tile or half-tile coordinates.
+local function position_key(position)
+  return math.floor(position.x * 2 + 0.5) .. ":" .. math.floor(position.y * 2 + 0.5)
+end
+
+local function positions_of(members)
+  local positions = {}
+  for unit, entity in pairs(members) do
+    if entity.valid then positions[unit] = { x = entity.position.x, y = entity.position.y } end
+  end
+  return positions
+end
+
+local function vacant_slots(record)
+  local vacant = {}
+  local positions = record.positions or {}
+  for unit, entity in pairs(record.members) do
+    if not entity.valid and positions[unit] then vacant[unit] = positions[unit] end
+  end
+  return vacant
+end
+
+local function count_keys(map)
+  local count = 0
+  for _ in pairs(map) do count = count + 1 end
+  return count
+end
+
+-- storage.production_cells.slots[surface_index][position_key][cell_id] = unit_number
+function Cells.reindex()
+  local cells = state()
+  local slots = {}
+  for id, record in pairs(cells.records) do
+    if not record.positions then record.positions = positions_of(record.members) end
+    local by_key = slots[record.surface_index] or {}
+    slots[record.surface_index] = by_key
+    for unit, position in pairs(record.positions) do
+      local key = position_key(position)
+      by_key[key] = by_key[key] or {}
+      by_key[key][id] = unit
+    end
+  end
+  cells.slots = slots
+end
+
+function Cells.missing(record)
+  return count_keys(vacant_slots(record))
+end
+
+-- Called for every built or revived crafting machine. Re-attaches it to each cell
+-- whose member at the same position is gone. Valid members are never replaced.
+function Cells.on_built(entity)
+  local cells = storage.production_cells
+  if not (cells and next(cells.records) and entity and entity.valid and supported[entity.type]) then return end
+  if not cells.slots then Cells.reindex() end
+  local by_key = cells.slots[entity.surface.index]
+  local slot = by_key and by_key[position_key(entity.position)]
+  if not slot then return end
+  local unit = entity.unit_number
+  if not (unit and eligible(entity, entity.surface.index)) then return end
+  for id, old in pairs(slot) do
+    local record = cells.records[id]
+    local previous = record and record.members[old]
+    if record and old ~= unit and not (previous and previous.valid) and not record.members[unit] then
+      record.members[old], record.positions[old] = nil, nil
+      record.members[unit] = entity
+      record.positions[unit] = { x = entity.position.x, y = entity.position.y }
+      slot[id] = unit
+    end
+  end
+end
+
 -- Rank by configured production capacity; activity or idle time does not rename a cell.
 local function final_items(members)
   local recipes = storage.graph and storage.graph.recipes
@@ -133,11 +208,17 @@ function Cells.open(player)
   if draft then
     local members, count = live_members(draft.members, draft.surface_index)
     bar.add { type = "label", style = "subheader_caption_label", caption = Loc("cells-machine-count", count) }
+    local missing = draft.vacant and count_keys(draft.vacant) or 0
+    if missing > 0 then
+      bar.add { type = "label", name = "ssk_cell_missing", style = "subheader_caption_label",
+        caption = Loc("cells-missing-count", missing), tooltip = Loc("cells-missing-tip") }
+    end
     local right = bar.add { type = "empty-widget" }
     right.style.horizontally_stretchable = true
     action(bar, "add", "utility/add", Loc("cells-add-machines"))
     action(bar, "remove", "utility/close", Loc("cells-remove-machines"), "tool_button_red").enabled = count > 0
     action(bar, "select", "utility/cross_select", Loc("cells-reselect"))
+    if missing > 0 then action(bar, "forget", "utility/trash", Loc("cells-forget-missing"), "tool_button_red") end
     local form = panel.add { type = "flow", name = "ssk_cell_form", direction = "horizontal" }
     form.style.padding = 8
     form.style.horizontal_spacing = 8
@@ -181,9 +262,12 @@ function Cells.open(player)
     for _, id in ipairs(ids) do
       local record = cells.records[id]
       local _, count = live_members(record.members, record.surface_index)
+      local missing = Cells.missing(record)
       local surface = game.surfaces[record.surface_index]
       local row = rows.add { type = "flow" }
-      local label = row.add { type = "label", caption = Loc("cells-row", record.name, surface.name, count) }
+      local caption = missing > 0 and Loc("cells-row-missing", record.name, surface.name, count, missing)
+        or Loc("cells-row", record.name, surface.name, count)
+      local label = row.add { type = "label", caption = caption }
       label.style.single_line = false
       label.style.maximal_width = 290
       row.style.horizontally_stretchable = true
@@ -244,6 +328,7 @@ function Cells.finish_delete(player, confirm)
   if confirm and player.force == game.forces.player then
     if cells.records[pending.id] == pending.record then
       cells.records[pending.id] = nil
+      Cells.reindex()
     else
       player.print(Loc("cells-changed"))
     end
@@ -267,9 +352,14 @@ function Cells.on_click(player, element)
     if record then
       cells.drafts[player.index] = { id = record.id, name = record.name,
         surface_index = record.surface_index, members = record.members, original = record,
-        display_item = record.display_item }
+        display_item = record.display_item, vacant = vacant_slots(record) }
       Cells.open(player)
     end
+  elseif tag == "forget" and draft then
+    local window = player.gui.screen[Cells.NAME]
+    if window then draft.name = window.ssk_cell_panel.ssk_cell_form.ssk_cell_name_column.ssk_cell_name.text end
+    draft.vacant = nil
+    Cells.open(player)
   elseif selection_prompts[tag] then
     if draft and draft.surface_index ~= player.surface.index then
       player.print(Loc("cells-wrong-surface"))
@@ -312,9 +402,22 @@ function Cells.on_click(player, element)
     for _, option in ipairs(options) do
       if option == display_item then still_available = true; break end
     end
+    local positions = positions_of(members)
+    local occupied = {}
+    for _, position in pairs(positions) do occupied[position_key(position)] = true end
+    -- Keep removed members' slots so a replacement built there rejoins the cell,
+    -- unless the player chose to forget them or a member already stands there.
+    local previous = draft.original and draft.original.members or {}
+    for unit, position in pairs(draft.vacant or {}) do
+      local key = position_key(position)
+      if previous[unit] and not previous[unit].valid and not members[unit] and not occupied[key] then
+        members[unit], positions[unit], occupied[key] = previous[unit], position, true
+      end
+    end
     cells.records[id] = { id = id, name = name, surface_index = draft.surface_index, members = members,
-      display_item = (still_available and display_item) or options[1] or false }
+      positions = positions, display_item = (still_available and display_item) or options[1] or false }
     cells.drafts[player.index] = nil
+    Cells.reindex()
     Cells.open(player)
   end
   return true
@@ -350,6 +453,8 @@ function Cells.on_selected(e)
     local merged = live_members(draft.members, surface_index)
     for id, entity in pairs(members) do merged[id] = entity end
     members = merged
+  else
+    draft.vacant = nil -- replacing the selection starts from the dragged machines only
   end
   draft.members, draft.selection_mode = members, nil
   if not draft.id and (draft.name == "" or draft.name == draft.suggested_name) then
@@ -420,6 +525,7 @@ function Cells.on_surface_deleted(index)
   for id, record in pairs(cells.records) do
     if record.surface_index == index then cells.records[id] = nil end
   end
+  Cells.reindex()
   for player_index, draft in pairs(cells.drafts) do
     if draft.surface_index == index then
       local player = game.get_player(player_index)

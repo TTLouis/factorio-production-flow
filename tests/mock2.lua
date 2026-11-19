@@ -26,6 +26,7 @@ local function new_elem(spec, parent)
   end
   e.destroy = function() Elem.destroy(e) end
   e.add_tab = function() end
+  e.focus = function() e.focused = true end
   return e
 end
 Elem.__index = function(t, k)
@@ -278,6 +279,7 @@ dofile(TESTDIR .. "/chest_stock_test.lua")
 dofile(TESTDIR .. "/material_picker_test.lua")
 dofile(TESTDIR .. "/watch_test.lua")
 dofile(TESTDIR .. "/tab_visibility_test.lua")(handlers)
+dofile(TESTDIR .. "/cells_membership_test.lua")
 dofile(TESTDIR .. "/transfers_ui_test.lua")
 dofile(TESTDIR .. "/se_logistics_ui_test.lua")
 dofile(TESTDIR .. "/gui_state_lifecycle_test.lua")(handlers)

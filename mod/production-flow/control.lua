@@ -82,7 +82,7 @@ for _, name in ipairs({ "on_built_entity", "on_robot_built_entity", "script_rais
                         "script_raised_revive", "on_space_platform_built_entity" }) do
   local id = defines.events[name]
   if id then
-    script.on_event(id, function(e) Sampler.add(e.entity) end, build_filter)
+    script.on_event(id, function(e) Sampler.add(e.entity); Cells.on_built(e.entity) end, build_filter)
   end
 end
 script.on_event(defines.events.on_entity_cloned, function(e) Sampler.add(e.destination) end, build_filter)
