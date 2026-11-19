@@ -252,8 +252,9 @@ local function update_header(player,us)
   local bar=frame and frame.ssk_window_bar
   if not bar then return end
   local scoped = us.tab_id ~= "cells" and (us.tab_id ~= "transfers" or us.transport_history~=nil or (SERockets.available() and not Transfers.available()))
-  bar.ssk_period_label.visible = us.tab_id ~= "cells"
-  bar.ssk_period_picker.visible = us.tab_id ~= "cells"
+  local periodic = us.tab_id ~= "cells" or CellsUI.mode(us.cells or {}) == "measured"
+  bar.ssk_period_label.visible = periodic
+  bar.ssk_period_picker.visible = periodic
   bar.ssk_surface_label.visible = scoped
   bar.ssk_surface_picker.visible = scoped
   local label=bar.ssk_history
@@ -287,10 +288,11 @@ function UI.refresh(player, only_auto, full, keep_balance_rows)
   us.sidx = surface
   update_header(player,us)
   if id == "cells" then
-    if only_auto then return end
     us.cells = us.cells or {}
+    if only_auto and CellsUI.mode(us.cells) ~= "measured" then return end
     us.cells.chart = us.cells.chart or {}
-    CellsUI.fill(player, c, us.cells, us.canvas_w, tab_pane_height(us), full)
+    us.cells.period = us.period
+    CellsUI.fill(player, c, us.cells, us.canvas_w, tab_pane_height(us), full, only_auto)
     return
   end
   if id == "focus" then
@@ -717,6 +719,14 @@ end
 
 function UI.on_switch(e)
   local us=ustate(e.player_index)
+  local el=e.element
+  if us.tab_id=="cells" and el and el.valid and el.tags and el.tags.ssk_ui=="cell_mode" then
+    us.cells=us.cells or {}
+    us.cells.mode=el.switch_state=="right" and "capacity" or "measured"
+    us.cells.chart={}
+    UI.refresh(game.get_player(e.player_index),false,true)
+    return true
+  end
   if us.tab_id~="transfers" then return false end
   local handled
   if us.transport_history then

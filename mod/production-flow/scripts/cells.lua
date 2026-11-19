@@ -65,11 +65,18 @@ local function count_keys(map)
 end
 
 -- storage.production_cells.slots[surface_index][position_key][cell_id] = unit_number
+-- storage.cell_units[unit_number] = { cell_id, ... } is read by the sampler to
+-- attribute measured crafts; ids are sorted so attribution order is stable.
 function Cells.reindex()
   local cells = state()
-  local slots = {}
-  for id, record in pairs(cells.records) do
+  local slots, units = {}, {}
+  local ids = {}
+  for id in pairs(cells.records) do ids[#ids + 1] = id end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local record = cells.records[id]
     if not record.positions then record.positions = positions_of(record.members) end
+    record.since = record.since or game.tick
     local by_key = slots[record.surface_index] or {}
     slots[record.surface_index] = by_key
     for unit, position in pairs(record.positions) do
@@ -77,8 +84,14 @@ function Cells.reindex()
       by_key[key] = by_key[key] or {}
       by_key[key][id] = unit
     end
+    for unit in pairs(record.members) do
+      local list = units[unit]
+      if not list then list = {}; units[unit] = list end
+      list[#list + 1] = id
+    end
   end
   cells.slots = slots
+  storage.cell_units = next(units) and units or nil
 end
 
 function Cells.missing(record)
@@ -96,6 +109,7 @@ function Cells.on_built(entity)
   if not slot then return end
   local unit = entity.unit_number
   if not (unit and eligible(entity, entity.surface.index)) then return end
+  local changed = false
   for id, old in pairs(slot) do
     local record = cells.records[id]
     local previous = record and record.members[old]
@@ -103,9 +117,84 @@ function Cells.on_built(entity)
       record.members[old], record.positions[old] = nil, nil
       record.members[unit] = entity
       record.positions[unit] = { x = entity.position.x, y = entity.position.y }
-      slot[id] = unit
+      changed = true
     end
   end
+  if changed then Cells.reindex() end
+end
+
+-- Space Exploration moves a spaceship by cloning its entities to another surface
+-- and destroying the originals. A cell follows its machines only when every
+-- member that was live when cloning began arrived on one surface and none of the
+-- originals remains. Copies (originals kept) and partial moves leave the cell
+-- where it is; members that left become missing slots.
+local CLONE_GRACE_TICKS = 600
+
+function Cells.on_cloned(source, destination)
+  local units = storage.cell_units
+  local ids = units and source and source.valid and source.unit_number and units[source.unit_number]
+  if not (ids and destination and destination.valid and destination.unit_number) then return end
+  local cells = state()
+  local pending = cells.clones or {}
+  cells.clones = pending
+  for _, id in ipairs(ids) do
+    local record = cells.records[id]
+    if record then
+      local move = pending[id]
+      if not move then
+        local live = {}
+        for unit, entity in pairs(record.members) do
+          if entity.valid then live[unit] = true end
+        end
+        move = { first = game.tick, live = live, map = {} }
+        pending[id] = move
+      end
+      move.map[source.unit_number] = destination
+    end
+  end
+end
+
+---@param final boolean? Decide now (the source surface is being deleted).
+function Cells.resolve_clones(final)
+  local cells = storage.production_cells
+  local pending = cells and cells.clones
+  if not pending then return end
+  local changed = false
+  for id, move in pairs(pending) do
+    local record = cells.records[id]
+    local waiting = false
+    if record then
+      local remaining, surface, complete = false, nil, true
+      for unit in pairs(move.live) do
+        local original = record.members[unit]
+        if original and original.valid then remaining = true end
+        local copy = move.map[unit]
+        if not (copy and copy.valid) then
+          complete = false
+        else
+          surface = surface or copy.surface.index
+          if not eligible(copy, surface) then complete = false end
+        end
+      end
+      if remaining then
+        waiting = not final and game.tick < move.first + CLONE_GRACE_TICKS
+      elseif not final and game.tick <= move.first then
+        waiting = true
+      elseif complete and surface then
+        local members, positions = {}, {}
+        for unit in pairs(move.live) do
+          local copy = move.map[unit]
+          members[copy.unit_number] = copy
+          positions[copy.unit_number] = { x = copy.position.x, y = copy.position.y }
+        end
+        record.members, record.positions, record.surface_index = members, positions, surface
+        changed = true
+      end
+    end
+    if not waiting then pending[id] = nil end
+  end
+  if not next(pending) then cells.clones = nil end
+  if changed then Cells.reindex() end
 end
 
 -- Rank by configured production capacity; activity or idle time does not rename a cell.
@@ -328,6 +417,7 @@ function Cells.finish_delete(player, confirm)
   if confirm and player.force == game.forces.player then
     if cells.records[pending.id] == pending.record then
       cells.records[pending.id] = nil
+      Sampler.purge_cell(pending.id)
       Cells.reindex()
     else
       player.print(Loc("cells-changed"))
@@ -414,8 +504,10 @@ function Cells.on_click(player, element)
         members[unit], positions[unit], occupied[key] = previous[unit], position, true
       end
     end
+    -- Measured history continues across edits; a new cell starts measuring now.
     cells.records[id] = { id = id, name = name, surface_index = draft.surface_index, members = members,
-      positions = positions, display_item = (still_available and display_item) or options[1] or false }
+      positions = positions, since = draft.original and draft.original.since or game.tick,
+      display_item = (still_available and display_item) or options[1] or false }
     cells.drafts[player.index] = nil
     Cells.reindex()
     Cells.open(player)
@@ -521,9 +613,14 @@ end
 
 function Cells.on_surface_deleted(index)
   if not storage.production_cells then return end
+  -- A spaceship's old surface is deleted after the move; let its cells follow first.
+  Cells.resolve_clones(true)
   local cells = state()
   for id, record in pairs(cells.records) do
-    if record.surface_index == index then cells.records[id] = nil end
+    if record.surface_index == index then
+      cells.records[id] = nil
+      Sampler.purge_cell(id)
+    end
   end
   Cells.reindex()
   for player_index, draft in pairs(cells.drafts) do

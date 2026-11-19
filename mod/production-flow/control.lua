@@ -21,6 +21,8 @@ local function setup(rescan)
   if SERockets.available() then SERockets.init(game.tick) end
   if SECannons.available() then SECannons.init(game.tick) end
   if rescan then Sampler.rescan() end
+  -- Rebuild cell slot and sampler attribution indexes after an upgrade or mod change.
+  if storage.production_cells then Cells.reindex() end
   for _, p in pairs(game.players) do UI.ensure_button(p) end
 end
 
@@ -85,7 +87,10 @@ for _, name in ipairs({ "on_built_entity", "on_robot_built_entity", "script_rais
     script.on_event(id, function(e) Sampler.add(e.entity); Cells.on_built(e.entity) end, build_filter)
   end
 end
-script.on_event(defines.events.on_entity_cloned, function(e) Sampler.add(e.destination) end, build_filter)
+script.on_event(defines.events.on_entity_cloned, function(e)
+  Sampler.add(e.destination)
+  Cells.on_cloned(e.source, e.destination)
+end, build_filter)
 -- removals are handled lazily by the sampler (invalid entities are dropped on visit)
 
 local track_cargo = Transfers.available()
@@ -126,6 +131,8 @@ local se_rockets_active = SERockets.available()
 local se_cannons_active = SECannons.available()
 script.on_event(defines.events.on_tick, function(e)
   Sampler.on_tick(e.tick)
+  local cells = storage.production_cells
+  if cells and cells.clones then Cells.resolve_clones() end
   if se_rockets_active then SERockets.on_tick(e.tick) end
   if se_cannons_active then SECannons.on_tick(e.tick) end
 end)

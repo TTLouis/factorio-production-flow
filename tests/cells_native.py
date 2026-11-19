@@ -80,11 +80,11 @@ assert(not shortcut.technology_to_unlock)
                                     "--disable-migration-window", "--force-graphics-preset", "low"],
                                     stdout=stream, stderr=subprocess.STDOUT, env=env, startupinfo=startup)
             try:
-                deadline = time.monotonic() + 90
+                deadline = time.monotonic() + 150
                 while time.monotonic() < deadline:
                     output = log.read_text(encoding="utf-8", errors="replace")
-                    screenshots = [stage / "script-output/cells" / name for name in ("draft.png", "saved.png", "missing.png", "overview.png", "inside.png", "delete.png")]
-                    if "PRODUCTION CELLS NATIVE PASS" in output and "CELL REPLACEMENT PASS" in output and all(is_complete_png(p) for p in screenshots):
+                    screenshots = [stage / "script-output/cells" / name for name in ("draft.png", "saved.png", "missing.png", "overview.png", "inside.png", "inside-capacity.png", "delete.png")]
+                    if "PRODUCTION CELLS NATIVE PASS" in output and "CELL REPLACEMENT PASS" in output and "CELL MEASURED PASS" in output and "CELL CLONE PASS" in output and all(is_complete_png(p) for p in screenshots):
                         manifest["screenshots_sha256"] = {path.name: digest(path) for path in screenshots}
                         break
                     if game.poll() is not None or "Error while running" in output:

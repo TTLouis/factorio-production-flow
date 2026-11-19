@@ -3,6 +3,10 @@ local T = {}
 local Selection = require("shared.cell_selection")
 local Flow = require("scripts.cell_flow")
 local Cells = require("scripts.cells")
+local Sampler = require("scripts.sampler")
+-- The construction checks assert full-speed rates; measured rates are checked
+-- separately once the machines have run on real ingredients.
+local CAPACITY = {mode = "capacity"}
 
 local function find(parent, key, value)
   if parent.tags[key] == value then return parent end
@@ -36,8 +40,13 @@ function T.tick(UI)
   if stage == nil then
     local surface = player.surface
     local function spawn(name, x, force)
-      return assert(surface.create_entity{name = name, position = {x, 8}, force = force})
+      return assert(surface.create_entity{name = name, position = {x, 8}, force = force, raise_built = true})
     end
+    -- Power for measured crafts: one substation covers every test machine.
+    assert(surface.create_entity{name = "substation", position = {3, 12}, force = "player"})
+    local power = assert(surface.create_entity{name = "electric-energy-interface", position = {3, 15}, force = "player"})
+    power.electric_buffer_size = 1e9
+    power.power_production = 1e7
     if not player.character then
       player.set_controller{type = defines.controllers.god}
       assert(player.create_character())
@@ -134,19 +143,19 @@ function T.tick(UI)
     click(player, window(), "ssk_cell", "save")
     click(player, window(), "ssk_cell", "close")
 
-    local all = Flow.build()
+    local all = Flow.build(nil, CAPACITY)
     local copper = "item/copper-cable#surface-" .. player.surface.index
     assert(all.links["recipe/cell-2>" .. copper .. "-output"].rate == 2)
     assert(all.links[copper .. "-input>recipe/cell-1"].rate == 3)
     assert(cells.records[2].display_item == "iron-gear-wheel")
     assert(all.nodes["recipe/cell-2"].sprite == "item/iron-gear-wheel")
     assert(all.nodes["recipe/cell-1"].caption[1] == "production-flow.cells-node-name")
-    local inside = Flow.build(1)
+    local inside = Flow.build(1, CAPACITY)
     assert(inside.links["item/copper-cable>recipe/electronic-circuit"].rate == 3)
     assert(inside.links["recipe/electronic-circuit>item/electronic-circuit"].rate == 1)
     local cable = storage.cell_test_machines[1]
     cells.records[1].members[cable.unit_number] = cable
-    assert(Flow.build().overlap and not Flow.build().links["recipe/cell-2>" .. copper .. "-output"])
+    assert(Flow.build(nil, CAPACITY).overlap and not Flow.build(nil, CAPACITY).links["recipe/cell-2>" .. copper .. "-output"])
     cells.records[1].members[cable.unit_number] = nil
     storage.cell_test_phase = "replace"
   elseif stage == "replace" then
@@ -172,7 +181,7 @@ function T.tick(UI)
       position = cable_position, force = "player"})
     storage.cell_test_ghost = ghost
     assert(Cells.missing(record) == 1 and record.members[cable_unit], "A destroyed member must be kept as missing")
-    assert(Flow.build(2).links["recipe/copper-cable>item/copper-cable"] == nil, "A missing member must not be charted")
+    assert(Flow.build(2, CAPACITY).links["recipe/copper-cable>item/copper-cable"] == nil, "A missing member must not be charted")
 
     UI.open(player)
     click(player, assert(player.gui.screen.ssk_main), "ssk_ui", "cells")
@@ -204,7 +213,40 @@ function T.tick(UI)
     log("CELL REPLACEMENT PASS: fast-replace upgrade and ghost revival re-attached; death ghost created by engine: "
       .. tostring(storage.cell_test_death_ghost))
     local copper = "item/copper-cable#surface-" .. player.surface.index
-    assert(Flow.build().links["recipe/cell-2>" .. copper .. "-output"].rate == 2, "Rebuilt member must be charted again")
+    assert(Flow.build(nil, CAPACITY).links["recipe/cell-2>" .. copper .. "-output"].rate == 2, "Rebuilt member must be charted again")
+
+    -- Feed every member so the sampler measures real engine crafts.
+    assert(machines[1].insert{name = "copper-plate", count = 100} > 0)
+    assert(machines[2].insert{name = "iron-plate", count = 100} > 0)
+    assert(machines[2].insert{name = "copper-cable", count = 200} > 0)
+    assert(machines[5].insert{name = "iron-plate", count = 100} > 0)
+    storage.cell_test_feed_tick = game.tick
+    storage.cell_test_phase = "measure"
+  elseif stage == "measure" then
+    if game.tick < storage.cell_test_feed_tick + 20 * 60 then return end
+    local cells, machines, sidx = storage.production_cells, storage.cell_test_machines, player.surface.index
+    local cable = machines[1]
+    assert(cable.products_finished > 5 and machines[2].products_finished > 5 and machines[5].products_finished > 5,
+      "Fed machines must have crafted: " .. cable.products_finished .. "/" .. machines[2].products_finished
+      .. "/" .. machines[5].products_finished)
+    -- The revived cable machine joined after the cell was created, so every craft it
+    -- finished belongs to cell 2. The sampler may lag by the bin still filling.
+    local rates, seconds = Sampler.cell_rates(2, sidx, 600, cells.records[2].since)
+    local measured = rates["copper-cable"] and rates["copper-cable"].cps * seconds or 0
+    assert(math.abs(measured - cable.products_finished) <= 3,
+      "Measured cable crafts " .. measured .. " must match the engine's " .. cable.products_finished)
+    assert(rates["iron-gear-wheel"] and not rates["electronic-circuit"], "Cell 2 measured another cell's recipe")
+    local circuits = Sampler.cell_rates(1, sidx, 600, cells.records[1].since)
+    assert(circuits["electronic-circuit"] and not circuits["copper-cable"], "Cell 1 must measure only its circuit machine")
+    local inside = Flow.build(2, {mode = "measured", period = 600})
+    assert(inside.partial and inside.utilisation and inside.utilisation > 0.2 and inside.utilisation <= 1.05,
+      "Measured utilisation out of range: " .. tostring(inside.utilisation))
+    assert(inside.nodes["recipe/copper-cable"].rate_line, "Measured recipe nodes need a utilisation line")
+    local overview = Flow.build(nil, {mode = "measured", period = 600})
+    assert(overview.nodes["recipe/cell-1"].rate_line and overview.nodes["recipe/cell-2"].note,
+      "Measured cell nodes need utilisation and a partial-window note")
+    log(string.format("CELL MEASURED PASS: cable crafts engine=%d measured=%.1f over %.0f s; cell 2 utilisation %.2f",
+      cable.products_finished, measured, seconds, inside.utilisation))
 
     UI.open(player)
     local main = player.gui.screen.ssk_main
@@ -235,6 +277,28 @@ function T.tick(UI)
     storage.cell_test_phase = "capture-inside"
   elseif stage == "capture-inside" then
     screenshot(player, "inside")
+    storage.cell_test_phase = "capacity"
+  elseif stage == "capacity" then
+    local main = player.gui.screen.ssk_main
+    local switch = assert(find(main, "ssk_ui", "cell_mode"))
+    assert(switch.switch_state == "left" and main.ssk_window_bar.ssk_period_picker.visible,
+      "Measured must be the default and use the selected period")
+    switch.switch_state = "right"
+    script.get_event_handler(defines.events.on_gui_switch_state_changed){player_index = player.index, element = switch}
+    main = player.gui.screen.ssk_main
+    assert(not main.ssk_window_bar.ssk_period_picker.visible, "Capacity does not depend on the period")
+    local chart = main.ssk_inner.ssk_tabs.content_cells.ssk_cell_split.ssk_cell_chart
+    assert(find(chart, "key", "recipe/electronic-circuit"), "Capacity must chart the configured recipe")
+    storage.cell_test_phase = "capture-capacity"
+  elseif stage == "capture-capacity" then
+    screenshot(player, "inside-capacity")
+    storage.cell_test_phase = "measured-again"
+  elseif stage == "measured-again" then
+    local main = player.gui.screen.ssk_main
+    local switch = assert(find(main, "ssk_ui", "cell_mode"))
+    switch.switch_state = "left"
+    script.get_event_handler(defines.events.on_gui_switch_state_changed){player_index = player.index, element = switch}
+    assert(player.gui.screen.ssk_main.ssk_window_bar.ssk_period_picker.visible)
     storage.cell_test_phase = "prompt-delete"
   elseif stage == "prompt-delete" then
     local main = player.gui.screen.ssk_main
@@ -269,6 +333,49 @@ function T.tick(UI)
     click(player, confirmation(), "ssk_cell_delete_answer", "delete")
     assert(window() and not next(cells.records) and machines[1].valid and machines[5].valid)
     assert(not next(cells.deletions))
+    storage.cell_test_phase = "clone"
+  elseif stage == "clone" then
+    -- Engine cloning to another surface, as Space Exploration moves a spaceship.
+    local machines = storage.cell_test_machines
+    player.cursor_stack.set_stack{name = Selection.tool}
+    select_area(player, {machines[1], machines[2]})
+    window().ssk_cell_panel.ssk_cell_form.ssk_cell_name_column.ssk_cell_name.text = "Ship"
+    click(player, window(), "ssk_cell", "save")
+    local id, record = next(storage.production_cells.records)
+    assert(record and record.name == "Ship" and table_size(record.members) == 2)
+    local ship = game.create_surface("cells-clone-test")
+    ship.request_to_generate_chunks({0, 0}, 2)
+    ship.force_generate_chunk_requests()
+    local tiles = {}
+    for x = -12, 16 do for y = 0, 16 do tiles[#tiles + 1] = {name = "lab-dark-1", position = {x, y}} end end
+    ship.set_tiles(tiles)
+    -- clone_entities returns nothing; the copies are found on the destination.
+    player.surface.clone_entities{entities = {machines[1], machines[2]},
+      destination_offset = {0, 0}, destination_surface = ship}
+    local copies = {}
+    for i = 1, 2 do
+      copies[i] = ship.find_entity(machines[i].name, machines[i].position)
+    end
+    assert(copies[1] and copies[2] and copies[1] ~= copies[2], "Engine clone failed")
+    assert(storage.production_cells.clones and storage.production_cells.clones[id], "Clone events must be recorded")
+    storage.cell_test_clone = {id = id, surface = ship.index, copies = copies}
+    storage.cell_test_clone_tick = game.tick
+    machines[1].destroy()
+    machines[2].destroy()
+    storage.cell_test_phase = "clone-check"
+  elseif stage == "clone-check" then
+    -- This hook runs before the mod resolves clones within a tick.
+    if storage.production_cells.clones and game.tick < storage.cell_test_clone_tick + 5 then return end
+    local clone = storage.cell_test_clone
+    local record = storage.production_cells.records[clone.id]
+    local a, b = clone.copies[1], clone.copies[2]
+    assert(record.surface_index == clone.surface and record.members[a.unit_number] == a
+      and record.members[b.unit_number] == b and Cells.missing(record) == 0,
+      "A cell must follow machines moved to another surface")
+    assert(not storage.production_cells.clones, "Resolved clones must be cleared")
+    assert(Flow.build(nil, CAPACITY).nodes["recipe/cell-" .. clone.id].context == "cells-clone-test",
+      "The All view must place a moved cell on its new surface")
+    log("CELL CLONE PASS: engine clone to another surface moved the cell with both members")
     storage.cell_test_phase = "done"
     log("PRODUCTION CELLS NATIVE PASS")
   end

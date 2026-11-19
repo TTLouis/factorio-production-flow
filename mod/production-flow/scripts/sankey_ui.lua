@@ -825,6 +825,7 @@ local function draw(canvas, L, us, st, player, W, H)
       local tip = {}
       tip[#tip + 1] = Loc.join(rt(sprite_for(n)), " ", display_name(n), "  [", n.ginfo.super_name, " › ", n.ginfo.name, "]  ", View.tier_label(n.tier), (n.era and Loc.join(" ", Loc("sankey-tech-era", string.format("%d", n.era))) or Loc.join(" ", Loc("sankey-production-depth-2"))))
       if n.context then tip[#tip + 1] = n.context end
+      if n.note then tip[#tip + 1] = n.note end
       if n.kind == "item" or n.kind == "fluid" or n.kind == "group" then
         tip[#tip + 1] = Loc("sankey-produced-consumed", fmt(n.prod), units(n), fmt(n.cons), units(n))
         if n.kind == "group" then tip[#tip + 1] = Loc("sankey-totals-across-these-members-expand-the-group") end
@@ -855,7 +856,7 @@ local function draw(canvas, L, us, st, player, W, H)
       end
       local details = Loc.join_list(tip, "\n")
       local shown = (n.prod > 0) and n.prod or n.cons
-      local rate = n.caption and n.context or n.kind == "recipe" and Loc("machine-status-recipe") or (Loc.join(fmt(shown), " ", units(n)))
+      local rate = n.rate_line or n.caption and n.context or n.kind == "recipe" and Loc("machine-status-recipe") or (Loc.join(fmt(shown), " ", units(n)))
       local usage = not n.transport and us.neighborhood and n.selected_usage
       if usage then
         local material=L.nodes[us.focus]
@@ -863,6 +864,7 @@ local function draw(canvas, L, us, st, player, W, H)
         details=Loc("sankey-consumes-selected", display_name(material), rate, details)
       end
       local tooltip = { "", rt(sprite_for(n)), " ", localised_name(n), "\n", rate }
+      if n.note then tooltip[#tooltip + 1] = Loc.join("\n", n.note) end
       if usage then
         tooltip[#tooltip+1]=Loc.join(" ", Loc("selected-material-consumed", localised_name(L.nodes[us.focus])))
         if n.kind~="recipe" then tooltip[#tooltip+1]=Loc("sankey-consumer-production", fmt(n.prod), units(n)) end

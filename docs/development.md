@@ -81,9 +81,32 @@ Sankey views at 100% UI scale. It also replaces members in the engine: a
 fast-replace upgrade (raised as `script_raised_built`) and a ghost revival
 (`script_raised_revive`) must rejoin the cell, and the editor must report the
 missing machine in between. The offline `cells_membership_test.lua` covers the
-slot index, edit keep/forget, replacement drags, shared slots and deletion. The Cells tab uses estimated recipe capacity
-and groups the All view by surface. Its figures are separate from production
-history and recorded cargo.
+slot index, edit keep/forget, replacement drags, shared slots and deletion.
+
+The Cells tab shows measured throughput by default: the sampler attributes each
+member's crafts to its cells from the moment a cell is created, and the chart
+uses the selected period, clipped to the cell's age. The Capacity switch shows
+every member at full crafting speed. The All view groups cells by surface and
+leaves out machines shared by several cells in both modes. The native fixture
+powers and feeds its machines, compares the measured cable crafts with the
+engine's `products_finished`, and captures the Capacity view. The offline
+`cells_measured_test.lua` covers attribution, ring roll-up, creation clipping,
+shared exclusion, membership changes, utilisation and purge on delete.
+
+A cell follows machines that are cloned to another surface (Space Exploration
+spaceship launches and landings) only when every live member has an eligible
+copy on the same new surface and the originals are gone. Copies that leave the
+originals in place, partial moves and splits across surfaces keep the cell where
+it was. The native fixture clones a cell's machines to a new surface;
+`cells_clone_test.lua` covers the wait, copy grace period, partial and split
+moves and a source surface deleted in the same tick.
+
+For the sampler cost, run `python tests/cells_benchmark.py --save PATH` on an
+authorized save. It snapshots the source, benchmarks a private copy without
+cells and with every sampled machine in two overlapping cells, alternating the
+order, and reports steady-state update times. `--no-overlap` drops the
+per-surface cell and `--limit N` caps the number of small cells for a more
+typical layout.
 
 For an authorized modded save, use Factorio's `--sync-mods` with an isolated
 `--config` and `--mod-directory` first. Then run

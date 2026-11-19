@@ -174,6 +174,18 @@ local function add_crafts(recipes, name, total, normal)
   end
 end
 
+local function add_cells(dst, src, field)
+  local cells = src[field]
+  if not cells then return end
+  local out = dst[field]
+  if not out then out = {}; dst[field] = out end
+  for id, recs in pairs(cells) do
+    local d = out[id]
+    if not d then d = {}; out[id] = d end
+    for r, a in pairs(recs) do add_crafts(d, r, a.c, a.n) end
+  end
+end
+
 local function add_into(dst, src)
   local empty = empty_stats()
   for s, recs in pairs(src.rec) do
@@ -183,6 +195,10 @@ local function add_into(dst, src)
       add_crafts(d, r, a.c, Sm.normal_crafts(a))
     end
   end
+  -- Production cells: bin.cell[id][recipe] holds every member's crafts and
+  -- bin.cell_shared[id][recipe] the part made by machines in several cells.
+  add_cells(dst, src, "cell")
+  add_cells(dst, src, "cell_shared")
   for s, keys in pairs(src.stat) do
     local d = dst.stat[s]
     if not d then d = empty; dst.stat[s] = d end
@@ -486,6 +502,7 @@ function Sm.on_tick(tick)
   local cur = storage.mcursor
   local machines = storage.machines
   local recipes = storage.graph and storage.graph.recipes
+  local cell_units = storage.cell_units
 
   for _ = 1, per do
     local n = #list
@@ -534,7 +551,27 @@ function Sm.on_tick(tick)
         if d > 0 then
           local bs = bin.rec[rec.s]
           if not bs then bs = {}; bin.rec[rec.s] = bs end
-          add_crafts(bs, r, d, normal_crafts_between(rec, d, productivity, crafting, bonus, speed, recipe))
+          local normal = normal_crafts_between(rec, d, productivity, crafting, bonus, speed, recipe)
+          add_crafts(bs, r, d, normal)
+          local cell_ids = cell_units and cell_units[u]
+          if cell_ids then
+            local all = bin.cell
+            if not all then all = {}; bin.cell = all end
+            local shared = #cell_ids > 1
+            for i = 1, #cell_ids do
+              local id = cell_ids[i]
+              local cr = all[id]
+              if not cr then cr = {}; all[id] = cr end
+              add_crafts(cr, r, d, normal)
+              if shared then
+                local sh = bin.cell_shared
+                if not sh then sh = {}; bin.cell_shared = sh end
+                local sr = sh[id]
+                if not sr then sr = {}; sh[id] = sr end
+                add_crafts(sr, r, d, normal)
+              end
+            end
+          end
         end
       end
       if entity_status and (r ~= rec.r or not rec.status_due or tick >= rec.status_due) then
@@ -836,6 +873,61 @@ function Sm.rates(sidx, period)
     end
   end
   return out, secs
+end
+
+-- Measured crafts of one production cell. Attribution starts when the cell is
+-- created, so the window is clipped to `since_tick`; a bin that straddles that
+-- start holds only crafts made after it and is counted whole. With `exclusive`,
+-- crafts by machines that also belong to another cell are left out.
+---@return table<string, {cps:number, normal_cps:number}> recipes
+---@return number seconds Measured duration used as the denominator.
+---@return number requested Requested window in seconds.
+function Sm.cell_rates(cell_id, sidx, period, since_tick, exclusive)
+  local sources, period_start = rate_sources(sidx, period)
+  local end_tick = math.floor(game.tick / BIN_TICKS) * BIN_TICKS
+  local since = since_tick and math.floor(since_tick / BIN_TICKS) * BIN_TICKS or period_start
+  local start_tick = math.max(period_start, since)
+  local totals, secs = {}, 0
+  local function add(recs, sign, fraction)
+    for r, a in pairs(recs) do add_crafts(totals, r, sign * a.c * fraction, sign * a.n * fraction) end
+  end
+  for _, source in ipairs(sources) do
+    local ticks = source.known and source_ticks(source, start_tick) or 0
+    if ticks > 0 then
+      local bin = source.bin
+      local fraction = 1
+      if start_tick > source.first and since < period_start then
+        fraction = ticks / source_ticks(source, -math.huge)
+      end
+      local all = bin.cell and bin.cell[cell_id]
+      if all then add(all, 1, fraction) end
+      local shared = exclusive and bin.cell_shared and bin.cell_shared[cell_id]
+      if shared then add(shared, -1, fraction) end
+      secs = secs + ticks / BIN_TICKS
+    end
+  end
+  local out = {}
+  if secs > 0 then
+    for r, x in pairs(totals) do
+      if x.c > 1e-9 then out[r] = { cps = x.c / secs, normal_cps = x.n / secs } end
+    end
+  end
+  return out, secs, (end_tick - period_start) / BIN_TICKS
+end
+
+-- A deleted cell's attribution is dropped from every resolution.
+function Sm.purge_cell(cell_id)
+  local function purge(bin)
+    if bin.cell then bin.cell[cell_id] = nil; if not next(bin.cell) then bin.cell = nil end end
+    if bin.cell_shared then
+      bin.cell_shared[cell_id] = nil
+      if not next(bin.cell_shared) then bin.cell_shared = nil end
+    end
+  end
+  for _, bin in pairs(storage.bins or {}) do purge(bin) end
+  for _, ring in ipairs(storage.rings or {}) do
+    for _, bin in pairs(ring.bins) do purge(bin) end
+  end
 end
 
 ---@param sidx integer? Surface index; nil combines all registered surfaces.
