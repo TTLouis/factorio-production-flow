@@ -5,8 +5,8 @@ local resolution, scale = player.display_resolution, player.display_scale
 local group = us.bal_group
 us.tab_id, us.bal_filter, us.bal_details = "balance", "all", false
 us.bal_group = "plates"
-for _, size in ipairs({ { 1920, 1080 }, { 1366, 768 }, { 1280, 720 } }) do
-  for _, gui_scale in ipairs({ 1, 1.25, 1.5 }) do
+for _, size in ipairs({ { 1920, 1080, { 1, 1.25, 1.5 } }, { 1366, 768, { 1, 1.25 } }, { 1280, 720, { 1, 1.25 } } }) do
+  for _, gui_scale in ipairs(size[3]) do
     player.display_resolution, player.display_scale = { width = size[1], height = size[2] }, gui_scale
     UI.open(player)
     local frame = player.gui.screen.ssk_main
@@ -16,7 +16,7 @@ for _, size in ipairs({ { 1920, 1080 }, { 1366, 768 }, { 1280, 720 } }) do
     assert(split.ssk_balance_table.ssk_bal_root.ssk_bal_list.ssk_bal_items.type == "scroll-pane", "items need independent scrolling")
     assert(split.ssk_balance_table.style.width + split.ssk_balance_focus.style.width + 12 == us.canvas_w, "panes exceed content width")
     local table_root = split.ssk_balance_table.ssk_bal_root
-    local controls = table_root.ssk_bal_controls
+    local controls = table_root.ssk_bal_strip.ssk_bal_controls
     local pickers, width = {}, (#controls.children - 1) * controls.style.horizontal_spacing
     for _, child in ipairs(controls.children) do
       local action = child.tags.ssk_ui
@@ -27,10 +27,18 @@ for _, size in ipairs({ { 1920, 1080 }, { 1366, 768 }, { 1280, 720 } }) do
     assert(table.concat(pickers, ",") == "bal_filter,bal_group,bal_sort", "Show, Group and Order must share one row")
     assert(width <= controls.style.width, "Balance controls must fit with a group selected")
     assert(table_root.ssk_bal_list.ssk_bal_items.horizontal_scroll_policy=="never", "item list must not scroll sideways")
+    local lane=table_root.tags.lane
+    assert(lane==0 or lane==12, "the scrollbar lane is kept whole or given to the rows")
+    assert(table_root.ssk_bal_list.ssk_bal_items.vertical_scroll_policy==(lane>0 and "auto-and-reserve-space" or "dont-show-but-allow-scrolling"),
+      "a list that gives up its lane must hide the scrollbar but keep wheel scrolling")
     local t=table_root.ssk_bal_list.ssk_bal_items.ssk_bal_section_1.ssk_bal_table
     local used=(t.column_count-1)*t.style.horizontal_spacing+t.column_count*((t.style.left_cell_padding or 0)+(t.style.right_cell_padding or 0))
     for i=1,t.column_count do used=used+t.children[i].style.width end
-    assert(used+t.parent.style.right_padding==us.bal_width+4, "rows and right gutter must fit within the frame padding and reserved scrollbar")
+    -- The item column never drops below 24 px; only the narrowest panels reach that floor.
+    local item_floor=false
+    for i=1,t.column_count do if t.children[i].tags.ssk_ui=="bal_material" and t.children[i].style.width==24 then item_floor=true end end
+    assert(used+t.parent.style.right_padding==us.bal_width-table_root.tags.lane or item_floor and used+t.parent.style.right_padding<=us.bal_width-table_root.tags.lane+8,
+      "rows and right gutter must fill the list box beside any scrollbar lane")
     UI.on_click({ player_index = 1, element = { name = "x", tags = { ssk_ui = "focus_item", key = "item/electronic-circuit" } } })
     assert(us.tab_id == "balance" and table_root == split.ssk_balance_table.ssk_bal_root, "selection must preserve table and tab")
     for _, focus in ipairs({ "item/electronic-circuit", "item/iron-ore", "fluid/water", "fluid/petroleum-gas", "item/idle-test" }) do

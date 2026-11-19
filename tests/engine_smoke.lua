@@ -74,6 +74,13 @@ function Smoke.run(UI, Canvas)
     height=backing.map_gen_settings.height,generated=backing.is_chunk_generated({16,0})})
   assert(backing.map_gen_settings.width==2000000 and backing.map_gen_settings.height==2000000 and
     backing.is_chunk_generated({16,0}), 'Canvas inherited finite factory bounds')
+  local chunk={{512,0},{544,32}}
+  assert(backing.generate_with_lab_tiles and backing.always_day and backing.freeze_daytime and not backing.show_clouds,
+    'Canvas lab generation and lighting settings are missing')
+  assert(backing.count_tiles_filtered{area=chunk,name={'lab-dark-1','lab-dark-2','lab-white'}}==1024,
+    'Canvas backing chunk contains non-lab tiles')
+  assert(#backing.find_entities_filtered{area=chunk}==0 and #backing.find_decoratives_filtered{area=chunk}==0,
+    'Canvas generated entities or decoratives')
   local finite=backing.map_gen_settings
   finite.width,finite.height=64,64
   backing.map_gen_settings=finite

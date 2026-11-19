@@ -1,6 +1,7 @@
 -- History reads completed sampler bins and chest scans without changing them.
 local Sampler = require("scripts.sampler")
 local Graph = require("scripts.graph")
+local Transport = require("scripts.transport_flows")
 
 local H = { OTHER = "other", LABS = "labs" }
 local TICKS_PER_SECOND = 60
@@ -210,6 +211,7 @@ end
 
 local function stock_net(source, scope, key)
   if not source.known then return nil end
+  if source.stock_rate then return source.stock_rate * (source.last - source.first) end
   if not scope then return source.made - source.used end
   local net = 0
   for index in pairs(scope) do
@@ -221,49 +223,183 @@ local function stock_net(source, scope, key)
   return net
 end
 
+local function scoped_stock_sources(sources, scope, key)
+  if not scope then return sources end
+  local result = {}
+  for _, source in ipairs(sources) do
+    if source.known then
+      local intervals = { { first = source.first, last = source.last, rate = 0 } }
+      for index in pairs(scope) do
+        local materials = source.bin.stat[index]
+        local runs = source.bin.coverage and source.bin.coverage[index]
+        if not materials or source.bin.coverage and not runs then intervals = {}; break end
+        local duration = source.duration or (source.last - source.first)
+        if runs then
+          duration = 0
+          for i = 1, #runs, 2 do duration = duration + (runs[i + 1] - runs[i]) * TICKS_PER_SECOND end
+        end
+        local measured = materials[key]
+        local rate = measured and (measured.i - measured.o) / duration or 0
+        local covered = {}
+        for _, interval in ipairs(intervals) do
+          if runs then
+            for i = 1, #runs, 2 do
+              local first = math.max(interval.first, runs[i] * TICKS_PER_SECOND)
+              local last = math.min(interval.last, runs[i + 1] * TICKS_PER_SECOND)
+              if last > first then covered[#covered + 1] = { first = first, last = last, rate = interval.rate + rate } end
+            end
+          else
+            covered[#covered + 1] = { first = interval.first, last = interval.last, rate = interval.rate + rate }
+          end
+        end
+        intervals = covered
+      end
+      -- Aggregate coverage means any surface was sampled. Stock requires every
+      -- surface in its physical baseline, with each total divided by its own
+      -- observed duration. Intersect those runs instead of bridging their gaps.
+      for _, interval in ipairs(intervals) do
+        result[#result + 1] = { first = interval.first, last = interval.last, known = true, stock_rate = interval.rate }
+      end
+    end
+  end
+  return result
+end
+
 local function add_stock_estimates(result, sources, from, to, old, new, scope, key)
+  sources = scoped_stock_sources(sources, scope, key)
   local live = new == nil
   local tick, net, point_index = from, 0, 1
-  local estimates = {}
+  local estimates, last_rate, last_rate_end = {}, nil, nil
+  local crossings={}
+  for _,event in ipairs(result.stock_events or {}) do
+    if event.tick>from and event.tick<=to and (not scope or scope[event.surface_index]) then crossings[#crossings+1]=event end
+  end
+  local shipment_index, shipment_total, crossing_index = 1, 0, 1
+  local function shipment_net(at)
+    while crossings[shipment_index] and crossings[shipment_index].tick <= at do
+      shipment_total = shipment_total + crossings[shipment_index].delta
+      shipment_index = shipment_index + 1
+    end
+    return shipment_total
+  end
+  local completed = math.floor(result.end_tick / TICKS_PER_SECOND) * TICKS_PER_SECOND
+  local function advance(stop, net_per_tick, extrapolated)
+    while crossings[crossing_index] and crossings[crossing_index].tick <= stop do
+      local event = crossings[crossing_index]
+      if event.tick>tick and event.tick<=stop then
+        estimates[#estimates+1]={tick=event.tick,net=net+(event.tick-tick)*net_per_tick,
+          extrapolated=extrapolated,boundary=true,event=event}
+      end
+      crossing_index = crossing_index + 1
+    end
+    local start = result.start_tick
+    if start > from and start > tick and start <= stop and start < to then
+      estimates[#estimates + 1] = { tick = start, net = net + (start - tick) * net_per_tick,
+        extrapolated = extrapolated }
+    end
+    while result.points[point_index] and result.points[point_index].end_tick <= stop do
+      local at = result.points[point_index].end_tick
+      if at > from and at < to and at > tick then
+        estimates[#estimates + 1] = { tick = at, net = net + (at - tick) * net_per_tick,
+          extrapolated = extrapolated }
+      end
+      point_index = point_index + 1
+    end
+    net = net + (stop - tick) * net_per_tick
+    tick = stop
+  end
   for _, source in ipairs(sources) do
-    if source.last > tick then
+    if source.last == completed and source.last <= from then
+      -- A scan on or after the latest completed boundary can still use that
+      -- immediately preceding observation for the remaining fractional second.
+      local change = stock_net(source, scope, key)
+      last_rate = change and change / (source.duration or (source.last - source.first)) or nil
+      last_rate_end = source.last
+    elseif source.last > tick then
       if source.first > tick then break end
       local change = stock_net(source, scope, key)
       if change == nil then break end
       local stop = math.min(source.last, to)
       local net_per_tick = change / (source.duration or (source.last - source.first))
-      local start = result.start_tick
-      if start > from and start > tick and start <= stop and start < to then
-        estimates[#estimates + 1] = { tick = start, net = net + (start - tick) * net_per_tick }
-      end
-      while result.points[point_index] and result.points[point_index].end_tick <= stop do
-        local at = result.points[point_index].end_tick
-        if at > from and at < to and (not estimates[#estimates] or at > estimates[#estimates].tick) then
-          estimates[#estimates + 1] = { tick = at, net = net + (at - tick) * net_per_tick }
-        end
-        point_index = point_index + 1
-      end
-      net = net + (stop - tick) * net_per_tick
-      tick = stop
+      advance(stop, net_per_tick)
+      last_rate, last_rate_end = net_per_tick, stop
       if tick == to then break end
     end
   end
+  -- Completed-bin statistics never include the accumulating second. Forecast
+  -- only its short tail, after a contiguous run reaches the current completed
+  -- boundary. Older missing history or missing surface coverage stays a gap.
+  local extrapolated = last_rate ~= nil and last_rate_end == completed and tick >= completed and to > tick
+    and to - completed < TICKS_PER_SECOND and to <= result.end_tick
+  if extrapolated then advance(to, last_rate, true) end
   if live then
-    -- Finish at the latest covered sample, even inside the current plot bucket.
+    -- The final point follows the current time only when the short forecast
+    -- above is supported; otherwise it stops at the last covered observation.
     local last = estimates[#estimates]
     if tick >= result.start_tick and tick > from and (not last or last.tick < tick) then
-      estimates[#estimates + 1] = { tick = tick, net = net }
+      estimates[#estimates + 1] = { tick = tick, net = net, extrapolated = extrapolated or nil }
     end
   elseif tick ~= to then
     return nil
   end
-  local residual = live and 0 or new - old - net
-  for _, point in ipairs(estimates) do
-    local fraction = (point.tick - from) / (to - from)
-    result.stock[#result.stock + 1] = { tick = point.tick, measured = false, live = live or nil, joined = true,
-      count = math.max(0, old + point.net + residual * fraction) }
+  table.sort(estimates,function(a,b) return a.tick<b.tick end)
+  local unique={}
+  for _,point in ipairs(estimates) do
+    local previous=unique[#unique]
+    if previous and previous.tick==point.tick then
+      previous.boundary=previous.boundary or point.boundary;previous.event=previous.event or point.event
+    else unique[#unique+1]=point end
   end
+  for _, point in ipairs(unique) do if live or point.tick<to then
+    result.stock[#result.stock + 1] = { tick = point.tick, measured = false, live = live or nil, joined = true,
+      boundary=point.boundary,transport=point.event,extrapolated = point.extrapolated,
+      count = math.max(0, old + point.net + shipment_net(point.tick)) }
+  end end
   return true
+end
+
+local function stock_events(result,scans,sidx,key,first,last)
+  if not result.stock_supported then return {} end
+  local force=game.forces and game.forces.player
+  if not (force and force.valid and game.surfaces) then return {} end
+  local scopes={}
+  if sidx then scopes[sidx]=true else for _,scan in ipairs(scans) do for index in pairs(scan.s) do scopes[index]=true end end end
+  local events,receipts={},{}
+  for index in pairs(scopes) do
+    local surface=game.surfaces[index]
+    if surface and surface.valid then
+      local observed,metadata=Transport.events(force,surface,last,(last-first)/60,{material=key:sub(6)})
+      if metadata and metadata.provider then result.import_receipts=result.import_receipts or {} end
+      for _,event in ipairs(observed or {}) do
+        if event.material==key then
+          -- Receipt markers are observations, independent of whether this
+          -- engine version includes cargo in production statistics. Combine
+          -- qualities arriving on the same tick without changing accounting.
+          if event.kind=="received" and event.delta>0 and event.tick>=result.start_tick and event.tick<=last then
+            local receipt=receipts[event.tick]
+            if not receipt then
+              receipt={tick=event.tick,count=0};receipts[event.tick]=receipt
+              result.import_receipts=result.import_receipts or {}
+              result.import_receipts[#result.import_receipts+1]=receipt
+            end
+            receipt.count=receipt.count+event.delta
+          end
+          if event.stats_included==false then events[#events+1]=event
+          elseif event.stats_included==nil then result.stock_transport_incomplete=true end
+        end
+      end
+      if metadata and metadata.provider then
+        local coverage, seconds = metadata.coverage or {}, metadata.period_seconds or (last-first)/60
+        if metadata.truncated or metadata.received_partial or not metadata.coverage_known
+          or (coverage.sent or 0) < seconds or (coverage.received or 0) < seconds then
+          result.stock_transport_incomplete=true
+        end
+      end
+    end
+  end
+  if result.import_receipts then table.sort(result.import_receipts,function(a,b)return a.tick<b.tick end) end
+  table.sort(events,function(a,b) if a.tick~=b.tick then return a.tick<b.tick end;return a.key<b.key end)
+  return events
 end
 
 local function stock_points(result, sources, scans, sidx, key)
@@ -274,10 +410,10 @@ local function stock_points(result, sources, scans, sidx, key)
     if scan.tick >= result.start_tick then
       local joined
       if count ~= nil and old ~= nil and scan.tick > previous.tick and (sidx or same_stock_scope(previous, scan)) then
-        joined = add_stock_estimates(result, sources, previous.tick, scan.tick, old, count)
+        joined = add_stock_estimates(result, sources, previous.tick, scan.tick, old, count, not sidx and previous.s or nil, key)
       end
       if count ~= nil then
-        result.stock[#result.stock + 1] = { tick = scan.tick, count = count, measured = true, joined = joined }
+        result.stock[#result.stock + 1] = { tick = scan.tick, count = count, measured = true, joined = joined, boundary=true }
       end
     end
     previous, old = scan, count
@@ -297,7 +433,7 @@ function H.build(sidx, period, key)
   local result = { start_tick = now - requested * TICKS_PER_SECOND, end_tick = now, seconds = 0,
     bucket_seconds = math.ceil(requested / MAX_BUCKETS), points = {}, usage_keys = {}, stock = {},
     stock_supported = key:sub(1, 5) == "item/" }
-  local scans = result.stock_supported and storage.stock_basis == "physical-chests-v1" and storage.stock or {}
+  local scans = result.stock_supported and storage.stock_basis == "physical-storage-v2" and storage.stock or {}
   local rate_start_tick = result.start_tick
   if requested >= ROLLING_MIN_PERIOD then
     result.rolling_seconds = result.bucket_seconds * ROLLING_BUCKETS
@@ -348,6 +484,7 @@ function H.build(sidx, period, key)
     end
   end
   if has_other then result.usage_keys[#result.usage_keys + 1] = H.OTHER end
+  result.stock_events=stock_events(result,scans,sidx,key,start_tick,now)
   stock_points(result, sources, scans, sidx, key)
   return result
 end

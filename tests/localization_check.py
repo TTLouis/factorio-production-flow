@@ -194,11 +194,11 @@ def validate(mod=MOD):
     return english, len(catalogs)
 
 
-def install_native_support(target, language="en"):
+def install_native_support(target, language="en", mod=MOD):
     """Inject only into private native-test copies, after clean packaging."""
-    catalog, _ = validate()
-    language_folder = MOD / "locale" / language
-    if language_folder not in list((MOD / "locale").iterdir()) or not language_folder.is_dir():
+    catalog, _ = validate(mod)
+    language_folder = mod / "locale" / language
+    if language_folder not in list((mod / "locale").iterdir()) or not language_folder.is_dir():
         raise ValueError(f"Unknown shipped locale: {language}")
     translated = {}
     for path in sorted(language_folder.glob("*.cfg")):

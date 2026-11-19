@@ -1,4 +1,16 @@
 local H = require("scripts.history")
+local Transport = require("scripts.transport_flows")
+local original_events = Transport.events
+local crossings, crossing_metadata = {}, {}
+Transport.events = function(force, surface, last, seconds, filters)
+  assert(force == game.forces.player and surface == game.surfaces[surface.index])
+  local result = {}
+  for _, event in ipairs(crossings) do
+    if event.surface_index == surface.index and event.tick >= last - seconds * 60 and event.tick <= last
+      and (not filters.material or event.material == "item/" .. filters.material) then result[#result + 1] = event end
+  end
+  return result, crossing_metadata
+end
 local material = "item/iron-plate"
 local other = H.OTHER
 prototypes = { get_entity_filtered = function() return {
@@ -10,9 +22,11 @@ local function near(actual, expected)
 end
 
 local function reset(tick)
-  storage = { bins = {}, rings = {}, stock = {}, stock_basis = "physical-chests-v1" }
+  storage = { bins = {}, rings = {}, stock = {}, stock_basis = "physical-storage-v2" }
   settings = { global = { ["ssk-window-seconds"] = { value = 60 } } }
-  game = { tick = tick }
+  game = { tick = tick, forces = { player = { index = 1, valid = true } }, surfaces = {
+    { index = 1, valid = true }, { index = 2, valid = true }, { index = 3, valid = true } } }
+  crossings, crossing_metadata = {}, {}
 end
 
 local function stats(made, used)
@@ -261,12 +275,13 @@ assert(stock_at(h, 30).measured and stock_at(h, 630).measured and stock_at(h, 69
 assert(not stock_at(h, 30).joined and stock_at(h, 630).joined and stock_at(h, 690).joined)
 near(stock_at(h, 30).count, 100); near(stock_at(h, 630).count, 130); near(stock_at(h, 690).count, 0)
 assert(not stock_at(h, 300).measured)
-near(stock_at(h, 300).count, 185.5)
-near(stock_at(h, 600).count, 130.5)
-assert(h.stock[#h.stock].live and h.stock[#h.stock].tick == 720, "stop at the latest complete sampler bin")
+near(stock_at(h, 300).count, 190)
+near(stock_at(h, 600).count, 140)
+assert(h.stock[#h.stock].live and h.stock[#h.stock].extrapolated and h.stock[#h.stock].tick == game.tick,
+  "a supported fractional-second tail reaches the current time")
 near(h.stock[#h.stock].count, 0)
-near(stock_at(H.build(2, 12, material), 300).count, 790)
-near(stock_at(H.build(nil, 12, material), 300).count, 975.5)
+near(stock_at(H.build(2, 12, material), 300).count, 2950)
+near(stock_at(H.build(nil, 12, material), 300).count, 3140)
 assert(not H.build(1, 12, "fluid/water").stock_supported and #H.build(1, 12, "fluid/water").stock == 0)
 assert(#H.build(999, 12, material).stock == 0)
 
@@ -274,7 +289,7 @@ local clipped = H.build(1, 10, material)
 assert(not stock_at(clipped, 30) and stock_at(clipped, 300))
 assert(clipped.stock[1].tick == clipped.start_tick and not clipped.stock[1].measured,
   "a complete scan interval should fill the visible time axis from its left edge")
-near(stock_at(clipped, 300).count, 185.5)
+near(stock_at(clipped, 300).count, 190)
 storage.bins[4] = nil
 h = H.build(1, 12, material)
 assert(stock_at(h, 30) and stock_at(h, 630) and not stock_at(h, 300), "no estimates over a rate gap")
@@ -293,10 +308,20 @@ scan(3 * 60, 20, 30)
 local last_scan = storage.stock[1]
 h = H.build(1, 20, material)
 local last = h.stock[#h.stock]
-assert(last.live and not last.measured and last.tick == 360)
-near(last.count, 29)
+assert(last.live and last.extrapolated and not last.measured and last.tick == game.tick)
+near(last.count, 29.75)
 near(stock_at(h, last_scan.tick).count, 20)
 near(stock_at(H.build(nil, 20, material), 360).count, 80)
+near(stock_at(H.build(nil, 20, material), game.tick).count, 82.5)
+near(h.seconds, 6)
+made, used = totals(h); near(made, 24); near(used, 6)
+fine(6, stats(1e6, 0), stats(1e6, 0)) -- The current accumulating bin is not a measurement.
+game.tick = 6 * 60 + 30
+h = H.build(1, 20, material)
+near(h.stock[#h.stock].count, 30.5)
+assert(h.stock[#h.stock].tick == game.tick and h.stock[#h.stock].extrapolated)
+near(h.seconds, 6)
+made, used = totals(h); near(made, 24); near(used, 6)
 game.tick = 9 * 60
 for sec = 6, 8 do fine(sec, stats(4, 1), stats(9, 2)); storage.bins[sec].stat[3] = stats(100, 0) end
 h = H.build(1, 20, material)
@@ -312,6 +337,70 @@ last = h.stock[#h.stock]
 assert(last.live and last.tick == 420, "stop at gaps even when there are later rates")
 near(last.count, 32)
 
+-- Extrapolation is limited to the current incomplete second. It cannot make
+-- stale or retained suffix history contiguous with a scan across missing data.
+reset(6 * 60 + 15)
+scan(3 * 60, 20, 30)
+assert(#H.build(1, 20, material).stock == 1, "a scan alone cannot forecast stock")
+for sec = 0, 5 do fine(sec, stats(4, 1), stats(9, 2)) end
+storage.bins[4] = nil
+h = H.build(1, 20, material)
+assert(h.stock[#h.stock].tick == 240 and not h.stock[#h.stock].extrapolated,
+  "later current rates cannot bridge a genuine gap")
+storage.bins[4] = nil; storage.bins[3] = nil
+h = H.build(1, 20, material)
+assert(#h.stock == 1, "a retained suffix cannot bridge discarded history after a scan")
+fine(3, stats(4, 1), stats(9, 2)); fine(4, stats(4, 1), stats(9, 2))
+storage.bins[5].stat[1] = nil
+h = H.build(1, 20, material)
+assert(h.stock[#h.stock].tick == 300 and not h.stock[#h.stock].extrapolated,
+  "another surface's newest coverage does not extend the selected scope")
+local scoped = H.build(2, 20, material)
+assert(scoped.stock[#scoped.stock].tick == game.tick and scoped.stock[#scoped.stock].extrapolated)
+near(scoped.stock[#scoped.stock].count, 52.75)
+local combined = H.build(nil, 20, material)
+assert(combined.stock[#combined.stock].tick == 300,
+  "aggregate estimates require the latest scan's whole surface scope")
+fine(5, stats(4, 1), stats(9, 2))
+game.tick = 7 * 60
+h = H.build(1, 20, material)
+assert(h.stock[#h.stock].tick == 360 and not h.stock[#h.stock].extrapolated,
+  "a missing complete second is stale history, not a fractional tail")
+
+-- A measurement on the completed boundary can anchor a current forecast. A
+-- measurement inside the current second also closes interpolation without
+-- discarding the whole preceding interval; that actual scan remains unchanged.
+reset(6 * 60 + 15)
+for sec = 0, 5 do fine(sec, stats(4, 1), stats(9, 2)) end
+scan(360, 20, 30)
+h = H.build(1, 20, material)
+assert(h.stock[#h.stock].tick == game.tick and h.stock[#h.stock].extrapolated)
+near(h.stock[#h.stock].count, 20.75)
+storage.stock = {}
+scan(6 * 60 + 5, 20, 30)
+h = H.build(1, 20, material)
+assert(h.stock[#h.stock].tick == game.tick and h.stock[#h.stock].extrapolated,
+  "a scan inside the current second can anchor its remaining fractional tail")
+near(h.stock[#h.stock].count, 20.5)
+storage.stock = {}
+scan(180, 20, 30); scan(game.tick, 60, 80)
+local newest_scan = storage.stock[2]
+h = H.build(1, 20, material)
+assert(stock_at(h, 360) and stock_at(h, game.tick).joined,
+  "a fractional newest measured scan retains its preceding estimated interval")
+near(stock_at(h, 360).count, 29)
+assert(stock_at(h, game.tick).measured and not stock_at(h, game.tick).extrapolated)
+near(stock_at(h, game.tick).count, 60)
+assert(storage.stock[2] == newest_scan and newest_scan.s[1][material] == 60)
+made, used = totals(h); near(made, 24); near(used, 6)
+
+reset(6 * 60 + 45)
+for sec = 0, 5 do fine(sec, stats(0, 8)) end
+scan(360, 2)
+h = H.build(1, 20, material)
+assert(h.stock[#h.stock].extrapolated and h.stock[#h.stock].tick == game.tick)
+near(h.stock[#h.stock].count, 0)
+
 reset(6 * 60)
 for sec = 0, 5 do fine(sec, stats(sec < 3 and 0 or 100, sec < 3 and 100 or 0)) end
 scan(0, 1)
@@ -321,4 +410,157 @@ near(stock_at(h, 180).count, 0)
 near(stock_at(h, 360).count, 1)
 storage.stock_basis = "legacy-logistic-network"
 assert(#H.build(1, 6, material).stock == 0)
+
+-- Physical crossings change the estimate on their observed boundary, never
+-- before it. Later scans reset the baseline without spreading their residual
+-- backwards through the earlier production/transport history.
+local function event(tick, delta, surface, included, name)
+  return {key=tostring(#crossings+1),tick=tick,delta=delta,surface_index=surface or 1,
+    material=name or material,stats_included=included,kind=delta<0 and "sent" or "received",provider="sa"}
+end
+reset(600)
+for sec=0,9 do fine(sec,stats(2,1),stats(0,0)) end
+scan(0,100,50)
+crossings[1]=event(150,-10,1,false)
+crossings[2]=event(330,20,1,false)
+h=H.build(1,10,material)
+near(stock_at(h,120).count,102)
+near(stock_at(h,150).count,92.5)
+near(stock_at(h,180).count,93)
+near(stock_at(h,330).count,115.5)
+near(stock_at(h,600).count,120)
+assert(stock_at(h,150).boundary and stock_at(h,150).transport==crossings[1])
+assert(stock_at(h,330).boundary and stock_at(h,330).transport==crossings[2])
+made,used=totals(h);near(made,20);near(used,10)
+scan(480,80,50)
+crossings[3]=event(480,5,1,false)
+h=H.build(1,10,material)
+near(stock_at(h,330).count,115.5)
+near(stock_at(h,480).count,80)
+near(stock_at(h,600).count,82)
+assert(stock_at(h,480).measured and stock_at(h,480).boundary,
+  "a measured scan resets the estimate and owns same-tick transport")
+
+reset(600)
+for sec=0,9 do fine(sec,stats(2,1),stats(0,0)) end
+scan(0,100,50)
+crossings[1]=event(150,-10,1,true)
+h=H.build(1,10,material)
+near(stock_at(h,600).count,110)
+assert(not stock_at(h,150),"a crossing already included in statistics cannot be added again")
+crossings[1]=event(150,20,1,nil)
+h=H.build(1,10,material)
+near(stock_at(h,600).count,110)
+assert(h.stock_transport_incomplete and not stock_at(h,150),
+  "unverified statistics accounting is disclosed, never guessed")
+crossings={};crossing_metadata={provider="sa",received_partial=true}
+h=H.build(1,10,material)
+near(stock_at(h,600).count,110)
+assert(h.stock_transport_incomplete and #h.stock_events==0,
+  "an unknown cargo receipt cannot create a positive stock event")
+crossing_metadata={provider="sa",coverage_known=true,period_seconds=10,coverage={sent=10,received=5}}
+h=H.build(1,10,material)
+assert(h.stock_transport_incomplete,"lost receipt coverage must mark the estimate incomplete")
+crossing_metadata.coverage.received=10
+h=H.build(1,10,material)
+assert(not h.stock_transport_incomplete,"complete independent SA boundaries permit a complete estimate")
+
+reset(600)
+for sec=0,9 do fine(sec,stats(2,1),stats(0,0)) end
+scan(0,100,50)
+crossings[1]=event(150,-10,1,false)
+crossings[2]=event(150,10,2,false)
+crossings[3]=event(180,1000,3,false)
+h=H.build(nil,10,material)
+near(stock_at(h,150).count,152.5)
+near(stock_at(h,600).count,160)
+assert(#h.stock_events==2,"aggregate scope cannot include an unscanned surface")
+scan(300,100,nil)
+crossings={event(400,-10,1,false),event(400,10,2,false)}
+h=H.build(nil,10,material)
+near(stock_at(h,400).count,100+100/60-10)
+near(stock_at(h,600).count,95)
+assert(stock_at(h,300).measured and not stock_at(h,300).joined,
+  "a changed aggregate scan scope establishes a new baseline")
+
+-- A coarse source still yields every requested chart point around shipment
+-- boundaries. Aggregate interpolation uses only surfaces in the anchored scan,
+-- including the historical interval before a later measured reset.
+reset(600)
+storage.rings={{secs=60,bins={{id=0,secs=10,first=0,last=10,
+  stat={stats(20,10),stats(0,0),stats(1000,0)},rec={},
+  coverage={[0]={0,10},[1]={0,10},[2]={0,10},[3]={0,10}}}}}}
+scan(0,100,50);scan(600,200,50)
+crossings[1]=event(150,-10,1,false)
+crossings[2]=event(330,20,1,false)
+h=H.build(nil,10,material)
+near(stock_at(h,60).count,151)
+near(stock_at(h,120).count,152)
+near(stock_at(h,150).count,142.5)
+near(stock_at(h,180).count,143)
+near(stock_at(h,300).count,145)
+near(stock_at(h,330).count,165.5)
+near(stock_at(h,540).count,169)
+near(stock_at(h,600).count,250)
+assert(stock_at(h,600).measured and stock_at(h,600).boundary)
+
+-- Any-surface coarse coverage cannot stand in for the full physical scan scope.
+-- Each surface's net total also has its own observed duration in that bin.
+reset(600)
+storage.rings={{secs=60,bins={{id=0,secs=10,first=0,last=10,
+  stat={stats(10,0),stats(20,0)},rec={},
+  coverage={[0]={0,10},[1]={0,5},[2]={0,10}}}}}}
+scan(0,100,50)
+h=H.build(nil,10,material)
+near(stock_at(h,300).count,170)
+assert(h.stock[#h.stock].tick==300 and not stock_at(h,360),
+  "aggregate stock stops when one anchored surface loses coarse coverage")
+near(stock_at(H.build(1,10,material),300).count,110)
+near(stock_at(H.build(2,10,material),600).count,70)
+
+-- An internal hole remains a gap even if another surface covers the whole bin.
+storage.rings[1].bins[1].coverage[1]={0,3,5,10}
+h=H.build(nil,10,material)
+assert(h.stock[#h.stock].tick==180 and not stock_at(h,240),
+  "aggregate stock cannot bridge a hole hidden by any-surface coverage")
+near(stock_at(h,180).count,150+10*3/8+20*3/10)
+scan(300,100,50)
+h=H.build(nil,10,material)
+assert(stock_at(h,300).measured and not stock_at(h,300).joined)
+near(stock_at(h,600).count,150+10*5/8+20*5/10)
+
+-- A dense observed ledger retains every actual boundary and exact running
+-- total, including simultaneous events, without changing production totals.
+reset(600)
+for sec=0,9 do fine(sec,stats(2,1)) end
+scan(0,10000)
+for i=1,4096 do crossings[i]=event(math.ceil(i/8),-1,1,false) end
+h=H.build(1,10,material)
+near(stock_at(h,1).count,10000+1/60-8)
+near(stock_at(h,512).count,10000+512/60-4096)
+near(stock_at(h,600).count,5914)
+made,used=totals(h);near(made,20);near(used,10)
+
+-- Balance's receipt overlay is observation-only. Qualities at one arrival
+-- share a marker; lookback/export/foreign/material events cannot leak into it.
+reset(600)
+for sec=0,9 do fine(sec,stats(2,1)) end
+scan(0,100)
+crossings={event(150,100,1,false),event(330,20,1,true),event(330,7,1,nil),
+  event(450,-3,1,false),event(360,99,2,false),event(370,55,1,false,"item/copper-plate"),event(700,50,1,false)}
+h=H.build(1,5,material)
+assert(#h.import_receipts==1 and h.import_receipts[1].tick==330 and h.import_receipts[1].count==27,
+  "receipt markers must use visible local arrivals and sum their qualities")
+near(stock_at(h,600).count,207)
+made,used=totals(h);near(made,10);near(used,5)
+assert(#h.stock_events==2,"receipt overlay changed independent stock accounting")
+storage.stock={}
+h=H.build(1,5,material)
+assert(#h.stock==0 and #h.import_receipts==1,"receipts must remain visible before the first stock scan")
+assert(not H.build(1,5,"fluid/water").import_receipts,"item receipts leaked into fluid history")
+crossings={};crossing_metadata={provider="sa",received_partial=true}
+h=H.build(1,5,material)
+assert(#h.import_receipts==0,"unknown cargo receipts must never invent an import marker")
+
+Transport.events=original_events
 print("MATERIAL HISTORY OK: bounded aligned rates, gaps, ranked usage, measured and estimated stock, surface scopes")

@@ -6,6 +6,23 @@ Release history is maintained in the [Factorio changelog](mod/production-flow/ch
 Run `python tools/changelog.py --write` after editing it.
 See [validation and engineering notes](docs/validation.md) for historical test details.
 
+## 0.2.10 — 2026-11-18
+
+### Bugfixes
+
+- Keep chart colours readable when night vision is active and prevent layout crashes in small windows. Enable Ignore minimum window size to use the compact layout.
+
+### Features
+
+- Added Traditional Chinese support and a startup setting to remove the game's night vision colour tint, enabled by default.
+- In Space Age, Balance History now marks measured cargo arrivals and uses observed transfers to improve stock estimates. Stored stock includes cargo held in pads, hubs and loaded silos.
+
+### Gui
+
+- Align the main tabs and refresh the Space Age platform list with a dedicated header and a separate favourites column.
+- Shade ribbons in Balance Flow and Focus so item bars stand out. Fade the short branches for other sources and uses away from item nodes.
+- In Space Age, switch between Time and Events in platform cargo History. The delivery log has more space between columns.
+
 ## 0.2.9 — 2026-11-16
 
 ### Bugfixes

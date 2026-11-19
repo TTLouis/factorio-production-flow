@@ -1,4 +1,4 @@
-# Production Flow (Beta)
+# Production Flow
 
 This file supplies the next Mod Portal description. The screenshots are native Factorio 2.1.24 captures at 100% UI scale.
 
@@ -10,13 +10,11 @@ Spot production shortages with interactive Sankey charts, item and fluid history
 
 **Where did all your green circuits go?** Follow the recipes using them, see whether production is keeping up, and check how long your chest stock will last. In Space Age, follow cargo from the surface that loaded it to the one where it landed.
 
-This beta focuses on the new **History** tab in Balance and the **Transfers** tab for Space Age cargo.
+Available in English, Simplified Chinese (简体中文), and Traditional Chinese (繁體中文). All views, mod settings, help, tooltips, and alerts follow your Factorio language setting.
 
-**New in 0.2.7: Simplified Chinese (简体中文) support.** Available in English and Simplified Chinese, including all views, mod settings, help, tooltips and alerts. The interface follows your Factorio language setting.
+**支持简体中文和繁體中文。** 界面会跟随 Factorio 的语言设置，无需另装汉化模组。
 
-**现已支持简体中文。** 将 Factorio 的游戏语言设为简体中文即可使用，无需另装汉化模组。
-
-**Feedback needed:** Try the beta in your factory and share what works, what is confusing, or what you would like improved. Feedback on Balance, chart readability, mod compatibility and performance is especially helpful. Leave a message in the [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion) or [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues). For bugs, include your Factorio/mod versions, what you expected, what happened and a screenshot if possible.
+**Feedback needed:** Try Production Flow in your factory and share what works, what is confusing, or what you would like improved. Feedback on Balance, chart readability, mod compatibility and performance is especially helpful. Leave a message in the [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion) or [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues). For bugs, include your Factorio/mod versions, what you expected, what happened and a screenshot if possible.
 
 ### Balance production and stock
 

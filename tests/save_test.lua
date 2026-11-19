@@ -322,8 +322,9 @@ local function exercise_history(UI, player, root, us, case)
       and tabs.selected_tab_index==2 and items.valid,"The History picker lost the current tab, list, or visit")
     pick_from_heading(UI,player,assert(find_named(panel,"ssk_material_slot")),case.focus)
   end
-  local rate_plot=assert(find_named(panel,"ssk_history_camera"),"History needs a native plot camera").parent
-  local net_plot=assert(find_named(panel,"ssk_history_net_camera"),"History needs a separate net rate plot").parent
+  local rate_plot=assert(find_named(panel,"ssk_history_rate_plot"),"History needs a rate plot")
+  local net_plot=assert(find_named(panel,"ssk_history_net_plot"),"History needs a separate net rate plot")
+  assert(rate_plot.ssk_history_gui_plot and net_plot.ssk_history_gui_plot,"History needs location-independent colours")
   local order={}
   for i,section in ipairs(rate_plot.parent.children) do order[section.name]=i end
   assert(order.ssk_history_rate_plot<order.ssk_history_net_section
@@ -392,7 +393,8 @@ local function exercise_history(UI, player, root, us, case)
       end
     end
     assert(#history.usage_keys>0,"Active items must have usage history")
-    local stock_plot=assert(find_named(panel,"ssk_history_stock_camera"),"Item History needs a native stock plot").parent
+    local stock_plot=assert(find_named(panel,"ssk_history_stock_plot"),"Item History needs a native stock plot")
+    assert(stock_plot.ssk_history_gui_plot)
     local stock_hover=assert(stock_plot.ssk_history_tooltips.children[1],"The stock plot needs hover targets")
     assert(not stock_hover.ignored_by_interaction and LOC(stock_hover.tooltip):find("stock",1,true),"Stock tooltips must be interactive")
   else
@@ -514,7 +516,7 @@ local function exercise_transfers(UI, player, root, us, case)
   local platform_row="platform_"..platform_id
   local pane=assert(find_named(panel,"ssk_transfer_tabs"),"Missing native Transfers tabbed pane")
   assert(pane.type=="tabbed-pane" and #pane.tabs==2,"Transfers must have native Flow and History tabs")
-  assert(UI.on_click{player_index=player.index,element=assert(platform_list[platform_row]).pick},
+  assert(UI.on_click{player_index=player.index,element=assert(platform_list[platform_row])},
     "Platform selection was not handled")
   pane.selected_tab_index=case.history and 2 or 1
   assert(UI.on_tab_changed{player_index=player.index,element=pane},"Transfers tab change was not handled")
@@ -525,6 +527,15 @@ local function exercise_transfers(UI, player, root, us, case)
   local flow,history=pane.ssk_transfer_flow,pane.ssk_transfer_history
   assert(flow.style.left_margin==history.style.left_margin and flow.style.right_margin==history.style.right_margin
     and flow.style.left_padding==history.style.left_padding,"Transfers tabs must share the same content insets")
+  if case.history then
+    local axis=assert(find_named(panel,"axis"),"Platform History must offer Time and Events")
+    assert(axis.type=="switch", "Platform History needs a native switch")
+    for _, mode in ipairs({{"right","events"},{"left","time"}}) do
+      axis.switch_state=mode[1]
+      assert(UI.on_switch{player_index=player.index,element=axis} and us.transfers.axis==mode[2],
+        "Platform History did not select "..mode[2])
+    end
+  end
   local heading=pane.parent.heading
   assert(heading.platform.caption==hub.surface.platform.name
     and heading.ssk_transfer_show_all_production.visible~=case.history,
@@ -553,8 +564,12 @@ local function exercise_transfers(UI, player, root, us, case)
       if arrival.tick==transfer_fixture.preview_tick and #arrival.items>=6 then manifest_row=i; break end
     end
     local expand=assert(find_named(panel,"ssk_transfer_delivery_"..assert(manifest_row)),"Missing delivery expansion")
+    local header_row=assert(find_named(panel,"log_headers")).children[1]
+    assert(header_row.style.horizontal_spacing==12 and expand.parent.style.horizontal_spacing==12,
+      "Cargo log header and rows must leave the same space between columns")
     assert(UI.on_click{player_index=player.index,element=expand},"Delivery expansion was not handled")
     local manifest=assert(find_named(panel,"ssk_transfer_manifest"),"Expanded pod has no cargo manifest")
+    assert(manifest.column_count==4,"Wide Space Age manifests must use the shared four-column grid")
     assert(#manifest.children==#result.arrivals[manifest_row].items,"Expanded pod hid some of its items")
     for i,item in ipairs(result.arrivals[manifest_row].items) do
       local tags=manifest.children[i].tags
@@ -567,6 +582,8 @@ local function exercise_transfers(UI, player, root, us, case)
       local coverage=root.ssk_window_bar.ssk_history
       assert(coverage.visible and LOC(coverage.caption):find("1000 h",1,true),"Transfers must show the retained cargo coverage")
       log("TRANSFERS LONG WINDOW PASS 1000-hour period and cargo coverage")
+      period.selected_index=2
+      assert(UI.on_selection{player_index=player.index,element=period} and us.period==600)
     end
     log("TRANSFERS HISTORY NATIVE PASS direction-specific hover manifests, bucket filtering and pod expansion")
   else
@@ -591,22 +608,24 @@ local function exercise_transfers(UI, player, root, us, case)
     local card=assert(find_named(panel,"ssk_transfer_surface_card"),"Flow is missing ranked surface cards")
     assert(card.tags.transfer_rank_count==5 and card.rank_5 and not card.rank_6 and card.tooltip,
       "Flow must show the first five items with a full manifest on hover")
-    assert(find_named(panel,"ssk_transfer_platform_node") and find_named(panel,"ssk_transfer_camera"),
+    assert(find_named(panel,"ssk_transfer_platform_node") and find_named(panel,"ssk_transfer_plot"),
       "Flow needs its platform node and native ribbon rendering")
     local arrow=assert(find_named(panel,"ssk_transfer_ribbon_loaded_1_1"),"Transfers is missing its ribbon hover target")
     local tip=LOC(arrow.tooltip)
     assert(not arrow.ignored_by_interaction and tip:find("items/s",1,true) and tip:find("electronic-circuit",1,true),
       "Transfer ribbon must list the cargo and rates")
-    assert(UI.on_click{player_index=player.index,element=platform_list[platform_row].star})
+    local star_name="favourite_"..platform_id
+    assert(UI.on_click{player_index=player.index,element=platform_list[star_name]})
     local pinned=platform_list[platform_row]
     assert(us.transfers.favourites[platform_id] and platform_list.children[2]==pinned
-      and pinned.star.toggled and pinned.pick.toggled,"Favourite must move to the top and retain selection")
+      and platform_list.children[1]==platform_list[star_name] and platform_list[star_name].toggled
+      and us.transfers.platform==platform_id,"Favourite must move to the top and retain selection")
     UI.refresh(player,true)
     assert(platform_list.valid and pane.valid and production.valid and not production.state and pinned.valid,
       "Live Transfers refresh rebuilt or reset the controls")
     assert(arrow.valid, "Localized cargo labels must not invalidate the flow cache on every refresh")
-    assert(UI.on_click{player_index=player.index,element=pinned.star})
-    assert(not us.transfers.favourites[platform_id] and platform_list[platform_row].pick.toggled,
+    assert(UI.on_click{player_index=player.index,element=platform_list[star_name]})
+    assert(not us.transfers.favourites[platform_id] and us.transfers.platform==platform_id,
       "Removing a favourite must retain the current platform")
     log("TRANSFERS FLOW NATIVE PASS native tabs, platform, production and ribbon tooltips")
   end
@@ -904,7 +923,7 @@ function T.tick(UI, Sampler)
   assert(us.period == 600, "10m is not the initial default")
   us.surface, us.tab_id, us.view = c.surface, c.tab, c.view or "overview"
   us.live = false
-  us.renderer = c.renderer or "poly"
+  us.renderer = c.renderer or ((mode=="history-view" or c.usage_history) and "sprites" or "poly")
   if mode=="scroll" or mode=="selection" or mode=="picker" or mode=="ux" or mode=="warmup" then
     us.bal_filter="all"; us.bal_details=c.details or false; us.bal_sort=c.groups and "groups" or "priority"; us.bal_group=nil
     us.bal_favs=c.favs or nil
@@ -1007,7 +1026,7 @@ function T.tick(UI, Sampler)
     local left=player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_balance.ssk_balance_split.ssk_balance_table
     local root=left.ssk_bal_root
     assert(left.type=="flow" and root.ssk_bal_list.ssk_bal_items.type=="scroll-pane")
-    assert(root.ssk_bal_summary and not root.ssk_bal_context and root.ssk_bal_controls.ssk_bal_refresh and not root.ssk_bal_footer)
+    assert(root.ssk_bal_summary and not root.ssk_bal_context and root.ssk_bal_strip.ssk_bal_controls.ssk_bal_refresh and not root.ssk_bal_footer)
     local heading=root.ssk_bal_list.ssk_bal_header
     assert(not heading.ssk_bal_column_groups,"Redundant upper column headings remain")
     local columns=heading.ssk_bal_columns
@@ -1059,7 +1078,7 @@ function T.tick(UI, Sampler)
     assert(not chart.ssk_settings,"Chart settings should start closed")
     local list_before=find_named(root,"ssk_bal_root")
     if list_before then
-      assert(not list_before.ssk_bal_footer and list_before.ssk_bal_controls.ssk_bal_refresh.tags.ssk_ui=="bal_update", "Refresh belongs in the Balance header with no footer")
+      assert(not list_before.ssk_bal_footer and list_before.ssk_bal_strip.ssk_bal_controls.ssk_bal_refresh.tags.ssk_ui=="bal_update", "Refresh belongs in the Balance header with no footer")
     end
     UI.on_click{player_index=player.index,element=find_action(root,"chart_settings")}
     assert(chart.ssk_settings and find_action(chart.ssk_settings,"f_heights"),"Chart settings did not open")

@@ -19,11 +19,12 @@ for k,n in pairs(L.nodes) do
   assert(n.color==P.material(k), "material colors must not depend on node order")
 end
 local st=storage.sk_render["1:focus"]
-assert(st.quiet and st.selected==nil and #st.ribbons>0)
+assert(not st.quiet and st.selected==nil and #st.ribbons>0)
 for _,r in ipairs(st.ribbons) do
   assert(r.color==P.material(r.to), "default ribbon must use destination color")
   local tint=P.tint(P.muted(r.color))
-  assert(math.abs(r.ro.color.r-tint.r)<0.0001, "idle ribbon must be subdued")
+  assert(math.abs(r.ro.color.r-tint.r)<0.0001 and math.abs(r.ro.color.g-tint.g)<0.0001
+    and math.abs(r.ro.color.b-tint.b)<0.0001, "idle Balance ribbon must use the darker material shade")
 end
 local neighbor="item/iron-plate#input"
 assert(click(find(c,"node",neighbor),us,true)=="rebuild")

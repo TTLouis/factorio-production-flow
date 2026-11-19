@@ -3,7 +3,7 @@ local Geometry = TREQ("scripts.ribbon_geometry")
 local player = game.players[1]
 local canvas = player.gui.screen.add { type = "flow", name = "ssk_tooltip_position_test", direction = "vertical" }
 canvas.style.vertical_spacing = 0
--- Irregular hover rectangles retained from a private rendering fixture. Their
+-- Exact hover rectangles captured from the existing SE Flow fixture. Their
 -- odd Y coordinates and heights expose independent scaled-length truncation.
 local pieces = {
   { kind = "bar", x = 364, y = 251, w = 50, h = 209 },

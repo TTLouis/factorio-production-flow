@@ -34,28 +34,24 @@ return function(handlers)
   local data={start_tick=0,end_tick=6000,seconds=15,bucket_seconds=15,
     points={{start_tick=3000,end_tick=3900,seconds=15,made=10,used=8,net=2,uses={},usage_detail={}}},
     usage_keys={},usage_totals={},stock_supported=true,stock={{tick=3000,count=30,measured=true}}}
-  local history_data=TREQ('scripts.history')
-  local previous_build=history_data.build
-  history_data.build=function()return data end
-  H.fill(p,history,hs,'item/iron-plate',900,700,56)
+  H.fill(p,history,hs,'item/iron-plate',900,700,56,{history=data})
   local target=assert(find(history,function(e)return e.tags.ssk_history_bucket end))
   H.on_hover({element=target,player_index=p.index},true)
   local saved=storage.history_hover[p.index]
-  assert(saved.target==target and type(saved.ox)=='number' and saved.painter==nil,
-    'Saved History hover must use coordinates and LuaObjects instead of painter closures')
+  assert(saved.target==target and saved.bands[1].sprite.valid and saved.painter==nil,
+    'Saved History hover must retain GUI objects without a painter closure')
   local new_history=reload('scripts/history_ui.lua')
   new_history.on_hover({element=target,player_index=p.index},false)
-  for _,band in ipairs(saved.bands) do assert(not band.rect.visible,'Reloaded leave did not hide a saved band') end
+  for _,band in ipairs(saved.bands) do assert(not band.sprite.visible,'Reloaded leave did not hide a saved band') end
   new_history.on_hover({element=target,player_index=p.index},true)
-  local left=saved.bands[1].rect.left_top[1]
-  for _,band in ipairs(saved.bands) do assert(band.rect.visible and band.rect.left_top[1]==left) end
-  new_history.fill(p,history,hs,'item/iron-plate',900,700,56)
+  local left=saved.bands[1].sprite.parent.style.left_margin
+  for _,band in ipairs(saved.bands) do assert(band.sprite.visible and band.sprite.parent.style.left_margin==left) end
+  new_history.fill(p,history,hs,'item/iron-plate',900,700,56,{history=data})
   local refreshed=storage.history_hover[p.index]
   assert(refreshed.target==target and target.valid,'Reloaded History refresh lost the persisted target')
   H.on_hover({element=target,player_index=p.index},false)
-  for _,band in ipairs(refreshed.bands) do assert(not band.rect.visible,'Old/new modules disagree on current saved bands') end
+  for _,band in ipairs(refreshed.bands) do assert(not band.sprite.visible,'Old/new modules disagree on current saved bands') end
   new_history.clear_hover(p.index);history.destroy()
-  history_data.build=previous_build
 
   UI.close(p)
   local original_item,original_fluid=prototypes.item,prototypes.fluid
@@ -76,10 +72,10 @@ return function(handlers)
     'Configuration change must sanitize saved states even when the window is closed')
   assert(storage.ui[98].sel==nil and storage.ui[98].fx.focus==nil,
     'Configuration change must sanitize disconnected players too')
-  us.sel='recipe/iron-plate';storage.ui[98].sel='group/user-2'
+  us.sel='recipe/iron-plate';storage.ui[98].sel='transport/exports/item/iron-plate'
   UI.sanitize_saved_states()
-  assert(us.sel=='recipe/iron-plate' and storage.ui[98].sel=='group/user-2',
-    'Valid recipe and internal group identities must survive sanitation')
+  assert(us.sel=='recipe/iron-plate' and storage.ui[98].sel=='transport/exports/item/iron-plate',
+    'Valid recipe and internal transport identities must survive sanitation')
   us.sel='group/user-1';UI.sanitize_saved_states();assert(us.sel=='group/user-1')
   storage.ui[98]=nil;us.sel,us.fx,us.bal_fx=previous.sel,previous.fx,previous.bal_fx
   prototypes.item,prototypes.fluid=original_item,original_fluid

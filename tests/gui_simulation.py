@@ -82,7 +82,7 @@ data.raw["utility-constants"].default.main_menu_simulations={
 
 def run(stage,args):
     command=[str(args.exe),'--config',str(stage/'config.ini'),'--mod-directory',str(stage/'mods'),
-        '--window-size','1920x1080','--disable-audio','--force-graphics-preset','low']
+        '--window-size','1920x1080','--disable-audio','--disable-migration-window','--force-graphics-preset','low']
     environment=dict(os.environ,SteamAppId='427520',SteamGameId='427520')
     startup=subprocess.STARTUPINFO();startup.dwFlags|=subprocess.STARTF_USESHOWWINDOW;startup.wShowWindow=0
     log_path=stage/'native.log'

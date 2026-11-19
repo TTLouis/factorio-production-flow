@@ -34,10 +34,10 @@ args.update(enumerate(sys.argv[2:], 1))
 lua.globals().arg = lua.table_from(args)
 os.chdir(MOD)
 lua.execute(script.read_text(encoding="utf-8"), name=str(script))
-
 if len(sys.argv) == 1:
-    # Keep synthetic history/surface fixtures isolated from the GUI world.
-    for name in ["canvas_visibility_test.lua", "surface_lifecycle_test.lua", "catalyst_stats_test.lua",
-                 "swimlane_columns_test.lua", "product_probability_test.lua", "sampler_empty_stats_test.lua"]:
+    # Provider accounting runs in a fresh Lua world so its force/surface fixtures
+    # cannot mutate the UI regression world's globals or saved state.
+    for name in ["transport_flows_test.lua", "empty_pods_test.lua", "history_data_test.lua", "canvas_visibility_test.lua", "surface_lifecycle_test.lua", "catalyst_stats_test.lua", "swimlane_columns_test.lua", "product_probability_test.lua", "sampler_empty_stats_test.lua"]:
         focused = LuaRuntime()
-        focused.execute((TESTS / name).read_text(encoding="utf-8"), name=str(TESTS / name))
+        provider_test = TESTS / name
+        focused.execute(provider_test.read_text(encoding="utf-8"), name=str(provider_test))

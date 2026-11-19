@@ -19,6 +19,15 @@ local Transfers = require("scripts.transfers")
 local UI = {}
 local TAB_CAPTIONS = { balance = Loc("ui-balance"), focus = Loc("ui-focus"), sankey = Loc("ui-full-sankey"), transfers = Loc("help-transfers") }
 local WIN = "ssk_main"
+-- The native window uses 12 px per side around the tab pane, and each tab keeps
+-- 12 px between its panels and the pane's border on every side (TAB_PAD_X here,
+-- TAB_PAD_Y above and below), so lists and charts never touch the outer border.
+local TAB_PAD_X = 12
+local WINDOW_SIDE_CHROME = 24 + 2 * TAB_PAD_X
+-- At 16:9 this leaves room for the fixed headers and shipment table columns.
+local MIN_WINDOW_WIDTH = 880
+-- Compact Transfers can scroll, but still needs room for its tabs and viewport.
+local MIN_SAFE_WINDOW_WIDTH = 396
 
 local function visible_tabs()
   local list = { "balance", "focus", "sankey" }
@@ -35,11 +44,18 @@ local function ustate(pi)
   end
   if not s.tab_id then s.tab_id = "balance" end
   if not s.readability_defaults then
-    s.view, s.tier_mode, s.renderer = "detail", "depth", "poly"
+    s.view, s.tier_mode = "detail", "depth"
     s.lines, s.layout, s.sel = "curves", "clean", nil
     s.tier_lo, s.tier_hi = nil, nil
-    for _, fx in pairs({ s.fx, s.bal_fx }) do fx.renderer = "poly" end
     s.readability_defaults = true
+  end
+  -- Older saves selected the experimental world camera. Charts use native GUI
+  -- sprites so the game world's colour lookup cannot alter the chart palette.
+  if not s.gui_chart_defaults then
+    s.renderer = "sprites"
+    if s.fx then s.fx.renderer = "sprites" end
+    if s.bal_fx then s.bal_fx.renderer = "sprites" end
+    s.gui_chart_defaults = true
   end
   -- Replace the unpublished grouped default once. Later explicit grouping
   -- choices survive reopening the window and loading the save.
@@ -121,9 +137,13 @@ end
 ---------------------------------------------------------------------------
 local fill = {}
 local BALANCE_TAB_HEADER_HEIGHT = 48 -- Vanilla tab strip and its top content padding.
+-- Every tab fills the same box: 12 px of tab padding on all four sides, so each
+-- tab leaves the same margin inside the window's border.
+local TAB_PAD_Y = 12
+local function tab_pane_height(us) return us.canvas_h + 100 end
 
 function fill.balance(player, c, us, only_auto, keep_balance_rows)
-  local pane_height = us.canvas_h + 100
+  local pane_height = tab_pane_height(us)
   local inspector_height = pane_height - BALANCE_TAB_HEADER_HEIGHT
   local split = c.ssk_balance_split
   local modes = split and split.ssk_balance_focus.ssk_balance_inspector_tabs
@@ -139,7 +159,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     us.bal_height = pane_height
     local right = split.add { type = "flow", name = "ssk_balance_focus", direction = "vertical" }
     local right_w = us.canvas_w - left_w - 12
-    us.bal_chart_w = right_w - 8
+    us.bal_chart_w = right_w
     right.style.width, right.style.height = right_w, pane_height
     modes = right.add { type = "tabbed-pane", name = "ssk_balance_inspector_tabs",
       style = "tabbed_pane_with_no_side_padding", tags = { ssk_balance_material_header = "flush" } }
@@ -153,7 +173,6 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     modes.add_tab(history, history_panel)
     for _, panel in ipairs({ flow_panel, history_panel }) do
       panel.style.width, panel.style.height = us.bal_chart_w, inspector_height
-      panel.style.left_margin, panel.style.right_margin = 4, 4
       panel.style.padding = 0
     end
     modes.selected_tab_index = us.bal_mode == "history" and 2 or 1
@@ -175,8 +194,23 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
 end
 
 function fill.transfers(player, c, us)
+  -- Transfers uses the same tab padding as Balance, so its nested tabs line up
+  -- with Balance's Flow / History tabs and it leaves the same bottom strip.
+  c.style.top_padding, c.style.bottom_padding = TAB_PAD_Y, TAB_PAD_Y
+  local _, window_height = UI.dimensions(player.display_resolution, player.display_scale)
+  local height = math.min(tab_pane_height(us), window_height - 96)
   us.transfers = us.transfers or {}
-  local seconds = TransfersUI.render(c, player, us.period, us.transfers, us.canvas_w, us.canvas_h + 100)
+  local parent, width, platform_height = c, us.canvas_w, tab_pane_height(us)
+  if width < 850 then
+    if not c.viewport then
+      c.clear()
+      TransfersUI.compact_viewport(c, width, height)
+    end
+    parent = c.viewport.body
+    local size = parent.tags
+    width, platform_height = size.width, size.height
+  end
+  local seconds = TransfersUI.render(parent, player, us.period, us.transfers, width, platform_height)
   if seconds and seconds < us.period then
     local label = player.gui.screen[WIN].ssk_window_bar.ssk_history
     label.visible = true
@@ -204,6 +238,7 @@ local function update_header(player,us)
   bar.ssk_surface_picker.visible = scoped
   local label=bar.ssk_history
   if not scoped then label.visible = false; return end
+  if us.tab_id=="transfers" then label.visible=false;return end
   local seconds=Sampler.coverage(us.sidx,us.period)
   local target=us.period
   label.visible=seconds<target
@@ -236,13 +271,13 @@ function UI.refresh(player, only_auto, full, keep_balance_rows)
     fx.sidx = us.sidx
     SK.defaults(fx)
     if only_auto and not fx.live then return end
-    SK.fill(player, chart_panel(c), fx, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(fx)), full, only_auto)
+    SK.fill(player, chart_panel(c), fx, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(fx)), full, only_auto)
     return
   end
   if id == "sankey" then
     SK.defaults(us)
     if only_auto and not us.live then return end
-    SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, us.canvas_h + 70 - SK.toolbar_height(us)), full, only_auto)
+    SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(us)), full, only_auto)
     return
   end
   fill[id](player, c, us, only_auto, keep_balance_rows)
@@ -295,14 +330,19 @@ end
 function UI.open(player)
   UI.close(player)
   if player.force~=game.forces.player then player.print(Loc("ui-player-force-only"));return end
-  local us = ustate(player.index)
-  close_chart_settings(us)
   local res, sc = player.display_resolution, player.display_scale
   local W, H = UI.dimensions(res, sc)
+  local compact_window = player.mod_settings["ssk-allow-small-window"]
+  if W < MIN_SAFE_WINDOW_WIDTH or (W < MIN_WINDOW_WIDTH and not (compact_window and compact_window.value)) then
+    player.print(Loc("ui-window-too-small"))
+    return
+  end
 
+  local us = ustate(player.index)
+  close_chart_settings(us)
   local f = player.gui.screen.add { type = "frame", name = WIN, direction = "vertical" }
   f.style.width, f.style.height = W, H
-  us.canvas_w = W - 64
+  us.canvas_w = W - WINDOW_SIDE_CHROME
   us.canvas_h = math.max(100, H - 240)
 
   local tb = f.add { type = "flow", name="ssk_window_bar", direction = "horizontal" }
@@ -316,6 +356,8 @@ function UI.open(player)
       tooltip = tooltip, tags = { ssk_ui = tag } }
   end
   tb.style.vertical_align = "center"
+  -- Vanilla title bars (frame_header_flow) space their controls 8 px apart.
+  tb.style.horizontal_spacing = 8
   tb.add { type = "label", name = "ssk_surface_label", caption = Loc("ui-surface") }
   local sitems, ssel = { Loc("ui-where-i-am", Su.rich(player.surface)) }, 1
   us.surface_names = {}
@@ -328,7 +370,8 @@ function UI.open(player)
            tags = { ssk_ui = "surface" }, tooltip = Loc("ui-surface-for-balance-focus-and-full-sankey") }
   surface_picker.style.width = math.min(240, math.floor(W * 0.22))
   local pl = tb.add { type = "label", caption = Loc("ui-period") }
-  pl.style.left_margin = 12
+  -- 16 px between each label + drop-down pair and the next group.
+  pl.style.left_margin = 8
   local psel = 2
   for i, v in ipairs(Sampler.PERIODS) do if us.period == v then psel = i end end
   tb.add { type = "drop-down", items = Sampler.PERIOD_CAPTIONS, selected_index = psel, tags = { ssk_ui = "period" },
@@ -336,6 +379,7 @@ function UI.open(player)
   local history=tb.add{type="label",name="ssk_history"}
   history.style.font="default-small-bold";history.style.font_color={1,0.82,0.35}
   history.style.maximal_width=190
+  history.style.left_margin,history.style.right_margin=8,8
   action_button("utility/questionmark", Loc("ui-help-controls-calculations-stock-alerts-and-chart"), "help")
   action_button("utility/refresh", Loc("ui-refresh"), "refresh")
   action_button("utility/close", Loc("help-close"), "close")
@@ -344,7 +388,8 @@ function UI.open(player)
   inner.style.horizontally_stretchable = true
   inner.style.vertically_stretchable = true
   local list = visible_tabs()
-  local tabs = inner.add { type = "tabbed-pane", name = "ssk_tabs", tags = { ssk_tab_ids = list } }
+  local tabs = inner.add { type = "tabbed-pane", name = "ssk_tabs", style = "tabbed_pane_with_no_side_padding",
+    tags = { ssk_tab_ids = list } }
   tabs.style.horizontally_stretchable = true
   tabs.style.vertically_stretchable = true
   local sel = 1
@@ -355,8 +400,10 @@ function UI.open(player)
     local c = tabs.add { type = "flow", name = Loc.join("content_", id), direction = "vertical" }
     c.style.horizontally_stretchable = true
     c.style.vertically_stretchable = true
-    c.style.padding = 12
-    c.style.maximal_width = W - 40
+    c.style.padding = 0
+    c.style.top_padding, c.style.bottom_padding = 12, 12
+    c.style.left_padding, c.style.right_padding = TAB_PAD_X, TAB_PAD_X
+    c.style.maximal_width = us.canvas_w + 2 * TAB_PAD_X
     tabs.add_tab(tab, c)
   end
   tabs.selected_tab_index = sel
@@ -452,7 +499,8 @@ function UI.on_click(e)
     local root=c and c.ssk_balance_split and c.ssk_balance_split.ssk_balance_table.ssk_bal_root
     if root then root.tags={} end
     UI.refresh(player)
-  elseif a == "refresh" then UI.refresh(player)
+  elseif a == "refresh" then
+    UI.refresh(player)
   elseif a == "bal_more" then
     us.bal_limit = (us.bal_limit or 200) + 200
     UI.refresh(player)
@@ -569,6 +617,13 @@ function UI.on_checked(e)
     return true
   end
   return false
+end
+
+function UI.on_switch(e)
+  local us = ustate(e.player_index)
+  if us.tab_id ~= "transfers" or not TransfersUI.on_switch(e, us.transfers) then return false end
+  UI.refresh(game.get_player(e.player_index))
+  return true
 end
 
 function UI.on_elem_changed(e)

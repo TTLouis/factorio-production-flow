@@ -10,6 +10,11 @@ local function button()
   return assert(find(player.gui.screen.ssk_main, "ssk_transfer_jump"))
 end
 local function click(el) return UI.on_click{element=el, player_index=player.index} end
+local function switch(value)
+  local axis=assert(find(player.gui.screen.ssk_main,"axis"))
+  axis.switch_state=value
+  return UI.on_switch{element=axis,player_index=player.index}
+end
 local a = {valid=true, index=101, name="Alpha", surface=player.surface}
 local b = {valid=true, index=102, name="Beta", surface=player.surface}
 a.hub = {valid=true, force=force}
@@ -20,10 +25,24 @@ for _, mode in ipairs({"flow", "history"}) do
   us.transfers.view = mode
   UI.open(player)
   if mode=="history" then
+    local axis=assert(find(player.gui.screen.ssk_main,"axis"))
     local old_panel=assert(find(player.gui.screen.ssk_main,"ssk_transfers"))
-    old_panel.tags.transfers_layout=7
+    old_panel.tags.transfers_layout=7;axis.destroy()
     UI.refresh(player)
-    assert(old_panel.valid==false,"Saved Transfers panel did not migrate to paired placement resets")
+    axis=assert(find(player.gui.screen.ssk_main,"axis"))
+    assert(old_panel.valid==false,"Saved pre-toggle UI was not migrated")
+    assert(axis.spec.type=="switch" and axis.spec.allow_none_state==false,"Two-way modes must use the vanilla switch")
+    assert(switch("right") and us.transfers.axis=="events" and axis.switch_state=="right")
+    local heading=axis.parent;local before_toggle=true;local paging=0
+    local log_header=assert(find(player.gui.screen.ssk_main,"log_headers"))
+    assert(heading.spec.style=="subheader_frame" and heading.style.height==38
+      and log_header.spec.style=="repeated_subheader_frame" and log_header.style.height==32)
+    for _,control in ipairs(heading.children) do
+      if control==axis then before_toggle=false end
+      if control.tags.transfer_exchange_page then assert(before_toggle,"Event pages must precede the axis switch");paging=paging+1 end
+    end
+    assert(paging==2)
+    assert(switch("left") and us.transfers.axis=="time" and axis.switch_state=="left")
   end
   local jump = button()
   assert(jump.visible and jump.enabled and jump.spec.style == "tool_button"
@@ -31,54 +50,109 @@ for _, mode in ipairs({"flow", "history"}) do
   assert(click(jump) and player.centered_on == a.hub and not UI.is_open(player))
   assert(us.transfers.platform == a.index and us.transfers.view == mode, "Jump lost Transfers selection")
 end
--- Time-history targets are reused across refreshes. Each absolute overlay has
--- its own zero-size reset, including after hiding/restoring shorter histories.
+UI.open(player)
+local sidebar=assert(find(player.gui.screen.ssk_main,"sidebar"))
+local split=sidebar.parent
+local tabs=split.tab_row.ssk_transfer_tabs
+assert(not split.divider and #split.children==2, "Only the panel borders should separate the platform list and details")
+for _, body in ipairs({tabs.ssk_transfer_flow,tabs.ssk_transfer_history}) do
+  assert(body.spec.style==sidebar.spec.style
+    and sidebar.style.width+split.style.horizontal_spacing+body.style.width==split.parent.style.width,
+    "Flow and History must fill the space next to the platform list")
+end
+local box=sidebar.platform_scroll
+local list=box.ssk_transfer_platforms
+assert(not sidebar.box and sidebar.heading.spec.style=="subheader_frame" and box.spec.style=="naked_scroll_pane"
+  and list.spec.type=="table" and list.spec.column_count==2,"Platforms need a title strip over unboxed rows")
+assert(not box.style.left_margin and not box.style.top_margin and box.style.width==sidebar.style.width
+  and box.style.height==sidebar.style.height-sidebar.heading.style.height,
+  "The platform rows must fill the panel edge to edge, with the scrollbar on its border")
+assert(list.children[1]==list.favourite_101 and list.children[2]==list.platform_101,
+  "The favourite action must sit in a separate cell to the left of the platform entry")
+local pick=list.platform_101
+assert(pick.spec.type=="button" and pick.spec.style=="list_box_item" and LOC(pick.caption)=="Alpha"
+  and pick.style.width+28==list.tags.row_width and pick.style.height==28,
+  "Platform rows are full-width list items without the repeated hub icon")
+local picked=0
+for _,child in ipairs(list.children) do
+  if child.tags.transfer_platform then
+    assert(child.toggled==(child.tags.transfer_platform==us.transfers.platform),"Only the selected platform is highlighted")
+    if child.toggled then picked=picked+1 end
+  end
+end
+assert(picked==1,"Exactly one platform row must be highlighted")
+assert(box.vertical_scroll_policy=="dont-show-but-allow-scrolling" and list.tags.row_width==list.tags.full_width,
+  "A short platform list must not reserve an empty scrollbar gutter")
+-- A short Events page grows towards the left, with newest cargo at the right.
 local Transfers=TREQ("scripts.transfers")
+local event_count=3
 local original_view=Transfers.platform_view
-local bucket_count=3
 Transfers.platform_view=function(...)
   local result=original_view(...)
-  result.from_tick,result.to_tick=game.tick-180,game.tick
-  result.buckets={}
-  local function cargo(n)return{pods=n,weight=0,count=n,items={}}end
-  for i=1,bucket_count do
-    result.buckets[i]={start_tick=game.tick-180+(i-1)*30,end_tick=game.tick-180+i*30,
-      loaded=cargo(1),unloaded=cargo(0)}
-  end
+  local filters=select(4,...)
+  local function cargo(n) return {pods=n,mass=0,unknown_mass=0,items={},count=n} end
+  result.exchanges={}
+  for i=1,event_count do result.exchanges[i]={key="right:"..i,start_tick=game.tick-180+i*30,end_tick=game.tick-180+i*30,
+    loaded=cargo(1),unloaded=cargo(0)} end
+  result.exchange=filters.exchange
   return result
 end
-us.transfers={platform=a.index,view="history"}
+us.transfers={force=force,period=us.period,platform=a.index,view="history",axis="events"}
 UI.open(player)
 local first=assert(find(player.gui.screen.ssk_main,"ssk_transfer_bucket_loaded_1"))
 local last=assert(find(player.gui.screen.ssk_main,"ssk_transfer_bucket_loaded_3"))
+assert(last.style.left_margin+last.style.width==last.parent.style.width-24,"Newest SA event must touch the right plot boundary")
+assert(last.style.left_margin-first.style.left_margin==48,"Right alignment changed compact spacing")
+assert(click(first) and us.transfers.exchange=="right:1")
+local clear_exchange=assert(find(player.gui.screen.ssk_main,"reset_bucket"))
+assert(clear_exchange.visible and click(clear_exchange) and us.transfers.exchange==nil,
+  "The log needs a visible reset for a selected exchange")
 local chart=first.parent
 local function aligned_history()
   for _,scale in ipairs({1,1.25,1.5}) do
-    local function px(v)local n=(v or 0)*scale;return n<0 and math.ceil(n) or math.floor(n)end
+    local function px(v) local n=(v or 0)*scale;return n<0 and math.ceil(n) or math.floor(n) end
     local cursor=0
-    for _,el in ipairs(chart.children) do if el.visible~=false then
-      if el.tags.transfer_direction then assert(cursor==0,"Transfer hover targets drift at fractional scale")end
-      local s=el.style;cursor=cursor+px(s.top_margin)+px(s.height)+px(s.bottom_margin)
-    end end
-    assert(cursor==0,"Transfer overlays did not restore the plot origin")
+    for _,el in ipairs(chart.children) do
+      if el.visible~=false then
+        local s=el.style
+        if el.tags.transfer_direction then
+          assert(cursor==0,"History bucket hover regions drift after previous buckets at fractional scale")
+        end
+        cursor=cursor+px(s.top_margin)+px(s.height)+px(s.bottom_margin)
+      end
+    end
+    assert(cursor==0,"History overlays must restore the plot origin")
   end
 end
 aligned_history()
 local child_count=#chart.children
 UI.refresh(player,true)
 assert(first.valid and chart.ssk_transfer_bucket_loaded_1==first and #chart.children==child_count,
-  "Refresh duplicated named position resets or replaced reusable hover targets")
+  "History refresh must retain targets without duplicating position resets")
 aligned_history()
-bucket_count=1;UI.refresh(player,true)
-local reset=assert(chart["ssk_transfer_position_reset_"..last.name])
-assert(not last.visible and not reset.visible,"Hidden target left an active position reset")
+event_count=1;UI.refresh(player,true)
+assert(not last.visible,"Shorter Events page must hide old bucket targets")
+local hidden_reset=assert(chart["ssk_transfer_position_reset_"..last.name])
+assert(not hidden_reset.visible,"Hidden bucket must also hide its layout reset")
 aligned_history()
-bucket_count=3;UI.refresh(player,true)
-assert(last.visible and reset.visible and #chart.children==child_count,"Restored target did not reuse its position reset")
+event_count=3;UI.refresh(player,true)
+assert(last.visible and hidden_reset.visible and #chart.children==child_count,"Restoring events must reuse and show existing resets")
 aligned_history()
+event_count=200;UI.refresh(player,true)
+assert(us.transfers._event_pages>1,"Event fixture must span several pages")
+local page_before=us.transfers.event_page
+assert(click(find(player.gui.screen.ssk_main,"next_exchanges")))
+assert(us.transfers.event_page==page_before+1,"Next must advance exactly one event page")
+local chosen_page=us.transfers.event_page
+event_count=201;UI.refresh(player,true)
+assert(us.transfers.event_page==chosen_page,"New cargo moved the explicitly selected event page")
+assert(switch("left"))
+assert(switch("right"))
+assert(us.transfers.event_page==us.transfers._event_pages,"Entering Events must open its newest page")
 Transfers.platform_view=original_view
+us.transfers.platform=b.index
 UI.open(player)
-assert(click(find(player.gui.screen.ssk_main, "platform_102").pick))
+assert(click(find(player.gui.screen.ssk_main, "platform_102")))
 assert(click(button()) and player.centered_on == b.hub, "Jump did not follow the selected platform")
 
 -- Revalidate targets at click time without closing the window or jumping elsewhere.

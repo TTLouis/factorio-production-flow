@@ -29,7 +29,7 @@ local original = root()
 local item_pane = original.ssk_bal_list.ssk_bal_items
 assert(content().ssk_balance_split.ssk_balance_table.type == "flow", "outer Balance pane must stay fixed")
 assert(item_pane.type == "scroll-pane", "only the item list should scroll")
-assert(original.ssk_bal_summary and not original.ssk_bal_context and original.ssk_bal_controls.ssk_bal_refresh
+assert(original.ssk_bal_summary and not original.ssk_bal_context and original.ssk_bal_strip.ssk_bal_controls.ssk_bal_refresh
   and not original.ssk_bal_footer, "refresh must be in the header and the footer must be absent")
 assert(item_pane.ssk_bal_section_1, "item tables must live inside the scroller")
 local function check_header_alignment()
@@ -39,10 +39,12 @@ local function check_header_alignment()
   local columns=header.ssk_bal_columns
   for _,t in ipairs(tables()) do
     assert(t.column_count==columns.column_count, "Header and rows have different columns")
+    assert(t.spec.style == "ssk_striped_rows" and not t.draw_horizontal_lines and t.draw_vertical_lines,
+      "Balance needs row backgrounds and column separators without drifting horizontal grid lines")
     for i,h in ipairs(columns.children) do
       assert(h.style.width==t.children[i].style.width, "Header width differs from data column "..i)
     end
-    assert(t.parent.style.right_padding>=8, "Empty in needs breathing room before the scrollbar")
+    assert(t.parent.style.right_padding==(root().tags.lane>0 and 8 or 0), "Empty in needs 8 px before a scrollbar and none without one")
   end
 end
 check_header_alignment()
@@ -195,7 +197,7 @@ biggest.eta, surplus.eta = 5, nil
 UI.refresh(player, true)
 assert(root() == sorted and sorted.ssk_bal_list.ssk_bal_items == sorted_pane)
 expect_order(surplus, relative, tied_first, biggest, tied_second, steady)
-click(sorted.ssk_bal_controls.ssk_bal_refresh.tags)
+click(sorted.ssk_bal_strip.ssk_bal_controls.ssk_bal_refresh.tags)
 expect_order(biggest, relative, tied_first, tied_second, surplus, steady)
 click({ ssk_ui = "bal_fav", key = surplus.key })
 select("bal_sort", 3)

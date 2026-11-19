@@ -1,6 +1,8 @@
--- Physical chest contents. Cached registry; bounded reads; publish complete scans only.
+-- Physical storage and cargo buffers. Bounded reads; publish complete scans only.
 local C = {}
-C.TYPES = {"container", "logistic-container"}
+C.TYPES = {"container", "logistic-container", "temporary-container", "cargo-landing-pad", "space-platform-hub", "rocket-silo", "cargo-pod"}
+local INVENTORY={container="chest",["logistic-container"]="chest",["temporary-container"]="chest",["cargo-landing-pad"]="cargo_landing_pad_main",
+  ["space-platform-hub"]="hub_main",["rocket-silo"]="rocket_silo_attached_cargo_unit",["cargo-pod"]="cargo_unit"}
 C.PER_TICK = 32
 local function state() return storage.chest_stock end
 
@@ -17,15 +19,15 @@ function C.reschedule()
 end
 
 function C.init()
-  if storage.stock_basis ~= "physical-chests-v1" then
+  if storage.stock_basis ~= "physical-storage-v2" then
     storage.stock, storage.chest_stock = {}, nil
-    storage.stock_basis = "physical-chests-v1"
+    storage.stock_basis = "physical-storage-v2"
   end
   storage.chest_stock = storage.chest_stock or {list={}, entities={}, next_tick=0}
 end
 
 function C.add(e)
-  if not (e and e.valid and (e.type=="container" or e.type=="logistic-container")) then return end
+  if not (e and e.valid and INVENTORY[e.type]) then return end
   local s, u = state(), e.unit_number
   if not u or s.entities[u] then return end
   s.entities[u] = e
@@ -65,7 +67,13 @@ function C.request(tick)
   local s = state()
   if s.batch or tick < s.next_tick then return end
   local surfaces = {}
-  for _, surface in pairs(game.surfaces) do surfaces[surface.index] = {} end
+  for _, surface in pairs(game.surfaces) do
+    surfaces[surface.index] = {}
+    -- Engine-created pods do not raise the normal entity-built events. Cargo
+    -- waiting at a platform hatch has already left hub_main, but has not yet
+    -- dispatched. Discover it before fixing this scan's bounded registry.
+    for _,pod in pairs(surface.find_entities_filtered{type="cargo-pod",force=game.forces.player}) do C.add(pod) end
+  end
   s.batch = {start=tick, cursor=1, limit=#s.list, s=surfaces, reads=0}
 end
 
@@ -88,7 +96,14 @@ function C.tick(tick)
       b.limit = b.limit-1
     else
       if e.force == game.forces.player then
-        local inv = e.get_inventory(defines.inventory.chest)
+        local eligible=true
+        if e.type=="cargo-pod" then
+          local origin=e.cargo_pod_origin
+          eligible=e.cargo_pod_state=="awaiting_launch" and origin and origin.valid
+            and (origin.type=="space-platform-hub" or origin.type=="cargo-landing-pad")
+        end
+        local id=eligible and defines.inventory[INVENTORY[e.type]]
+        local inv = id and e.get_inventory(id)
         if inv and inv.valid then
           local index = e.surface.index
           local totals = b.s[index] or {}; b.s[index] = totals

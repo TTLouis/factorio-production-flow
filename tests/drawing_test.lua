@@ -172,6 +172,71 @@ for _, setting in ipairs({ { "detail", "clean" }, { "detail", "lanes" }, { "focu
     end
   end
 end
+-- Balance keeps every material colour during hover; Focus uses the same
+-- complete node/ribbon dimming as Full Sankey, in both drawing backends.
+local Palette = TREQ("shared.palette")
+for _, renderer in ipairs({"sprites", "poly"}) do
+  local balance = configuration("focus", "clean", "curves")
+  balance.renderer, balance.neighborhood = renderer, true
+  SK.fill(player, c, balance, 1800, 900, true)
+  local state = storage.sk_render["1:focus"]
+  local function ribbon_colour(r, colour)
+    if r.elem then
+      assert(tonumber(r.elem.sprite:match("c(%d+)$")) == colour, "Ribbon sprite used the wrong shade")
+    elseif r.ro then
+      local expected = Canvas.col(colour)
+      near(r.ro.color.r, expected.r); near(r.ro.color.g, expected.g); near(r.ro.color.b, expected.b)
+    end
+  end
+  local function coloured()
+    for _, r in ipairs(state.ribbons) do
+      assert(Palette.muted(r.color) ~= r.color, "Balance ribbon shade must differ from its material bar")
+      ribbon_colour(r, Palette.muted(r.color))
+    end
+  end
+  coloured()
+  SK.on_hover({player_index=1,element={valid=true,tags={ssk_sk="node",key="item/iron-plate",fx=true}}},true)
+  coloured()
+  for _, n in pairs(state.node_visuals) do assert(not n.dimmed, "Balance hover hid unrelated colours") end
+  local focus = configuration("focus", "clean", "curves"); focus.renderer=renderer
+  SK.fill(player, c, focus, 1800, 900, true)
+  state = storage.sk_render["1:focus"]
+  local connected = 0
+  for _, r in ipairs(state.ribbons) do
+    if r.from == focus.focus or r.to == focus.focus then
+      ribbon_colour(r, Palette.muted(r.color))
+      connected = connected + 1
+    end
+  end
+  assert(connected > 0, "Focus fixture must include a ribbon connected to the selected material")
+  SK.on_hover({player_index=1,element={valid=true,tags={ssk_sk="node",key="item/iron-plate",fx=true}}},true)
+  local dimmed, related = 0, 0
+  local fade_directions = {}
+  for _, n in pairs(state.node_visuals) do
+    if renderer == "sprites" then
+      for _, visual in ipairs(n.sprites) do
+        local direction = visual.original:match("^ssk%-stub%-(%a+)%-")
+        if direction then
+          fade_directions[direction] = true
+          assert(visual.element.style.width == View.STUB and type(visual.element.tooltip) == "table",
+            "Other branch must retain its original width and native tooltip")
+          assert(visual.element.sprite == (n.dimmed and visual.dimmed or visual.original),
+            "Highlight must preserve the fade direction for dimmed and visible branches")
+          assert(visual.dimmed:match("^ssk%-stub%-(%a+)%-") == direction)
+        end
+      end
+    end
+    if n.dimmed then
+      dimmed=dimmed+1
+      if n.icon then assert(n.icon.style.draw_grayscale_picture, "Focus unrelated icon retained colour") end
+    else related=related+1 end
+  end
+  assert(dimmed>0 and related>0, "Focus hover must retain the related chain and dim the other branch")
+  if renderer == "sprites" then
+    assert(fade_directions.left and fade_directions.right,
+      "The fixture must exercise Other sources and uses in the sprite renderer")
+  end
+end
 assert(thick_header_checked, "missing thick-bar header regression fixture")
 assert(grouped_detail_checked, "missing grouped arrow usage fixture")
 for _, layout in ipairs({ "clean", "lanes" }) do

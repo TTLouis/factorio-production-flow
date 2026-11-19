@@ -8,7 +8,7 @@ so a runtime ribbon is fully described by (direction, r) and stretched to its bo
 r is sampled geometrically so relative thickness error is constant (~±4.5%).
 
 Run from the mod root:  python tools/gen_atlas.py
-Outputs: graphics/ribbons.png, shared/ribbon_steps.lua
+Outputs: graphics/ribbons.png, graphics/elbows.png, graphics/stubs.png, shared/ribbon_steps.lua
 """
 import math
 import os
@@ -67,7 +67,18 @@ def render_cell(r, cw=CELL_W, ch=CELL_H):
     return (cov * 255.0 + 0.5).astype(np.uint8)
 
 
+def save_stub_gradient():
+    # Two rows of tiles, with the opaque end facing the node in either direction.
+    width, height = 32, 8
+    rgba = np.full((2 * height, width, 4), 255, dtype=np.uint8)
+    alpha = np.linspace(0, 255, width).round().astype(np.uint8)
+    rgba[:height, :, 3] = alpha
+    rgba[height:, :, 3] = alpha[::-1]
+    Image.fromarray(rgba).save(os.path.join(ROOT, "graphics", "stubs.png"), optimize=True)
+
+
 def main():
+    save_stub_gradient()
     rows = math.ceil(2 * STEPS / GRID_COLS)
     alpha = np.zeros((rows * CELL_H, GRID_COLS * CELL_W), dtype=np.uint8)
     for i, r in enumerate(R_VALUES):

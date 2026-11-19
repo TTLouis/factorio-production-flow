@@ -13,6 +13,7 @@ local Geometry = require("scripts.ribbon_geometry")
 local MaterialPicker = require("scripts.material_picker")
 local Watch = require("scripts.watch")
 local Tooltip = require("scripts.tooltip")
+local GuiPlot = require("scripts.gui_plot")
 
 local SK = {}
 local ZOOM_STEP = 1.25
@@ -589,6 +590,9 @@ local function ribbon_sprite(r, color)
 end
 
 local function highlight(st, key)
+  -- Balance is already scoped to the selected material. Keep its colours
+  -- visible while hovering or pinning a neighbour.
+  if not st.dim_nodes then key = nil end
   local upstream, downstream = {}, {}
   local function walk(set, reverse)
     if not key then return end
@@ -603,9 +607,10 @@ local function highlight(st, key)
     end
   end
   walk(upstream, true); walk(downstream, false)
+  local shade = st.shade_ribbons or (not key and st.quiet)
   for _, r in ipairs(st.ribbons) do
     local related = upstream[r.from] and upstream[r.to] or downstream[r.from] and downstream[r.to]
-    local c = key and not related and palette.DIM or (not key and st.quiet and palette.muted(r.color) or r.color)
+    local c = key and not related and palette.DIM or (shade and palette.muted(r.color) or r.color)
     if r.ro then
       if r.ro.valid then r.ro.color = Canvas.col(c) end
     elseif r.elem and r.elem.valid then r.elem.sprite = ribbon_sprite(r, c) end
@@ -615,7 +620,7 @@ local function highlight(st, key)
     if node.dimmed ~= dim then
       node.dimmed = dim
       for _, sprite in ipairs(node.sprites) do
-        if sprite.element.valid then sprite.element.sprite = dim and S.bar(palette.DIM) or sprite.original end
+        if sprite.element.valid then sprite.element.sprite = dim and (sprite.dimmed or S.bar(palette.DIM)) or sprite.original end
       end
       for _, shape in ipairs(node.shapes) do
         if shape.object.valid then
@@ -634,8 +639,9 @@ end
 local function draw(canvas, L, us, st, player, W, H)
   st.ribbons = {}
   st.node_visuals = {}
-  st.dim_nodes = us.view ~= "focus"
-  st.quiet = true
+  st.dim_nodes = not us.neighborhood
+  st.quiet = not us.neighborhood
+  st.shade_ribbons = us.view == "focus"
   st.selected = us.view == "focus" and us.focus or us.sel
   if us.neighborhood then st.selected=us.pinned end
   local count = 0
@@ -643,7 +649,7 @@ local function draw(canvas, L, us, st, player, W, H)
   local late = {} -- deferred labels / buttons
   POLY = nil
   if player then Canvas.clear(player.index) end
-  if us.renderer == "poly" and player then
+  if us.renderer == "poly" and player and not GuiPlot.needed(player) then
     POLY = Canvas.begin(player, W, H)
     local cam = canvas.add(Canvas.camera_spec(player, POLY))
     place(cam, 0, 0, W, H)
@@ -736,10 +742,10 @@ local function draw(canvas, L, us, st, player, W, H)
       local visual = { sprites = {}, shapes = {}, labels = {}, dimmed = false }
       st.node_visuals[n.key] = visual
       local function stub(x, y, h, tip)
+        local right = x > n.x
         if POLY then
           -- fades out away from the node: three steps of decreasing alpha
           local w3 = View.STUB / 3
-          local right = x > n.x
           for i = 0, 2 do
             local a = 0.25 - 0.08 * i
             local xx = right and (x + i * w3) or (x + View.STUB - (i + 1) * w3)
@@ -747,8 +753,10 @@ local function draw(canvas, L, us, st, player, W, H)
             if object then visual.shapes[#visual.shapes + 1] = { object=object, color=palette.GREY, alpha=a } end
           end
         end
-        local e = add_sprite(canvas, POLY and "ssk-node-hit" or S.bar(palette.GREY), tip)
-        if not POLY then visual.sprites[#visual.sprites + 1] = { element=e, original=e.sprite } end
+        local e = add_sprite(canvas, POLY and "ssk-node-hit" or S.stub(right, palette.GREY), tip)
+        if not POLY then
+          visual.sprites[#visual.sprites + 1] = { element=e, original=e.sprite, dimmed=S.stub(right, palette.DIM) }
+        end
         place(e, x, y, View.STUB, h)
       end
       local lab_use = n.lab_use or 0
@@ -1198,7 +1206,7 @@ end
 function SK.focus_state(us)
   local fx = us.fx
   if not fx then
-    fx = { view = "focus", focus_steps = 2, heights = "sqrt", lines = "curves", renderer = "poly" }
+    fx = { view = "focus", focus_steps = 2, heights = "sqrt", lines = "curves", renderer = "sprites" }
     us.fx = fx
   end
   fx.period, fx.sidx = us.period, us.sidx
@@ -1210,7 +1218,7 @@ end
 
 function SK.balance_state(us)
   if not us.bal_fx then us.bal_fx = { view = "focus", neighborhood = true, focus_steps = 1,
-    heights = "sqrt", lines = "curves", renderer = "poly", live = true } end
+    heights = "sqrt", lines = "curves", renderer = "sprites", live = true } end
   local fx = us.bal_fx
   fx.period, fx.sidx = us.period, us.sidx
   if fx.show_labels == nil then fx.show_labels = true end

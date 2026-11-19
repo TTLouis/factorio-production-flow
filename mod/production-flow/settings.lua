@@ -1,5 +1,12 @@
 data:extend({
   {
+    type = "bool-setting",
+    name = "ssk-remove-night-vision-tint",
+    setting_type = "startup",
+    default_value = true,
+    order = "a",
+  },
+  {
     type = "int-setting",
     name = "ssk-entities-per-tick",
     setting_type = "runtime-global",
@@ -42,5 +49,12 @@ data:extend({
     minimum_value = 0.0001,
     maximum_value = 1,
     order = "e",
+  },
+  {
+    type = "bool-setting",
+    name = "ssk-allow-small-window",
+    setting_type = "runtime-per-user",
+    default_value = false,
+    order = "f",
   },
 })

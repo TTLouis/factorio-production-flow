@@ -5,6 +5,20 @@ local steps = S.steps
 local ATLAS = "__production-flow__/graphics/ribbons.png"
 
 local protos = {}
+-- Plot rectangles tint the base game's white square; no new graphics.
+for name,color in pairs(require("shared.plot_colors")) do
+  protos[#protos+1]={type="sprite",name="ssk-plot-"..name,filename="__core__/graphics/white-square.png",
+    width=10,height=10,tint=color,flags={"gui"}}
+end
+-- Sprite charts use the same fade direction and peak opacity as the polygon stubs.
+for _, right in ipairs({false, true}) do
+  for _, color in ipairs({palette.GREY, palette.DIM}) do
+    local alpha = palette.grey.alpha * (color == palette.DIM and palette.dim.alpha or 1)
+    protos[#protos + 1] = { type = "sprite", name = S.stub(right, color),
+      filename = "__production-flow__/graphics/stubs.png", x = 0, y = right and 8 or 0,
+      width = 32, height = 8, tint = palette.tint(color, alpha), flags = { "gui" } }
+  end
+end
 -- Invisible GUI hit area over polygon node bars; keeps native tooltips and clicks.
 protos[#protos + 1] = { type = "sprite", name = "ssk-node-hit",
   filename = "__core__/graphics/empty.png", width = 1, height = 1, flags = { "gui" } }
@@ -93,6 +107,11 @@ data.raw["gui-style"].default.ssk_balance_grid = {
   vertical_line_color = {0.31, 0.33, 0.35, 1},
   top_cell_padding = 5, bottom_cell_padding = 5,
   left_cell_padding = 3, right_cell_padding = 3,
+}
+data.raw["gui-style"].default.ssk_striped_rows = {
+  type = "table_style", parent = "ssk_balance_grid",
+  -- Use the vanilla removed-content table's alternating row background.
+  odd_row_graphical_set = { filename = "__core__/graphics/gui-new.png", position = {472, 25}, size = 1 },
 }
 data.raw["gui-style"].default.ssk_balance_header = {
   type = "frame_style", parent = "subheader_frame", padding = 0,

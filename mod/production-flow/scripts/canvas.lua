@@ -17,7 +17,21 @@ local MAP_LIMIT = 2000000
 
 local function surface()
   local s = game.get_surface(C.SURFACE)
-  if s then
+  if not s then
+    s = game.create_surface(C.SURFACE, {
+      width = 0, height = 0,
+      default_enable_all_autoplace_controls = false,
+      autoplace_settings = {
+        tile = { treat_missing_as_default = false, settings = {} },
+        entity = { treat_missing_as_default = false, settings = {} },
+        decorative = { treat_missing_as_default = false, settings = {} },
+      },
+      peaceful_mode = true, no_enemies_mode = true,
+    })
+    for _, force in pairs(game.forces) do
+      pcall(function() force.set_surface_hidden(s, true) end)
+    end
+  else
     -- Older canvases inherited finite dimensions from the save. Player regions
     -- start at x=512, so those bounds can prevent their chunks from generating.
     local settings = s.map_gen_settings
@@ -25,25 +39,14 @@ local function surface()
         (settings.height > 0 and settings.height < MAP_LIMIT) then
       settings.width, settings.height = 0, 0
       s.map_gen_settings = settings
-      storage.canvas_chunks = nil
     end
-    return s
   end
-  s = game.create_surface(C.SURFACE, {
-    width = 0, height = 0,
-    default_enable_all_autoplace_controls = false,
-    autoplace_settings = {
-      tile = { treat_missing_as_default = false, settings = {} },
-      entity = { treat_missing_as_default = false, settings = {} },
-      decorative = { treat_missing_as_default = false, settings = {} },
-    },
-    peaceful_mode = true, no_enemies_mode = true,
-  })
-  pcall(function() s.always_day = true end)
-  pcall(function() s.freeze_daytime = true; s.daytime = 0 end)
-  pcall(function() s.show_clouds = false end)
-  for _, f in pairs(game.forces) do
-    pcall(function() f.set_surface_hidden(s, true) end)
+  if not s.generate_with_lab_tiles then
+    s.generate_with_lab_tiles = true
+    s.always_day = true
+    s.freeze_daytime = true
+    s.daytime = 0
+    s.show_clouds = false
   end
   return s
 end
@@ -51,32 +54,17 @@ end
 -- make sure the drawing area exists, has plain tiles and is charted for the player's force
 -- (a camera may not show uncharted areas)
 local function prepare_area(player, s, x0, y0, x1, y1)
-  storage.canvas_chunks = storage.canvas_chunks or {}
-  local done = storage.canvas_chunks
   local cx0, cy0, cx1, cy1 = math.floor(x0 / 32), math.floor(y0 / 32), math.floor(x1 / 32), math.floor(y1 / 32)
-  local new = {}
+  local generation_requested = false
   for cx = cx0, cx1 do
     for cy = cy0, cy1 do
-      local k = cx .. "," .. cy
-      -- Other mods can remove backing chunks or recreate this surface. A saved
-      -- coordinate cache does not prove that the current chunk still exists.
-      if not done[k] or not s.is_chunk_generated({ cx, cy }) then
-        new[#new + 1] = { cx, cy }
+      if not s.is_chunk_generated({ cx, cy }) then
         s.request_to_generate_chunks({ cx * 32 + 16, cy * 32 + 16 }, 0)
+        generation_requested = true
       end
     end
   end
-  if #new > 0 then
-    s.force_generate_chunk_requests()
-    for _, c in ipairs(new) do
-      local tiles = {}
-      for x = c[1] * 32, c[1] * 32 + 31 do
-        for y = c[2] * 32, c[2] * 32 + 31 do tiles[#tiles + 1] = { name = "lab-dark-1", position = { x, y } } end
-      end
-      pcall(function() s.set_tiles(tiles, false) end)
-      done[c[1] .. "," .. c[2]] = true
-    end
-  end
+  if generation_requested then s.force_generate_chunk_requests() end
   -- Match the complete generated chunks, including the camera's edge chunks.
   -- A partial-area chart request can leave saved-map cameras behind fog even
   -- though their player-filtered rendering objects already exist.

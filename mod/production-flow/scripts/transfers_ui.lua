@@ -1,11 +1,16 @@
 local Loc = require("scripts.locale")
 local Canvas = require("scripts.canvas")
 local Graph = require("scripts.graph")
+local GuiPlot = require("scripts.gui_plot")
 local Sampler = require("scripts.sampler")
 local Sprites = require("shared.sprites")
 local Transfers = require("scripts.transfers")
 local Tooltip = require("scripts.tooltip")
 local Surfaces = require("scripts.surfaces")
+local Exchanges = require("scripts.transfer_exchanges")
+local Axis = require("scripts.transfer_history_axis")
+local HistoryLayout = require("scripts.transfer_history_layout")
+local Manifest = require("scripts.transfer_manifest_ui")
 
 local UI = {}
 local LOADED = { r = 0.28, g = 0.59, b = 0.73, a = 1 }
@@ -17,11 +22,14 @@ local TICK = { r = 0.75, g = 0.74, b = 0.71, a = 1 }
 local HIGHLIGHT = { r = 0.28, g = 0.24, b = 0.18, a = 1 }
 local CARD_ROW, CARD_HEADER, CARD_GAP = 25, 34, 12
 local DIRECTIONS = { "loaded", "unloaded" }
-local LAYOUT_VERSION = 8
-local SPLIT_GAP, LIST_INSET, TAB_MARGIN, TAB_INSET = 12, 4, 4, 8
-local HEADING_HEIGHT, LIST_HEADER_HEIGHT, TAB_HEIGHT, TAB_CHROME = 38, 32, 36, 48
+local LAYOUT_VERSION = 23
+local SPLIT_GAP, PANEL_INSET = 12, 8
+local LIST_HEADER_HEIGHT, TAB_HEIGHT, TAB_CHROME = 36, 36, 48
 local GRAPH_TOP, PLATFORM_HEIGHT = 34, 124
 local SCROLLBAR_WIDTH = 12
+-- Platform list: 28 px rows (a 24 px star with 2 px around it) flush with the
+-- panel, and a scrollbar lane plus 8 px gutter only when it scrolls.
+local PLATFORM_ROW, FAVOURITE_WIDTH, LIST_PAD, LIST_GUTTER = 28, 24, 12, 8
 
 local function label(parent, name, caption, style, width)
   local el = parent.add { type = "label", name = name, caption = caption, style = style }
@@ -133,53 +141,58 @@ local function platform_hub(force, id)
   end
 end
 
-local function add_platform_rows(pane, platforms, width, favourite)
-  for _, platform in ipairs(platforms) do
-    local line = row(pane, Loc.join("platform_", platform.id))
-    line.style.horizontal_spacing, line.style.height = 4, 28
-    local star = line.add { type = "sprite-button", name = "star", style = "tool_button",
-      sprite = favourite and "ssk-star" or "ssk-star-off", toggled = favourite,
-      tags = { transfer_favourite = platform.id },
-      tooltip = favourite and Loc("transfers-remove-this-platform-from-favourites") or Loc("transfers-add-this-platform-to-favourites-at-the") }
-    star.style.width, star.style.height = 24, 24
-    local caption = platform.icon and (Loc.join("[img=", platform.icon, "] ", platform.name)) or platform.name
-    local pick = line.add { type = "button", name = "pick", style = "list_box_item", caption = caption,
-      tooltip = platform.name, tags = { transfer_platform = platform.id } }
-    pick.style.width, pick.style.height = width - 28, 28
+local function platform_caption(platform)
+  -- Keep rich-text names, and give icon-only names a readable identifier.
+  if platform.name:gsub("%[[^%]]+%]", ""):match("^%s*$") then
+    return Loc.join(platform.name, " #", platform.id)
   end
+  return platform.name
 end
 
-local function platform_group(pane, width, caption, top_margin)
-  local heading = pane.add { type = "frame", style = "repeated_subheader_frame", direction = "horizontal" }
-  heading.style.width, heading.style.height, heading.style.left_padding = width, 28, 6
-  heading.style.top_margin, heading.style.vertical_align = top_margin, "center"
-  label(heading, nil, caption, "caption_label")
+local function add_platform_row(list, platform, width, favourite)
+  local star = list.add { type = "sprite-button", name = Loc.join("favourite_", platform.id), style = "tool_button",
+    sprite = favourite and "ssk-star" or "ssk-star-off", toggled = favourite,
+    tags = { transfer_favourite = platform.id },
+    tooltip = favourite and Loc("transfers-remove-this-platform-from-favourites") or Loc("transfers-add-this-platform-to-favourites-at-the") }
+  star.style.width, star.style.height = FAVOURITE_WIDTH, FAVOURITE_WIDTH
+  local inset = (PLATFORM_ROW - FAVOURITE_WIDTH) / 2
+  star.style.left_margin, star.style.right_margin = inset, inset
+  star.style.top_margin, star.style.bottom_margin = inset, inset
+  -- A vanilla list-box row: the whole row is the click target, and the selected
+  -- platform is drawn with the list box's selected highlight (toggled).
+  local name = platform_caption(platform)
+  local pick = list.add { type = "button", name = Loc.join("platform_", platform.id),
+    style = "list_box_item", caption = name, tooltip = name, tags = { transfer_platform = platform.id } }
+  pick.style.width, pick.style.height = width - PLATFORM_ROW, PLATFORM_ROW
 end
 
-local function update_platforms(pane, platforms, selected, favourites)
+local function update_platforms(list, platforms, selected, favourites)
   local parts, pinned, others = {}, {}, {}
   for _, platform in ipairs(platforms) do
     local favourite = favourites and favourites[platform.id]
-    local list = favourite and pinned or others
-    list[#list + 1] = platform
-    parts[#parts + 1] = Loc.join(platform.id, ":", (favourite and "1:" or "0:"), platform.name)
+    local group = favourite and pinned or others
+    group[#group + 1] = platform
+    parts[#parts + 1] = Loc.join(platform.id, ":", favourite and "1:" or "0:", platform.name)
   end
-  local signature = Loc.join_list(parts, "\n")
-  local width = pane.tags.row_width
-  if pane.tags.signature ~= signature then
-    pane.clear()
-    pane.tags = { row_width = width, signature = signature }
-    if #pinned > 0 then
-      platform_group(pane, width, Loc("balance-favourites"), 0)
-      add_platform_rows(pane, pinned, width, true)
-      if #others > 0 then platform_group(pane, width, Loc("transfers-other-platforms"), 8) end
-    end
-    add_platform_rows(pane, others, width, false)
+  local scroll = list.parent
+  local scrolls = #platforms * PLATFORM_ROW > list.tags.viewport_height
+  local width = list.tags.full_width - (scrolls and SCROLLBAR_WIDTH + LIST_GUTTER or 0)
+  local policy = scrolls and "auto-and-reserve-space" or "dont-show-but-allow-scrolling"
+  if scroll.vertical_scroll_policy ~= policy then scroll.vertical_scroll_policy = policy end
+
+  local signature = Loc.join_list(parts, "\n") .. ":" .. width
+  if list.tags.signature ~= signature then
+    list.clear()
+    local tags = list.tags
+    tags.row_width, tags.signature = width, signature
+    list.tags = tags
+    for _, platform in ipairs(pinned) do add_platform_row(list, platform, width, true) end
+    for _, platform in ipairs(others) do add_platform_row(list, platform, width, false) end
   end
   for _, platform in ipairs(platforms) do
-    local pick = pane[Loc.join("platform_", platform.id)].pick
-    local toggled = selected ~= nil and selected.id == platform.id
-    if pick.toggled ~= toggled then pick.toggled = toggled end
+    local pick = list[Loc.join("platform_", platform.id)]
+    local active = selected ~= nil and selected.id == platform.id
+    if pick.toggled ~= active then pick.toggled = active end
   end
 end
 
@@ -196,34 +209,45 @@ local function build(content, width, height)
   panel.style.width, panel.style.height = width, height
   local split = row(panel, "split")
   split.style.vertical_align, split.style.horizontal_spacing = "top", SPLIT_GAP
-  local sidebar_w = math.max(116, math.min(236, math.floor(width * 0.17)))
+  local sidebar_w = math.max(160, math.min(264, math.floor(width * 0.18)))
   local details_w = width - sidebar_w - SPLIT_GAP
   local sidebar = split.add { type = "frame", name = "sidebar", style = "inside_deep_frame", direction = "vertical" }
-  sidebar.style.width, sidebar.style.height, sidebar.style.padding = sidebar_w, height, LIST_INSET
-  local side_header = strip(sidebar, "heading", LIST_HEADER_HEIGHT)
+  sidebar.style.width, sidebar.style.height, sidebar.style.padding = sidebar_w, height, 0
+  -- A one-line title strip, then the rows straight on the panel, edge to edge and
+  -- down to its foot, with the scrollbar against the panel's right border.
+  local side_header = sidebar.add { type = "frame", name = "heading", style = "subheader_frame",
+    direction = "horizontal" }
+  side_header.style.width, side_header.style.height = sidebar_w, LIST_HEADER_HEIGHT
+  side_header.style.left_padding, side_header.style.right_padding = LIST_PAD, LIST_PAD
+  side_header.style.top_padding, side_header.style.bottom_padding = 4, 4
+  side_header.style.vertical_align = "center"
   label(side_header, nil, Loc("transfers-platforms"), "subheader_caption_label")
   spacer(side_header)
   label(side_header, "count", "", "subheader_semibold_label")
-  local list_w = sidebar_w - 2 * LIST_INSET
-  local platform_scroll = scroll(sidebar, "platform_scroll", list_w, height - LIST_HEADER_HEIGHT - 2 * LIST_INSET)
-  local platforms = platform_scroll.add { type = "flow", name = "ssk_transfer_platforms", direction = "vertical",
-    tags = { row_width = list_w - SCROLLBAR_WIDTH - 8 } }
-  platforms.style.vertical_spacing = 0
+
+  local list_w = sidebar_w
+  local list_h = math.max(PLATFORM_ROW, height - LIST_HEADER_HEIGHT)
+  local platform_scroll = scroll(sidebar, "platform_scroll", list_w, list_h)
+  platform_scroll.vertical_scroll_policy = "dont-show-but-allow-scrolling"
+  local platforms = platform_scroll.add { type = "table", name = "ssk_transfer_platforms", column_count = 2,
+    style = "table", tags = { full_width = list_w, viewport_height = list_h } }
+  platforms.style.horizontal_spacing, platforms.style.vertical_spacing = 0, 0
+  platforms.style.top_cell_padding, platforms.style.bottom_cell_padding = 0, 0
+  platforms.style.left_cell_padding, platforms.style.right_cell_padding = 0, 0
 
   local tab_row = row(split, "tab_row")
   tab_row.style.vertical_align, tab_row.style.horizontal_spacing = "top", 0
   local tabs = tab_row.add { type = "tabbed-pane", name = "ssk_transfer_tabs",
     style = "tabbed_pane_with_no_side_padding", tags = { transfer_tabs = true } }
   tabs.style.width, tabs.style.top_margin = details_w, 0
-  local tab_w, tab_h = details_w - 2 * TAB_MARGIN, height - TAB_CHROME
+  local tab_h = height - TAB_CHROME
   for _, view in ipairs({ { "flow", Loc("help-flow") }, { "history", Loc("help-history") } }) do
     local tab = tabs.add { type = "tab", caption = view[2] }
     local body = tabs.add { type = "frame", name = "ssk_transfer_" .. view[1], direction = "vertical",
       style = "inside_deep_frame" }
-    body.style.width, body.style.height = tab_w, tab_h
-    body.style.left_margin, body.style.right_margin, body.style.padding = TAB_MARGIN, TAB_MARGIN, TAB_INSET
+    body.style.width, body.style.height, body.style.padding = details_w, tab_h, PANEL_INSET
     local tab_content = body.add { type = "flow", name = "content", direction = "vertical",
-      tags = { transfer_width = tab_w - 2 * TAB_INSET, transfer_height = tab_h - 2 * TAB_INSET } }
+      tags = { transfer_width = details_w - 2 * PANEL_INSET, transfer_height = tab_h - 2 * PANEL_INSET } }
     tab_content.style.vertical_spacing = 4
     tabs.add_tab(tab, body)
   end
@@ -252,7 +276,7 @@ local function build(content, width, height)
   return panel
 end
 
--- Match the existing Sankey camera and keep native controls aligned with its coordinates.
+-- Keep native controls aligned with plot coordinates.
 local function position_reset_name(el)
   if el.name and el.name~="" then return "ssk_transfer_position_reset_"..el.name end
   local tags=el.tags
@@ -286,16 +310,12 @@ local function overlay_visible(el,visible)
   if reset then reset.visible=visible end
 end
 
-local function camera(parent, player, painter, width, height)
-  local el = parent.ssk_transfer_camera
-  local spec = Canvas.camera_spec(player, painter)
-  if el then
-    el.position = spec.position
-  else
-    spec.name, spec.ignored_by_interaction = "ssk_transfer_camera", true
-    el = parent.add(spec)
-  end
-  return place(el, 0, 0, width, height)
+local function plot(parent, player, width, height)
+  Canvas.clear(player.index)
+  if parent.ssk_transfer_plot then parent.ssk_transfer_plot.destroy() end
+  local painter=GuiPlot.begin(parent,width,height,"ssk_transfer_plot")
+  painter.root.style.bottom_margin=-height
+  return painter
 end
 
 local function canvas_label(parent, caption, style, x, y, width, alignment)
@@ -365,7 +385,7 @@ local function draw_ribbon(painter, x0, y0, x1, y1, data, highest, color)
     return ribbon_shape(x0, y0, x1, y1, 2, true)
   end
   painter.curve(x0, x1, y0 - width / 2, y1 - width / 2, width, color)
-  painter.polygon({ { x1 - 6, y1 - 4 }, { x1 - 6, y1 + 4 }, { x1, y1 } }, TICK)
+  painter.polygon({ { x1 - 6, y1 - 4 }, { x1 - 6, y1 + 4 }, { x1, y1 }, { x1, y1 } }, TICK)
   return ribbon_shape(x0, y0, x1, y1, width)
 end
 
@@ -428,8 +448,7 @@ local function flow_graph(player, parent, result, width, viewport)
   local update = parent.tags.transfer_graph ~= signature
   if update then parent.clear() end
   parent.style.width, parent.style.height = width, height
-  local painter = Canvas.begin(player, width, height)
-  camera(parent, player, painter, width, height)
+  local painter = plot(parent, player, width, height)
   local platform_name = result.platform.name
   local function route_hover(shape, caption, route, direction, index)
     local tip = manifest_tooltip(caption, Loc("transfers-cargo-mass", mass(route)), route.items, result.covered_seconds)
@@ -529,13 +548,20 @@ local function nice_step(value)
   end
 end
 
-local function timeline(player, chart, result, width, height)
-  local painter = Canvas.begin(player, width, height)
-  camera(chart, player, painter, width, height)
+local function timeline(player, chart, result, width, height,state)
+  local painter = plot(chart, player, width, height)
   local left, right, top, bottom = width < 650 and 115 or 156, width - 24, 10, height - 29
   local mid = math.floor((top + bottom) / 2)
+  local events=state.axis=="events"
+  local buckets=result.buckets
+  local event_start=1
+  if events then
+    local _,_,first,last=Exchanges.page(result.exchanges,right-left,state.event_page)
+    event_start=first;buckets={}
+    for i=first,last do buckets[#buckets+1]=result.exchanges[i] end
+  end
   local peak = 1
-  for _, bucket in ipairs(result.buckets) do
+  for _, bucket in ipairs(buckets) do
     for _, direction in ipairs(DIRECTIONS) do peak = math.max(peak, bucket[direction].pods) end
   end
   local step = nice_step(peak)
@@ -545,10 +571,14 @@ local function timeline(player, chart, result, width, height)
   local recorded_from = result.to_tick - result.covered_seconds * 60
   local function x(tick) return left + (right - left) * (tick - result.from_tick) / domain end
 
-  local selected = result.bucket
-  for _, bucket in ipairs(result.buckets) do
-    if bucket.start_tick == selected then
-      local a, b = x(math.max(bucket.start_tick, result.from_tick)), x(math.min(bucket.end_tick, result.to_tick))
+  local function band(bucket,i)
+    if events then return right-(#buckets-i+1)*Exchanges.SLOT,right-(#buckets-i)*Exchanges.SLOT end
+    return x(math.max(bucket.start_tick,result.from_tick)),x(math.min(bucket.end_tick,result.to_tick))
+  end
+  local selected = events and result.exchange or result.bucket
+  for i, bucket in ipairs(buckets) do
+    if (events and bucket.key or bucket.start_tick) == selected then
+      local a,b=band(bucket,i)
       painter.rect(a, top, b - a, bottom - top, HIGHLIGHT)
     end
   end
@@ -562,7 +592,7 @@ local function timeline(player, chart, result, width, height)
     end
   end
   local spacing = width >= 740 and 5 or 3
-  for i = 0, spacing do
+  for i = 0, events and -1 or spacing do
     local tick = result.from_tick + domain * i / spacing
     painter.text(x(tick), bottom + 13, clock(tick, domain < 5 * 60 * 60), TICK, "center")
   end
@@ -575,9 +605,9 @@ local function timeline(player, chart, result, width, height)
     painter.text(22, lane[1] + 12, lane[4], TICK, "left")
   end
 
-  for i, bucket in ipairs(result.buckets) do
+  for i, bucket in ipairs(buckets) do
     local start_tick, end_tick = math.max(bucket.start_tick, result.from_tick), math.min(bucket.end_tick, result.to_tick)
-    local a, b = math.floor(x(start_tick)), math.ceil(x(end_tick))
+    local a,b=band(bucket,i);a,b=math.floor(a),math.ceil(b)
     local band = math.max(1, b - a)
     local gap = math.floor(band * 0.14)
     for j, direction in ipairs(DIRECTIONS) do
@@ -586,7 +616,7 @@ local function timeline(player, chart, result, width, height)
       local color = up and LOADED or UNLOADED
       if amount > 0 then
         painter.rect(a + gap, up and mid - magnitude or mid + 1, band - 2 * gap, magnitude, color)
-        if selected == bucket.start_tick and band >= 23 then
+        if selected == (events and bucket.key or bucket.start_tick) and band >= 23 then
           painter.text(a + band / 2, up and mid - 9 or mid + 10, number(amount), TICK, "center")
         end
       end
@@ -595,50 +625,45 @@ local function timeline(player, chart, result, width, height)
       local hit = chart[name] or chart.add { type = "sprite", name = name, sprite = "ssk-node-hit",
         resize_to_sprite = false }
       hit.tooltip = bucket_tooltip(bucket, direction, start_tick, end_tick, recorded_from)
-      hit.tags = { transfer_bucket = bucket.start_tick, transfer_direction = direction }
+      hit.tags = events and {transfer_exchange=bucket.key,transfer_direction=direction}
+        or { transfer_bucket = bucket.start_tick, transfer_direction = direction }
       place(hit, a, up and top or mid, band, up and mid - top or bottom - mid)
       overlay_visible(hit,true)
     end
+    if events and (i-1)%3==0 then painter.text((a+b)/2,bottom+13,"#"..(event_start+i-1),TICK,"center") end
   end
-  for i = #result.buckets + 1, chart.tags.bucket_count or 0 do
+  for i = #buckets + 1, chart.tags.bucket_count or 0 do
     for _, direction in ipairs(DIRECTIONS) do overlay_visible(chart[Loc.join("ssk_transfer_bucket_", direction, "_", i)],false) end
   end
-  chart.tags = { bucket_count = math.max(#result.buckets, chart.tags.bucket_count or 0) }
+  chart.tags = { bucket_count = math.max(#buckets, chart.tags.bucket_count or 0) }
 end
+
+local LOG_ROW_PADDING = 4
+local LOG_COLUMN_GAP = 12
+local LOG_EXPAND_WIDTH = 24
 
 local function log_widths(width)
   local arrival = width < 600 and 80 or 110
   local direction = width < 600 and 76 or 104
   local surface = math.min(170, math.floor(width * 0.20))
   local weight = width < 600 and 76 or 100
-  return { arrival, direction, surface, width - arrival - direction - surface - weight - 52, weight }
+  local row_chrome = LOG_EXPAND_WIDTH + 2 * LOG_ROW_PADDING + 5 * LOG_COLUMN_GAP
+  local cargo = width - row_chrome - arrival - direction - surface - weight
+  return { arrival, direction, surface, cargo, weight }
 end
 
 local function log_row(parent)
   local line = row(parent)
-  line.style.height, line.style.horizontal_spacing = 4 + 24, 4
-  line.style.left_padding, line.style.right_padding = 4, 4
+  line.style.height, line.style.horizontal_spacing = 4 + LOG_EXPAND_WIDTH, LOG_COLUMN_GAP
+  line.style.left_padding, line.style.right_padding = LOG_ROW_PADDING, LOG_ROW_PADDING
   return line
 end
 
 local function detail_row(parent, items, width)
-  local columns = math.max(1, math.min(4, math.floor((width - 38) / 155)))
-  local grid = parent.add { type = "table", name = "ssk_transfer_manifest",
-    column_count = columns }
-  grid.style.left_margin, grid.style.right_margin = 34, 4
-  local cell_w = math.floor((width - 48) / columns) - 5
-  for _, item in ipairs(items) do
-    local cell = grid.add { type = "frame", style = "inside_shallow_frame", direction = "horizontal",
-      tags = { transfer_item = item.name, count = item.count } }
-    cell.style.width, cell.style.height, cell.style.padding = cell_w, 27, 2
-    cell.style.vertical_align = "center"
-    sprite(cell, Loc.join("item/", item.name), 18)
-    local count = number(item.count)
-    local cap = label(cell, nil, item_name(item.name), nil, math.max(24, cell_w - 48 - #count * 6))
-    cap.tooltip = item_name(item.name, true)
-    spacer(cell)
-    label(cell, nil, count, "bold_label")
-  end
+  local detail = parent.add { type = "frame", style = "inside_shallow_frame", direction = "vertical" }
+  detail.style.width, detail.style.padding = width, 8
+  Manifest.section(detail, "delivered_contents", Loc("shipment-received-manifest"), items, width - 16, number,
+    "ssk_transfer_manifest")
 end
 
 local function render_log(body, result, state, width)
@@ -647,11 +672,12 @@ local function render_log(body, result, state, width)
   for _, bucket in ipairs(result.buckets) do
     if bucket.start_tick == result.bucket then selected = bucket; break end
   end
-  local interval = selected and range(math.max(selected.start_tick, result.from_tick),
+  local interval = result.exchange and Loc("transfer-exchange-selected")
+    or selected and range(math.max(selected.start_tick, result.from_tick),
     math.min(selected.end_tick, result.to_tick)) or Loc("transfers-selected-period")
   header.range.caption = Loc("confirmed-pod-count", interval, result.arrival_count, number(result.arrival_count))
   header.range.tooltip = Loc("transfers-arrival-time-is-shown-as-elapsed-simulation")
-  header.reset_bucket.visible = selected ~= nil
+  header.reset_bucket.visible = selected ~= nil or result.exchange ~= nil
   header.previous.visible, header.next.visible, header.pages.visible = result.pages > 1, result.pages > 1, result.pages > 1
   header.previous.enabled, header.next.enabled = result.page > 1, result.page < result.pages
   header.pages.caption = Loc.join(result.page, " / ", result.pages)
@@ -671,7 +697,7 @@ local function render_log(body, result, state, width)
     local expanded = state.expanded == pod.id
     local expand = action(line, Loc.join("ssk_transfer_delivery_", i), expanded and "collapse" or "expand",
       expanded and Loc("transfers-collapse-cargo-manifest") or Loc("transfers-expand-cargo-manifest"), { transfer_delivery = pod.id })
-    expand.style.width, expand.style.height = 24, 24
+    expand.style.width, expand.style.height = LOG_EXPAND_WIDTH, LOG_EXPAND_WIDTH
     expand.toggled = expanded
     label(line, nil, clock(pod.tick, true), nil, columns[1])
     local direction = row(line)
@@ -687,9 +713,7 @@ local function render_log(body, result, state, width)
     local cargo = row(line)
     cargo.style.width = columns[4]
     cargo.tooltip = manifest_tooltip(name, mass(pod), pod.items)
-    local shown = math.min(#pod.items, math.max(0, math.min(5, math.floor((columns[4] - 32) / 23))))
-    for j = 1, shown do sprite(cargo, Loc.join("item/", pod.items[j].name), 19) end
-    if shown < #pod.items then label(cargo, nil, Loc.join("+", (#pod.items - shown)), "grey_label") end
+    Manifest.preview(cargo, pod.items, columns[4])
     local weight = label(line, nil, mass(pod), "caption_label", columns[5])
     weight.style.horizontal_align = "right"
     weight.tooltip = Loc("transfers-full-cargo-pod-mass")
@@ -699,16 +723,20 @@ end
 
 local function render_history(player, body, result, state, note)
   local width, height = body.tags.transfer_width, body.tags.transfer_height
-  local chart_height = math.max(116, math.min(228, math.floor(height * 0.43)))
+  local chart_height = HistoryLayout.plot_height(height)
   if not body.chart then
-    local heading = strip(body, "timeline_heading", HEADING_HEIGHT)
+    local heading = HistoryLayout.strip(body, "timeline_heading")
     label(heading, nil, Loc("transfers-cargo-timeline"), "subheader_caption_label")
     label(heading, "units", "", "grey_label")
     spacer(heading)
+    action(heading,"previous_exchanges","left_arrow",Loc("transfer-exchanges-previous"),{transfer_exchange_page=-1})
+    label(heading,"exchange_pages","","grey_label")
+    action(heading,"next_exchanges","right_arrow",Loc("transfer-exchanges-next"),{transfer_exchange_page=1})
+    Axis.add(heading, state.axis, Loc("transfer-axis-help"))
     label(heading, "counts", "", "subheader_semibold_label")
     local chart = body.add { type = "flow", name = "chart", direction = "vertical" }
     chart.style.width, chart.style.height, chart.style.vertical_spacing = width, chart_height, 0
-    local delivered = strip(body, "delivered", HEADING_HEIGHT)
+    local delivered = HistoryLayout.strip(body, "delivered")
     label(delivered, nil, Loc("transfers-delivered-cargo"), "subheader_caption_label")
     spacer(delivered)
     label(delivered, "range", "", "subheader_semibold_label")
@@ -716,29 +744,61 @@ local function render_history(player, body, result, state, note)
     action(delivered, "previous", "left_arrow", Loc("transfers-previous-page"), { transfer_page = -1 })
     label(delivered, "pages", "", "grey_label")
     action(delivered, "next", "right_arrow", Loc("transfers-next-page"), { transfer_page = 1 })
-    local headers = log_row(body)
+    local headers = log_row(HistoryLayout.columns(body, "log_headers", width - HistoryLayout.SCROLL_GUTTER))
     local gutter = headers.add { type = "empty-widget" }
-    gutter.style.width = 24
+    gutter.style.width = LOG_EXPAND_WIDTH
     local columns = log_widths(width - 24)
     for i, title in ipairs({ Loc("transfers-arrival"), Loc("transfers-direction"), Loc("transfers-surface"), Loc("transfers-cargo"), Loc("transfers-mass") }) do
       local cell = label(headers, nil, title, "caption_label", columns[i])
       if i == 5 then cell.style.horizontal_align = "right" end
     end
-    local log_chrome = 2 * HEADING_HEIGHT + 28 + 4 * 4
-    scroll(body, "log_scroll", width, math.max(70, height - chart_height - log_chrome))
+    scroll(body, "log_scroll", width, HistoryLayout.log_height(height, chart_height, 0))
   end
   local seconds = result.bucket_ticks / 60
   local period = Sampler.duration(seconds)
   local heading = body.timeline_heading
+  local events=state.axis=="events"
+  local left=width<650 and 115 or 156
+  local page,pages=Exchanges.page(result.exchanges,width-24-left,state.event_page)
+  state._event_pages=pages
+  if events then state.event_page=page end
+  heading.axis.switch_state=events and "right" or "left"
+  heading.previous_exchanges.visible,heading.next_exchanges.visible,heading.exchange_pages.visible=events,events,events
+  heading.previous_exchanges.enabled,heading.next_exchanges.enabled=page>1,page<pages
+  heading.exchange_pages.caption=Loc("shipment-page",page,pages)
   heading.units.caption = Loc("transfers-confirmed-pods-2", period)
+  heading.units.visible=not events
   heading.units.tooltip = note or Loc("transfers-select-a-time-bucket-to-filter-delivered")
   heading.counts.caption = Loc("transfers-loaded-unloaded", number(result.loaded.pods), number(result.unloaded.pods))
-  timeline(player, body.chart, result, width, chart_height)
+  timeline(player, body.chart, result, width, chart_height,state)
   render_log(body, result, state, width)
+  body.delivered.reset_bucket.tooltip=Loc(result.exchange and "transfer-exchange-clear" or "transfers-clear-selected-time-bucket")
 end
 
 local function reset_log(state)
-  state.bucket, state.page, state.expanded = nil, nil, nil
+  state.bucket, state.page, state.expanded,state.exchange = nil, nil, nil,nil
+end
+
+function UI.compact_viewport(parent,width,height)
+  local min_width,min_height=900,420
+  local pad_x,pad_y,rail=12,8,12
+  local w,h=width-2*pad_x,height-2*pad_y
+  if min_width>w or min_height>h then
+    -- Leave room for the native tab frame's bottom inset so the horizontal rail stays visible.
+    height=height-2*pad_y
+    h=height-2*pad_y
+  end
+  local horizontal=min_width>w or (min_height>h and min_width>w-rail)
+  local vertical=min_height>h or (horizontal and min_height>h-rail)
+  local viewport=parent.add{type="scroll-pane",name="viewport",style="naked_scroll_pane",direction="vertical",
+    horizontal_scroll_policy=horizontal and "auto" or "never",vertical_scroll_policy=vertical and "auto" or "never"}
+  viewport.style.width,viewport.style.height=width,height
+  viewport.style.left_padding,viewport.style.right_padding=pad_x,pad_x
+  viewport.style.top_padding,viewport.style.bottom_padding=pad_y,pad_y
+  w,h=math.max(min_width,w-(vertical and rail or 0)),math.max(min_height,h-(horizontal and rail or 0))
+  local body=viewport.add{type="flow",name="body",direction="vertical",tags={width=w,height=h}}
+  body.style.width,body.style.height=w,h
+  body.style.vertical_spacing=4
 end
 
 function UI.render(content, player, period, state, width, height)
@@ -755,6 +815,7 @@ function UI.render(content, player, period, state, width, height)
   if state.period ~= period then
     state.period = period
     reset_log(state)
+    state.event_page=nil
   end
   state.view = state.view or "flow"
   local panel = content.ssk_transfers
@@ -779,8 +840,8 @@ function UI.render(content, player, period, state, width, height)
   production.visible = result.platform ~= nil and state.view == "flow"
   production.state = state.show_all_production == true
   local body = (state.view == "history" and tabs.ssk_transfer_history or tabs.ssk_transfer_flow).content
-  heading.platform.caption = result.platform and result.platform.name or Loc("help-transfers")
-  heading.platform.tooltip = result.platform and result.platform.name or nil
+  heading.platform.caption = result.platform and platform_caption(result.platform) or Loc("help-transfers")
+  heading.platform.tooltip = result.platform and platform_caption(result.platform) or nil
   local icon = result.platform and result.platform.icon
   heading.icon.visible = icon ~= nil and helpers.is_valid_sprite_path(icon)
   if heading.icon.visible then heading.icon.sprite = icon end
@@ -800,6 +861,7 @@ function UI.render(content, player, period, state, width, height)
   local note = result.truncated and Loc("transfers-some-deliveries-are-outside-the-retained-history") or nil
   if state.view == "history" then
     state.bucket, state.page = result.bucket, result.page
+    state.exchange=result.exchange
     render_history(player, body, result, state, note)
   else
     render_flow(player, body, result, note)
@@ -825,6 +887,13 @@ function UI.on_checked(event, state)
   return true
 end
 
+function UI.on_switch(event,state)
+  local axis=Axis.selection(event.element)
+  if not (state and axis) then return false end
+  if state.axis~=axis then state.axis=axis;reset_log(state);state.event_page=nil end
+  return true
+end
+
 function UI.on_click(event, state, close_all)
   local el = event.element
   if not (state and el and el.valid) then return false end
@@ -840,6 +909,7 @@ function UI.on_click(event, state, close_all)
     if state.platform ~= tags.transfer_platform then
       state.platform = tags.transfer_platform
       reset_log(state)
+      state.event_page=nil
     end
   elseif tags.transfer_favourite then
     local id = tags.transfer_favourite
@@ -847,6 +917,11 @@ function UI.on_click(event, state, close_all)
     state.favourites[id] = not state.favourites[id] or nil
   elseif tags.transfer_reset_bucket then
     reset_log(state)
+  elseif tags.transfer_exchange_page then
+    state.event_page=math.max(1,math.min((state.event_page or state._event_pages or 1)+tags.transfer_exchange_page,state._event_pages or 1))
+  elseif tags.transfer_exchange then
+    local selected=state.exchange==tags.transfer_exchange;reset_log(state)
+    if not selected then state.exchange=tags.transfer_exchange end
   elseif tags.transfer_bucket ~= nil then
     local was_selected = state.bucket == tags.transfer_bucket
     reset_log(state)

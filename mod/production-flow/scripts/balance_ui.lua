@@ -12,13 +12,43 @@ local FILTER_NAMES = { Loc("balance-problems-only"), Loc("balance-everything"), 
 local SORT_NAMES = { Loc("balance-priority"), Loc("balance-item-groups"), Loc("balance-biggest-deficit"), Loc("balance-soonest-empty") }
 local SHORTAGE = { deficit = true, limited = true, starved = true }
 local LIMIT = 200
--- The item list pane is bal_width + 24 wide and always reserves its scrollbar,
--- with an 8 px inner gutter between the last column and the scrollbar.
--- Headers and rows share the same content width.
+-- The Balance column is one deep panel, bal_width + 24 wide, laid out like the
+-- chart panels: a toolbar strip across the top (12 px at the sides, 8 px above
+-- and below, a 40 px row), then the summary, then the column heading and rows
+-- in their own bordered box inset 12 px (bal_width wide), as in Transfers.
+-- A list that scrolls keeps a 12 px scrollbar lane with an 8 px gutter before
+-- it. A list that clearly fits gives both to the item column, so its rows meet
+-- the box's right edge as they meet its left one. Headers and rows share widths.
 local SCROLLBAR = 12
-local LIST_PADDING = 4
+local PAD_X, PAD_Y, ROW_H, GAP = 12, 8, 40, 8
 local LIST_GUTTER = 8
-local function list_width(width) return (width or 900) + 24 - SCROLLBAR - 2 * LIST_PADDING - LIST_GUTTER end
+local function list_width(width, lane)
+  lane = lane or SCROLLBAR
+  return (width or 900) - lane - (lane > 0 and LIST_GUTTER or 0)
+end
+-- Conservative heights at 100% scale: group headings and one-line rows.
+-- Two- and three-line rows (Details, narrow columns) use generous estimates.
+local SECTION_H, ROW_EST, NOTE_H = 36, 35, 28
+-- Everything above the rows: the tallest toolbar strip, summary, column header
+-- and the margins between them, plus the list box's 12 px bottom margin.
+local function list_space(height, details)
+  return (height or 600) - (2 * PAD_Y + ROW_H + GAP + 28) - (details and 52 or 32) - 100 - PAD_X
+end
+local function rows_height(display, nfav, empty, details, width, note)
+  local row_h = (width or 900) < 550 and 68 or ((details or (width or 900) < 680) and 52 or ROW_EST)
+  local h, last = 0, nil
+  for i, d in ipairs(display) do
+    if i == 1 or d.section ~= last then
+      if i > 1 then h = h + GAP end
+      if d.section ~= "all" or nfav > 0 or #empty > 0 then h = h + SECTION_H end
+      last = d.section
+    end
+    h = h + row_h
+  end
+  h = h + #empty * (GAP + SECTION_H + NOTE_H)
+  if note then h = h + GAP + NOTE_H end
+  return h
+end
 
 -- Favourites stay at the top of the list whatever the filters; saved per player.
 function BU.favourites(us)
@@ -119,7 +149,7 @@ local function values(r)
   }
 end
 
-local function columns(details, width)
+local function columns(details, width, lane)
   local out = {}
   width = width or 900
   local compact = { focus=52, status=146, prod=60, cons=60, net=62, stock=65, eta=66 }
@@ -148,7 +178,7 @@ local function columns(details, width)
   end
   for _,col in ipairs(out) do
     -- every cell adds 3 + 3 px padding; the item column takes the rest of the pane
-    if col.id=="item" then col.width=math.max(24,list_width(width)-total-#out*6) end
+    if col.id=="item" then col.width=math.max(24,list_width(width, lane)-total-#out*6) end
     col.narrow=width<680
     col.stock_in_item=width<550
     col.details=details
@@ -169,9 +199,11 @@ local function caption(v, col)
   return v[col.id]
 end
 
-local function grid(parent, name, cols)
-  local t = parent.add { type = "table", name = name, style="ssk_balance_grid",
-    column_count = #cols, draw_horizontal_lines=true, draw_vertical_lines=true }
+local function grid(parent, name, cols, style)
+  -- Factorio's horizontal grid lines can drift a pixel per row. Use row
+  -- backgrounds for the body so the shading follows the cell layout.
+  local t = parent.add { type = "table", name = name, style = style or "ssk_balance_grid",
+    column_count = #cols, draw_horizontal_lines = false, draw_vertical_lines = true }
   t.style.horizontal_spacing = 0
   t.style.left_cell_padding, t.style.right_cell_padding = 3, 3
   t.style.vertical_spacing = 0
@@ -182,7 +214,8 @@ end
 -- rows scroll. It uses the same widths as the row tables beneath it.
 local function make_header(parent, cols)
   local header = parent.add { type = "frame", name = "ssk_bal_header", style = "ssk_balance_header", direction = "vertical" }
-  header.style.width = cols.list_width
+  -- The strip spans the whole box; the columns keep the rows' widths.
+  header.style.width = cols.box_width
   -- Keep one heading row, with paired sublabels only when Details is enabled.
   header.style.height = cols[1].details and 52 or 32
   header.style.bottom_padding = 4
@@ -195,7 +228,7 @@ local function make_header(parent, cols)
     l.style.horizontal_align = col.numeric and "right" or "left"
   end
   local line = header.add { type = "line", direction = "horizontal" }
-  line.style.width = cols.list_width
+  line.style.width = cols.box_width
   return header
 end
 
@@ -244,12 +277,12 @@ local function section_header(section, width, caption, star)
   local header=section.add {type="frame",name="ssk_bal_group_header",
     style="repeated_subheader_frame",direction="horizontal"}
   header.style.width=width
-  header.style.left_padding,header.style.right_padding=6,8
+  header.style.left_padding,header.style.right_padding=8,8
   header.style.vertical_align="center"
   if star then star_button(header, star.set, star.tags, Loc("balance-this-group")) end
   local h=header.add{type="label",caption=caption,tooltip=caption,style="caption_label"}
-  if star then h.style.left_margin=6 end
-  h.style.width=width-14-(star and 30 or 0)
+  if star then h.style.left_margin=8 end
+  h.style.width=width-16-(star and 32 or 0)
   h.style.single_line=true
   return header
 end
@@ -391,12 +424,21 @@ function BU.fill(player, c, us, scope, only_auto)
   -- updates values without destroying the table, dropdowns or scroll position.
   local same = live_reuse or (c.ssk_bal_root and c.ssk_bal_root.tags.signature == signature)
   local root, summaries, summary_heads, cells, refresh
-  local cols = columns(us.bal_details, us.bal_width)
-  local list_w = list_width(us.bal_width)
+  -- Hide the scrollbar lane only with a full row to spare. The pane still scrolls
+  -- with the mouse wheel, so a low estimate can never clip a row. Live updates
+  -- reuse the built table, so they keep the lane it was built with.
+  local lane = SCROLLBAR
+  if same then lane = c.ssk_bal_root.tags.lane or SCROLLBAR
+  elseif limit >= #normal and rows_height(display, nfav, empty, us.bal_details, us.bal_width, #normal == 0) + ROW_EST
+    <= list_space(us.bal_height, us.bal_details) then lane = 0 end
+  local cols = columns(us.bal_details, us.bal_width, lane)
+  local list_w = list_width(us.bal_width, lane)
   cols.list_width = list_w
+  cols.box_width = us.bal_width or 900
+  local gutter = lane > 0 and LIST_GUTTER or 0
   if same then
     root = c.ssk_bal_root
-    refresh = root.ssk_bal_controls.ssk_bal_refresh
+    refresh = root.ssk_bal_strip.ssk_bal_controls.ssk_bal_refresh
     summaries, summary_heads, cells = {}, {}, {}
     for _, group in ipairs(SUMMARY_GROUPS) do
       local column = root.ssk_bal_summary[Loc.join("ssk_bal_", group.id)]
@@ -423,16 +465,24 @@ function BU.fill(player, c, us, scope, only_auto)
   else
     c.clear()
     local visible_keys={}; for i=1,shown do visible_keys[i]=list[i].key end
-    root = c.add { type = "flow", name = "ssk_bal_root", direction = "vertical", tags = { signature = signature, visible_keys=visible_keys } }
-    root.style.vertical_spacing = 8
-    local toolbar_width = (us.bal_width or 900) + 24
-    root.style.width = toolbar_width
+    root = c.add { type = "frame", name = "ssk_bal_root", style = "inside_deep_frame", direction = "vertical",
+      tags = { signature = signature, visible_keys=visible_keys, lane = lane } }
+    local panel_width = (us.bal_width or 900) + 24
+    root.style.width = panel_width
     root.style.height = us.bal_height or 600
-    local toolbar = root.add { type = "flow", name = "ssk_bal_controls", direction = "horizontal" }
-    local spacing = 4
+    root.style.padding = 0
+    local strip = root.add { type = "frame", name = "ssk_bal_strip", style = "subheader_frame", direction = "vertical" }
+    strip.style.horizontally_stretchable = true
+    strip.style.left_padding, strip.style.right_padding = PAD_X, PAD_X
+    strip.style.top_padding, strip.style.bottom_padding = PAD_Y, PAD_Y
+    local toolbar_width = panel_width - 2 * PAD_X
+    local toolbar = strip.add { type = "flow", name = "ssk_bal_controls", direction = "horizontal" }
+    -- The same 8 px gap between controls as the chart toolbars.
+    local spacing = 8
     toolbar.style.vertical_align = "center"
     toolbar.style.horizontal_spacing = spacing
     toolbar.style.width = toolbar_width
+    toolbar.style.height = ROW_H
     local show_label_width, group_label_width, order_label_width = 38, 44, 40
     local labels_width = show_label_width + group_label_width + order_label_width + 3 * spacing
     local details_width = 76
@@ -477,20 +527,28 @@ function BU.fill(player, c, us, scope, only_auto)
     spacer.style.horizontally_stretchable = true
     spacer.style.minimal_width = 8
     local details_row = toolbar
+    local strip_height = 2 * PAD_Y + ROW_H
     if not inline_details then
-      details_row = root.add { type = "flow", direction = "horizontal" }
+      -- A narrow column moves Details to a second 28 px toolbar row.
+      details_row = strip.add { type = "flow", direction = "horizontal" }
       details_row.style.width = toolbar_width
+      details_row.style.height = 28
+      details_row.style.top_margin = GAP
       details_row.style.vertical_align = "center"
       details_row.add { type = "empty-widget" }.style.horizontally_stretchable = true
+      strip_height = strip_height + GAP + 28
     end
+    strip.style.height = strip_height
     details_row.add { type = "checkbox", caption = Loc("balance-details"), state = us.bal_details == true, tags = { ssk_ui = "bal_details" },
       tooltip = Loc("balance-show-net-percentage-producer-consumer-utilisation-and") }
     refresh = toolbar.add { type = "sprite-button", name = "ssk_bal_refresh", style = "tool_button", sprite = "utility/refresh",
       tags = { ssk_ui = "bal_update" }, tooltip = Loc("balance-refresh-table") }
     local summary = root.add { type = "table", name = "ssk_bal_summary", column_count = 3 }
-    summary.style.horizontal_spacing = 8
+    summary.style.horizontal_spacing = GAP
+    summary.style.left_margin, summary.style.right_margin = PAD_X, PAD_X
+    summary.style.top_margin = PAD_Y
     summary.vertical_centering = false
-    local width = math.floor(((us.bal_width or 900) + 24 - 16) / 3)
+    local width = math.floor((panel_width - 2 * PAD_X - 2 * GAP) / 3)
     summaries, summary_heads = {}, {}
     for _, group in ipairs(SUMMARY_GROUPS) do
       local column = summary.add { type = "flow", name = Loc.join("ssk_bal_", group.id), direction = "vertical" }
@@ -512,14 +570,19 @@ function BU.fill(player, c, us, scope, only_auto)
     -- Only the item list scrolls; filters, summary, column header and pagination
     -- stay visible. A deep frame bounds the list and a raised header clearly
     -- separates fixed headings from the independently scrolling rows.
+    -- The heading row and rows share one bordered box inset 12 px, like the
+    -- Transfers Items and History entity lists. It stretches to the panel's foot.
     local list_flow = root.add { type = "frame", name = "ssk_bal_list", style = "inside_deep_frame", direction = "vertical" }
-    list_flow.style.width = (us.bal_width or 900) + 24
-    list_flow.style.padding = LIST_PADDING
+    list_flow.style.width = cols.box_width
+    list_flow.style.padding = 0
+    list_flow.style.left_margin, list_flow.style.top_margin = PAD_X, PAD_Y
+    list_flow.style.bottom_margin = limit < #normal and PAD_Y or PAD_X
     list_flow.style.vertically_stretchable = true
     if shown > 0 then make_header(list_flow, cols) end
     local items = list_flow.add { type = "scroll-pane", name = "ssk_bal_items", style = "naked_scroll_pane",
-      horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
-    items.style.width = (us.bal_width or 900) + 24 - 2 * LIST_PADDING
+      horizontal_scroll_policy = "never",
+      vertical_scroll_policy = lane > 0 and "auto-and-reserve-space" or "dont-show-but-allow-scrolling" }
+    items.style.width = cols.box_width
     items.style.vertically_stretchable = true
     items.style.minimal_height = 0
     cells = {}
@@ -530,7 +593,7 @@ function BU.fill(player, c, us, scope, only_auto)
         local g = empty[e].group
         local section = items.add { type = "flow", name = Loc.join("ssk_bal_empty_", e), direction = "vertical" }
         section.style.vertical_spacing = 0
-        section.style.right_padding = LIST_GUTTER
+        section.style.right_padding = gutter
         section.style.top_margin = #items.children > 1 and 8 or 0
         section_header(section, list_w, group_name(g), { set = true, tags = { ssk_ui = "bal_fav_group", gid = g.id } })
         local note = text(section, Loc("balance-no-items-in-this-group-right-now"))
@@ -546,7 +609,7 @@ function BU.fill(player, c, us, scope, only_auto)
       if not t or last ~= d.section then
         local section = items.add { type = "flow", name = Loc.join("ssk_bal_section_", i), direction = "vertical" }
         section.style.vertical_spacing = 0
-        section.style.right_padding = LIST_GUTTER
+        section.style.right_padding = gutter
         section.style.top_margin = #items.children > 1 and 8 or 0
         if d.section == "fav" then
           section_header(section, list_w, Loc("balance-favourites"))
@@ -557,7 +620,7 @@ function BU.fill(player, c, us, scope, only_auto)
         elseif nfav > 0 or #empty > 0 then
           section_header(section, list_w, Loc("balance-all-other-items"))
         end
-        t = grid(section, "ssk_bal_table", cols)
+        t = grid(section, "ssk_bal_table", cols, "ssk_striped_rows")
       end
       cells[i] = add_row(t, r, g, cols, favs.items[r.key] == true)
       last = d.section
@@ -573,6 +636,7 @@ function BU.fill(player, c, us, scope, only_auto)
       local more = root.add { type = "flow", direction = "horizontal" }
       more.style.horizontal_align = "center"
       more.style.horizontally_stretchable = true
+      more.style.bottom_margin = PAD_X
       more.add { type = "button", caption = Loc("balance-show-200-more"), tags = { ssk_ui = "bal_more" },
         tooltip = Loc("balance-add-the-next-200-matching-rows-to") }
     end

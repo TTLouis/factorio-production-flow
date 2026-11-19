@@ -46,12 +46,17 @@ script.on_event(defines.events.on_force_created, function(e) Canvas.on_force_cre
 script.on_event(defines.events.on_runtime_mod_setting_changed, function(e)
   if e.setting == "ssk-window-seconds" then Sampler.init() end
   if e.setting == "ssk-stock-scan-minutes" then Sampler.on_stock_interval_changed() end
+  if e.setting == "ssk-allow-small-window" then
+    local player = e.player_index and game.get_player(e.player_index)
+    if player then UI.on_display_changed(player) end
+  end
 end)
 
 ---------------------------------------------------------------------------
 -- entity registry
 ---------------------------------------------------------------------------
-local build_filter = { {filter="type",type="container"}, {filter="type",type="logistic-container"} }
+local build_filter = { {filter="type",type="container"}, {filter="type",type="logistic-container"},
+  {filter="type",type="temporary-container"}, {filter="type",type="cargo-landing-pad"}, {filter="type",type="space-platform-hub"} }
 for _, t in ipairs(Sampler.TYPES) do build_filter[#build_filter + 1] = { filter = "type", type = t } end
 
 for _, name in ipairs({ "on_built_entity", "on_robot_built_entity", "script_raised_built",
@@ -66,6 +71,16 @@ script.on_event(defines.events.on_entity_cloned, function(e) Sampler.add(e.desti
 
 local track_cargo = Transfers.available()
 if track_cargo then
+  local platform_changed = defines.events.on_space_platform_changed_state
+  if platform_changed then script.on_event(platform_changed, Transfers.on_platform_changed_state) end
+  -- Platform cargo leaves the hub when ascent starts. Capture that manifest
+  -- before a storage scan can establish a newer, already-unloaded baseline.
+  if defines.events.on_cargo_pod_started_ascending then
+    script.on_event(defines.events.on_cargo_pod_started_ascending, Transfers.on_departed)
+  end
+  if defines.events.on_rocket_launch_ordered then
+    script.on_event(defines.events.on_rocket_launch_ordered, Transfers.on_rocket_launch_ordered)
+  end
   script.on_event(defines.events.on_cargo_pod_finished_ascending, Transfers.on_departed)
   script.on_event(defines.events.on_cargo_pod_finished_descending, Transfers.on_landed)
   script.on_event(defines.events.on_cargo_pod_delivered_cargo, function(e)
@@ -103,6 +118,7 @@ script.on_event(defines.events.on_gui_click, function(e)
 end)
 
 script.on_event(defines.events.on_gui_checked_state_changed, function(e) UI.on_checked(e) end)
+script.on_event(defines.events.on_gui_switch_state_changed, function(e) UI.on_switch(e) end)
 script.on_event(defines.events.on_gui_elem_changed, function(e) UI.on_elem_changed(e) end)
 script.on_event(defines.events.on_gui_text_changed, function(e) UI.on_text_changed(e) end)
 script.on_event(defines.events.on_string_translated, function(e) UI.on_string_translated(e) end)

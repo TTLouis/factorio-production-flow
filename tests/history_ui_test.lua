@@ -28,7 +28,7 @@ us.bal_history_from_zero = nil
 local fx = SK.balance_state(us)
 local saved_focus = fx.focus
 fx.focus = "item/iron-plate"
-local request, data_state
+local request, data_state, stock_transport_incomplete, receipt_fixture
 History.build = function(surface, period, key)
   request = { surface, period, key }
   local fluid = key:sub(1, 6) == "fluid/"
@@ -50,7 +50,8 @@ History.build = function(surface, period, key)
   end
   if data_state then
     return { start_tick = 0, end_tick = 6000, seconds = data_state == "idle" and 100 or 0,
-      bucket_seconds = 15, points = {}, usage_keys = {}, stock = {}, stock_supported = not fluid }
+      bucket_seconds = 15, points = {}, usage_keys = {}, stock = {}, stock_supported = not fluid,
+      import_receipts = not fluid and receipt_fixture or nil }
   end
   return {
     start_tick = 0, end_tick = 6000, seconds = 50, bucket_seconds = 15,
@@ -67,6 +68,8 @@ History.build = function(surface, period, key)
     usage_keys = { "item/steel-plate", History.OTHER },
     usage_totals = { ["item/steel-plate"] = 255, ["item/iron-gear-wheel"] = 42.5, other = 42.5 },
     stock_supported = not fluid,
+    stock_transport_incomplete = stock_transport_incomplete,
+    import_receipts = not fluid and receipt_fixture or nil,
     stock = not fluid and {
       { tick = 3000, count = 30, measured = true },
       { tick = 3900, count = 20, measured = false, joined = true },
@@ -99,6 +102,10 @@ assert(history_slot.type == flow_slot.type and history_slot.sprite == flow_slot.
   and history_slot.style.width == flow_slot.style.width and history_slot.style.height == flow_slot.style.height,
   "Flow and History must use the same material heading")
 assert(not find(controls, function(e) return e.type == "radiobutton" end), "all three charts are always shown")
+local saved_renderer=us.renderer
+assert(named(root,"ssk_history_gui_plot"),"Ordinary History must render in the GUI")
+us.renderer="poly"
+UI.refresh(player,true)
 local camera, stock_camera = named(root, "ssk_history_camera"), named(root, "ssk_history_stock_camera")
 local net_camera = named(root, "ssk_history_net_camera")
 local history_panel = inspector_tabs.ssk_history_panel
@@ -140,6 +147,19 @@ assert(other_tooltip:find("iron-gear-wheel", 1, true) and other_tooltip:find("0.
   and not other_tooltip:find("steel-plate", 1, true), "Other must list hidden product uses and rates")
 assert(LOC(stock_targets[1].tooltip) == "50s ago\nMeasured stock  30 items"
   and LOC(stock_targets[2].tooltip) == "35s ago\nEstimated stock  20 items")
+stock_transport_incomplete = true
+UI.refresh(player, true)
+stock_targets = stock_camera.parent.ssk_history_tooltips.children
+assert(LOC(stock_targets[1].tooltip) == "50s ago\nMeasured stock  30 items")
+assert(LOC(stock_targets[2].tooltip):find("items\n\nObserved quantities only; coverage is incomplete", 1, true)
+  and LOC(named(root, "ssk_history_stock_note").tooltip):find("coverage is incomplete", 1, true)
+  and LOC(named(root, "ssk_history_stock_legend").tooltip):find("coverage is incomplete", 1, true),
+  "Incomplete transport accounting must be disclosed on estimates and their legend/note")
+stock_transport_incomplete = nil
+UI.refresh(player, true)
+stock_targets = stock_camera.parent.ssk_history_tooltips.children
+assert(not LOC(named(root, "ssk_history_stock_note").tooltip):find("coverage is incomplete", 1, true),
+  "Complete stock history retained an old incomplete-accounting warning")
 local function hover_bands()
   local bands = {}
   for _, object in ipairs(objects()) do
@@ -178,6 +198,9 @@ assert(positive > 0 and negative > 0, "Net must show green surplus and red defic
 assert(#stock == 4 and stock[1].right_bottom[1] == stock[2].left_top[1]
   and stock[2].right_bottom[1] == stock[3].left_top[1]
   and stock[3].right_bottom[1] < stock[4].left_top[1], "stock bars share edges only where a rate estimate is available")
+for _,bar in ipairs(stock) do if bar.color[1]==181/255 then
+  assert(math.abs((bar.right_bottom[1]-bar.left_top[1])*32-6)<1e-6,"Joined measurements must keep the same six-pixel width as isolated scans")
+end end
 assert(LOC(named(root, "ssk_history_use_1").rate.caption) == "5.1/s" and LOC(named(root, "ssk_history_use_2").rate.caption) == "1.7/s")
 local old = objects()
 UI.refresh(player, true)
@@ -192,6 +215,37 @@ assert(LOC(stock_targets[1].tooltip):find("99 items", 1, true) and LOC(stock_tar
   and not stock_targets[3].visible, "overlapping stock markers must show the newest measurement on their shared pixels")
 period_picker.selected_index = 2
 assert(UI.on_selection(event(period_picker)))
+
+-- The ordinary Balance History path (without Items options) shows observed
+-- imports on stock, including before a stock scan, and reuses aligned hover.
+receipt_fixture={{tick=4200,count=37}}
+UI.refresh(player,true)
+local receipt_target
+for _,t in ipairs(stock_camera.parent.ssk_history_tooltips.children) do
+  if t.visible and t.tags.import_receipt then assert(not receipt_target);receipt_target=t end
+end
+assert(receipt_target and receipt_target.tags.count==37 and receipt_target.tags.tick==4200)
+assert(LOC(receipt_target.tooltip):find("37",1,true) and LOC(receipt_target.tooltip):find("00:01:10",1,true))
+assert(named(root,"ssk_history_import_legend").visible and UI.on_hover(event(receipt_target),true))
+assert(#hover_bands()==3,"import hover must align all three Balance plots")
+UI.on_hover(event(receipt_target),false)
+receipt_fixture={{tick=6000,count=19}}
+UI.refresh(player,true)
+local at_right
+for _,t in ipairs(stock_camera.parent.ssk_history_tooltips.children) do
+  if t.visible and t.tags.import_receipt then at_right=t end
+end
+assert(at_right and at_right.tags.count==19,"a receipt at Now lost its right-edge tooltip")
+data_state="receipt-only"
+UI.refresh(player,true)
+assert(stock_camera.parent.visible and not camera.parent.visible and named(root,"ssk_history_stock_state").visible,
+  "a receipt needs a marker even when no stock scan or rate history exists")
+receipt_fixture=nil;data_state=nil
+UI.refresh(player,true)
+assert(not named(root,"ssk_history_import_legend").visible)
+for _,t in ipairs(stock_camera.parent.ssk_history_tooltips.children) do
+  assert(not t.visible or not t.tags.import_receipt,"refresh retained an old import marker")
+end
 
 local all_height = camera.style.height
 local checkbox = named(root, "ssk_history_usage")
@@ -260,6 +314,26 @@ tabs.selected_tab_index = 1
 assert(UI.on_tab_changed(event(tabs)))
 assert(us.tab_id == "balance" and root.ssk_window_bar.ssk_surface_picker.visible)
 assert(named(root, "ssk_bal_items") == items and named(root, "ssk_history_controls") == controls)
+assert(UI.on_click(event({ tags = { ssk_ui = "focus_item", key = "item/iron-plate" } })))
+local get_inventory = player.get_inventory
+player.get_inventory = function()
+  return {valid=true, [1]={valid_for_read=true, grid={equipment={{type="night-vision-equipment"}}}}}
+end
+UI.refresh(player, true)
+local gui_plot = assert(named(root, "ssk_history_gui_plot"))
+local target = gui_plot.parent.ssk_history_tooltips.children[1]
+local hover = storage.history_hover[player.index]
+assert(not gui_plot.parent.ssk_history_camera and #objects() == 0)
+assert(UI.on_hover(event(target), true) and hover.bands[1].sprite.visible)
+UI.refresh(player, true)
+assert(not gui_plot.valid and target.valid and storage.history_hover[player.index].bands[1].sprite.visible,
+  "A GUI plot refresh must preserve the active tooltip target and redraw its highlight")
+player.get_inventory = get_inventory
+UI.refresh(player, true)
+camera = assert(named(root, "ssk_history_camera"))
+assert(camera.parent.children[1] == camera and target.valid,
+  "Removing night vision must restore the camera underneath the retained tooltip targets")
+assert(UI.on_hover(event(target), false) and not storage.history_hover[player.index].bands[1].rect.visible)
 old = objects()
 UI.close(player)
 assert(not old[1].valid and #objects() == 0, "closing History clears its render objects")
@@ -267,5 +341,6 @@ History.build = previous_build
 us.bal_mode, us.bal_usage_breakdown, us.period, us.bal_filter, fx.focus =
   saved_mode, saved_breakdown, saved_period, saved_filter, saved_focus
 us.bal_history_from_zero = saved_zero
+us.renderer=saved_renderer
 UI.open(player)
 print("BALANCE HISTORY UI OK: retained list, controls, aligned axes, measured and estimated rendering, and cleanup")

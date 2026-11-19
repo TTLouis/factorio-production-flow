@@ -2,6 +2,7 @@ local Loc = require("scripts.locale")
 -- Balance's single-material time series. The cameras share one plot width and
 -- clock; the surrounding controls and legends remain ordinary Factorio GUI.
 local Canvas = require("scripts.canvas")
+local GuiPlot = require("scripts.gui_plot")
 local Graph = require("scripts.graph")
 local History = require("scripts.history")
 local Geometry = require("scripts.ribbon_geometry")
@@ -176,6 +177,7 @@ local function build(panel, width, chart_width, toolbar_height, scroll_height)
   label(stock, nil, Loc("help-chest-stock"), "caption_label")
   spacer(stock)
   small(stock, "ssk_history_stock_legend", Loc("history-measured-estimated", swatch(MEASURED), swatch(ESTIMATED)))
+  small(stock,"ssk_history_import_legend",Loc("transfer-import-marker","[color=#8bd49c]■[/color]")).visible=false
   body.add { type = "flow", name = "ssk_history_stock_plot", direction = "vertical" }
   local stock_state = small(body, "ssk_history_stock_state", "", chart_width)
   stock_state.style.single_line = false
@@ -416,16 +418,21 @@ local function draw_rates(painter, h, width, height, mode, top, paths, from_zero
   return paths
 end
 
-local function draw_stock(painter, h, width, height, top)
+local function draw_stock(painter, h, width, height, top, receipts)
   local highest = 0
   local hover_by_x = {}
+  local sample_by_x,receipt_by_x={},{}
   for _, sample in ipairs(h.stock) do highest = math.max(highest, sample.count) end
   local step = nice_step(highest, height < 100 and 2 or height < 140 and 3 or 4)
   local max_value = math.max(step, math.ceil(highest / step) * step)
   local x, y, left, right, plot_top = axes(painter, h, width, height, top, 0, max_value, step)
   local bottom, last_label = y(0), left - 56
   local function edge(a, b)
-    return Geometry.round(x((a.tick + b.tick) / 2))
+    return Geometry.round(x(b.boundary and b.tick or (a.tick + b.tick) / 2))
+  end
+  local function marker(tick)
+    local center=Geometry.round(x(tick))
+    return math.max(left,center-STOCK_MARKER_HALF),math.min(right,center+STOCK_MARKER_HALF)
   end
   for i, sample in ipairs(h.stock) do
     local center = x(sample.tick)
@@ -434,6 +441,13 @@ local function draw_stock(painter, h, width, height, top)
       or math.max(left, Geometry.round(center - STOCK_MARKER_HALF))
     local x2 = following and following.joined and edge(sample, following)
       or math.min(right, Geometry.round(center + STOCK_MARKER_HALF))
+    if sample.measured then
+      x1,x2=marker(sample.tick)
+    else
+      if sample.joined and previous and previous.measured then local _,finish=marker(previous.tick);x1=finish end
+      if following and following.joined and following.measured then x2=marker(following.tick) end
+    end
+    x2=math.max(x1,x2)
     -- Very close scans can share a pixel on long windows. Keep measurements
     -- visible and use the same rounded edge for both bars in a joined pair.
     if x1 == x2 and sample.measured then
@@ -445,9 +459,12 @@ local function draw_stock(painter, h, width, height, top)
     if x2 > x1 then
       local source = sample.measured and Loc("history-measured-stock") or sample.live and Loc("history-estimated-stock-since-last-scan") or Loc("history-estimated-stock")
       local tooltip = Loc("history-items", elapsed(h, sample.tick), source, string.format("%.0f", sample.count))
+      if h.stock_transport_incomplete and not sample.measured then
+        tooltip = Tooltip.lines({tooltip, "\n\n", Loc("transport-flow-partial")})
+      end
       -- Stock markers can overlap after rounding. Match the painting order so
       -- a newer bar owns the pixels it covers in the time-only hover row.
-      for pixel = x1, x2 - 1 do hover_by_x[pixel] = tooltip end
+      for pixel = x1, x2 - 1 do hover_by_x[pixel] = tooltip;sample_by_x[pixel]=sample end
     end
     if sample.measured and center - last_label >= 56 then
       local label_x = math.min(right - 12, math.max(left + 12, center))
@@ -455,14 +472,26 @@ local function draw_stock(painter, h, width, height, top)
       last_label = center
     end
   end
+  for _,receipt in ipairs(receipts or {}) do
+    if receipt.count>0 and receipt.tick>=h.start_tick and receipt.tick<=h.end_tick then
+      local px=math.max(left+1,math.min(right-1,Geometry.round(x(receipt.tick))))
+      painter.line(px,plot_top,px,bottom,{139/255,212/255,156/255,1},2)
+      painter.rect(px-3,plot_top-3,6,4,{139/255,212/255,156/255,1})
+      local seconds=math.floor(receipt.tick/60)
+      local clock=string.format("%02d:%02d:%02d",math.floor(seconds/3600),math.floor(seconds/60)%60,seconds%60)
+      local tip=Loc("transfer-import-receipt",clock,string.format("%.0f",receipt.count))
+      for pixel=math.max(left,px-4),math.min(right,px+3) do hover_by_x[pixel]=tip;receipt_by_x[pixel]=receipt;sample_by_x[pixel]=nil end
+    end
+  end
   local regions, tooltip, start = {}, nil, left
   for pixel = left, right do
     local next_tooltip = hover_by_x[pixel]
     if next_tooltip ~= tooltip then
-      if tooltip then regions[#regions + 1] = { left = start, right = pixel, tooltip = tooltip } end
+      if tooltip then regions[#regions + 1] = { left = start, right = pixel, tooltip = tooltip,sample=sample_by_x[start],receipt=receipt_by_x[start] } end
       tooltip, start = next_tooltip, pixel
     end
   end
+  if tooltip then regions[#regions+1]={left=start,right=right+1,tooltip=tooltip,sample=sample_by_x[start],receipt=receipt_by_x[start]} end
   return regions
 end
 
@@ -488,6 +517,11 @@ local function plot_tooltips(parent, height, regions)
       target.style.width, target.style.height = region.right - left, hover_height
       target.style.left_margin = left - last
       target.tags = { ssk_history_bucket = true, left = left, right = region.right }
+      if region.sample then
+        target.tags={ssk_history_bucket=true,left=left,right=region.right,stock_sample=true,measured=region.sample.measured==true,live=region.sample.live==true}
+      elseif region.receipt then
+        target.tags={ssk_history_bucket=true,left=left,right=region.right,import_receipt=true,tick=region.receipt.tick,count=region.receipt.count}
+      end
       target.raise_hover_events = true
       target.tooltip, target.visible = region.tooltip, true
       last = region.right
@@ -502,7 +536,7 @@ local function camera(player, parent, name, painter, width, height, top, regions
   if not painter then return end
   local spec = Canvas.camera_spec(player, painter, top, height)
   if not view then
-    spec.name, spec.ignored_by_interaction = name, true
+    spec.name, spec.ignored_by_interaction, spec.index = name, true, 1
     view = parent.add(spec)
     view.style.width = width
   else
@@ -516,12 +550,37 @@ local function camera(player, parent, name, painter, width, height, top, regions
   bands[#bands + 1] = { rect = band, top = y, height = h }
 end
 
+local GUI_PLOT = "ssk_history_gui_plot"
+
+local function gui_plot(parent, camera_name, width, height, visible)
+  if parent[GUI_PLOT] then parent[GUI_PLOT].destroy() end
+  if parent[camera_name] then parent[camera_name].destroy() end
+  parent.visible = not not visible
+  if visible then return GuiPlot.begin(parent, width, height, GUI_PLOT) end
+end
+
+local function gui_targets(parent, painter, height, regions, bands)
+  if not painter then return end
+  plot_tooltips(parent, height, regions)
+  local band = painter.rect(PLOT_LEFT, PLOT_TOP, 1, height - PLOT_TOP - PLOT_BOTTOM, HOVER_BAND)
+  band.visible = false
+  bands[#bands + 1] = { sprite = band }
+end
+
 local function highlight(view, target)
   view.target = target
   local region = target and target.tags
   for _, band in ipairs(view.bands) do
     local rect = band.rect
-    if rect.valid then
+    local sprite = band.sprite
+    if sprite and sprite.valid then
+      if region then
+        local width = region.right - region.left
+        sprite.parent.style.left_margin, sprite.parent.style.width = region.left, width
+        sprite.style.width = width
+      end
+      sprite.visible = region ~= nil
+    elseif rect and rect.valid then
       if region then
         local x,y,w,h=Geometry.box(region.left,band.top,region.right-region.left,band.height)
         rect.left_top={view.ox+x/32,view.oy+y/32}
@@ -548,7 +607,7 @@ function H.clear_hover(index)
   if view then highlight(view); storage.history_hover[index] = nil end
 end
 
-function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
+function H.fill(player, panel, us, key, width, panel_height, toolbar_height, options)
   local chart_width = width - 2 * (SCROLL_INSET + SCROLLBAR_WIDTH)
   local scroll_height = math.max(1, panel_height - toolbar_height - 2 * SCROLL_INSET)
   local scroll = panel.ssk_history_scroll
@@ -567,12 +626,14 @@ function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
   MaterialPicker.update_heading(header.ssk_material_heading, key)
   local readout = body.ssk_history_readout
   local summary = readout.ssk_history_summary
-  local h = key and History.build(us.sidx, us.period, key)
+  local h = options and options.history or key and History.build(us.sidx, us.period, key)
+  local receipts=options and options.receipts or h and h.import_receipts
   local rates = h and h.seconds > 0
   local made, used, uses, partial
   if rates then made, used, uses, partial = averages(h) end
   local active = rates and (made > 0 or used > 0)
-  local stock = h and #h.stock > 0
+  local measured_stock = h and #h.stock > 0
+  local stock = measured_stock or receipts and #receipts>0
   summary.caption = rates and Loc("history-made-s-used-s-net-s", number(made), number(used), made > used and "+" or "", number(made - used)) or ""
   summary.visible = rates == true
   local legend = body.ssk_history_rate_title.ssk_history_rate_legend
@@ -627,14 +688,20 @@ function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
   end
 
   local stock_state = body.ssk_history_stock_state
-  stock_state.visible = not stock
+  stock_state.visible = not measured_stock
   stock_state.caption = not key and Loc("history-select-an-item-to-view-chest-stock")
     or h and not h.stock_supported and Loc("history-chest-stock-history-is-available-for-items")
     or Loc("history-no-completed-chest-stock-scan-in-the")
   body.ssk_history_stock_title.ssk_history_stock_legend.visible = stock == true
+  body.ssk_history_stock_title.ssk_history_import_legend.visible=receipts~=nil
+  body.ssk_history_stock_title.ssk_history_import_legend.tooltip=Loc("transfer-import-marker-help")
   local stock_note = body.ssk_history_stock_note
-  stock_note.visible = stock == true
-  if stock then
+  stock_note.visible = measured_stock == true
+  stock_note.tooltip = h and h.stock_transport_incomplete
+    and Tooltip.lines({Loc("history-estimates-use-the-recorded-made-minus-used"), "\n\n", Loc("transport-flow-partial")})
+    or Loc("history-estimates-use-the-recorded-made-minus-used")
+  body.ssk_history_stock_title.ssk_history_stock_legend.tooltip = stock_note.tooltip
+  if measured_stock then
     local last = h.stock[#h.stock]
     if last.live then
       stock_note.caption = Loc("history-latest-estimate-items-updated-from-recorded-rates", number(last.count), elapsed(h, last.tick))
@@ -673,29 +740,47 @@ function H.fill(player, panel, us, key, width, panel_height, toolbar_height)
   end
   local net_top = rate_height + PLOT_GAP
   local stock_top = net_top + net_height + PLOT_GAP
-  local painter, stock_regions
-  if rates or stock then
-    painter = Canvas.begin(player, chart_width, stock and stock_top + stock_height or net_top + net_height)
-    local paths
-    if active then
-      paths = draw_rates(painter, h, chart_width, rate_height, breakdown and "breakdown" or "total", 0, nil, from_zero)
-    end
-    if rates then draw_rates(painter, h, chart_width, net_height, "net", net_top, paths) end
-    if stock then stock_regions = draw_stock(painter, h, chart_width, stock_height, stock_top) end
-  else
-    Canvas.clear(player.index)
-  end
+  local rate_plot, net_plot, stock_plot = body.ssk_history_rate_plot, net.ssk_history_net_plot, body.ssk_history_stock_plot
   local buckets = rates and rate_regions(h, chart_width, units)
   local bands = {}
-  camera(player, body.ssk_history_rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0, buckets, bands)
-  camera(player, net.ssk_history_net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top, buckets, bands)
-  camera(player, body.ssk_history_stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top, stock_regions, bands)
+  local painter, stock_regions
+  -- Keep ordinary History plots outside the world-camera colour lookup.
+  if us.renderer~="poly" or GuiPlot.needed(player) then
+    Canvas.clear(player.index)
+    local rate_gui = gui_plot(rate_plot, "ssk_history_camera", chart_width, rate_height, active)
+    local net_gui = gui_plot(net_plot, "ssk_history_net_camera", chart_width, net_height, rates)
+    local stock_gui = gui_plot(stock_plot, "ssk_history_stock_camera", chart_width, stock_height, stock)
+    local paths = rate_gui and draw_rates(rate_gui, h, chart_width, rate_height, breakdown and "breakdown" or "total", 0, nil, from_zero)
+    if net_gui then draw_rates(net_gui, h, chart_width, net_height, "net", 0, paths) end
+    if stock_gui then stock_regions = draw_stock(stock_gui, h, chart_width, stock_height, 0, receipts) end
+    gui_targets(rate_plot, rate_gui, rate_height, buckets, bands)
+    gui_targets(net_plot, net_gui, net_height, buckets, bands)
+    gui_targets(stock_plot, stock_gui, stock_height, stock_regions, bands)
+  else
+    for _, plot in ipairs({rate_plot, net_plot, stock_plot}) do
+      if plot[GUI_PLOT] then plot[GUI_PLOT].destroy() end
+    end
+    if rates or stock then
+      painter = Canvas.begin(player, chart_width, stock and stock_top + stock_height or net_top + net_height)
+      local paths
+      if active then
+        paths = draw_rates(painter, h, chart_width, rate_height, breakdown and "breakdown" or "total", 0, nil, from_zero)
+      end
+      if rates then draw_rates(painter, h, chart_width, net_height, "net", net_top, paths) end
+      if stock then stock_regions = draw_stock(painter, h, chart_width, stock_height, stock_top, receipts) end
+    else
+      Canvas.clear(player.index)
+    end
+    camera(player, rate_plot, "ssk_history_camera", active and painter, chart_width, rate_height, 0, buckets, bands)
+    camera(player, net_plot, "ssk_history_net_camera", rates and painter, chart_width, net_height, net_top, buckets, bands)
+    camera(player, stock_plot, "ssk_history_stock_camera", stock and painter, chart_width, stock_height, stock_top, stock_regions, bands)
+  end
   storage.history_hover=storage.history_hover or {}
   local previous = storage.history_hover[player.index]
   local target = previous and previous.target
   -- Save only serializable coordinates and LuaObject references, never painter
   -- closures. A joining/reloading peer can apply the same hover event immediately.
-  local view = painter and { ox=painter.ox,oy=painter.oy,bands=bands,key=key,period=us.period,surface=us.sidx }
+  local view = #bands > 0 and { ox=painter and painter.ox,oy=painter and painter.oy,bands=bands,key=key,period=us.period,surface=us.sidx }
   storage.history_hover[player.index] = view
   if view and target and target.valid and target.visible and target.parent.parent.visible
     and previous.key == key and previous.period == us.period and previous.surface == us.sidx then

@@ -73,5 +73,54 @@ settings.global["ssk-stock-scan-minutes"].value=15
 Sm.on_stock_interval_changed()
 assert(storage.chest_stock.next_tick==finished+54000,"increasing the interval postpones the next scan")
 settings.global["ssk-stock-scan-minutes"].value=saved_interval
+-- Changing the scope invalidates chest-only baselines. Cargo inventories use
+-- their dedicated inventory IDs, never the unrelated rocket recipe/result slots.
+storage={stock_basis="physical-chests-v1",stock={{tick=0,s={[1]={["item/iron-plate"]=999}}}}}
+C.init();assert(storage.stock_basis=="physical-storage-v2" and #storage.stock==0)
+local ids=defines.inventory
+local old_pad,old_hub,old_silo=ids.cargo_landing_pad_main,ids.hub_main,ids.rocket_silo_attached_cargo_unit
+ids.cargo_landing_pad_main,ids.hub_main,ids.rocket_silo_attached_cargo_unit=101,102,103
+for i,kind in ipairs({"cargo-landing-pad","space-platform-hub","rocket-silo"}) do
+  local entity={valid=true,type=kind,unit_number=900+i,surface={index=1},force=game.forces.player}
+  entity.get_inventory=function(id)
+    assert(id==100+i,"Wrong cargo stock inventory")
+    return {valid=true,get_contents=function() return {{name="iron-plate",count=i*10}} end}
+  end
+  C.add(entity);C.add(entity)
+end
+C.tick(1)
+assert(storage.stock[1].s[1]["item/iron-plate"]==60 and C.status().tracked==3,
+  "Cargo pads, hubs and loaded rocket cargo must join physical stock exactly once")
+local surface=game.surfaces[1]
+local find_entities=surface.find_entities_filtered
+local old_cargo=ids.cargo_unit;ids.cargo_unit=104
+local pods={}
+for i,entry in ipairs({{"awaiting_launch","space-platform-hub"},{"ascending","space-platform-hub"},
+  {"awaiting_launch","rocket-silo"},{"descending","space-platform-hub"}}) do
+  local pod={valid=true,type="cargo-pod",unit_number=950+i,surface=surface,force=game.forces.player,
+    cargo_pod_state=entry[1],cargo_pod_origin={valid=true,type=entry[2]}}
+  pod.get_inventory=function(id)
+    assert(i==1 and id==104,"Only waiting platform cargo belongs to stored stock; attached rocket cargo is already counted")
+    return {valid=true,get_contents=function() return {{name="iron-plate",count=100}} end}
+  end
+  pods[#pods+1]=pod
+end
+surface.find_entities_filtered=function(filter)
+  if filter.type=="cargo-pod" then return pods end
+  return find_entities(filter)
+end
+storage.chest_stock.next_tick=0;C.tick(2)
+assert(storage.stock[2].s[1]["item/iron-plate"]==160,
+  "Cargo waiting at a platform hatch must survive a scan between hub loading and dispatch")
+pods[1].cargo_pod_state="ascending"
+storage.chest_stock.next_tick=0;C.tick(3)
+assert(storage.stock[3].s[1]["item/iron-plate"]==60,
+  "A dispatched pod leaves stored stock exactly once at ascent start")
+chest(999,"temporary-container",1,{{name="iron-plate",count=7}})
+storage.chest_stock.next_tick=0;C.tick(4)
+assert(storage.stock[4].s[1]["item/iron-plate"]==67,
+  "Landed cargo's temporary container remains physical stock after receipt")
+surface.find_entities_filtered=find_entities;ids.cargo_unit=old_cargo
+ids.cargo_landing_pad_main,ids.hub_main,ids.rocket_silo_attached_cargo_unit=old_pad,old_hub,old_silo
 storage,game.tick=saved_storage,saved_tick
 print("CHEST STOCK OK: budget, atomic scans, registry changes, qualities, forces, surfaces, trends, stored-only, resume and runtime intervals")
