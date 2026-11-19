@@ -89,7 +89,7 @@ Cannons.on_effect{effect_id=Cannons.EFFECT_ID,tick=game.tick,surface_index=origi
 us.tab_id="transfers";us.surface=nil;us.period=600;us.se_logistics={view="flow"}
 UI.open(player)
 local window=player.gui.screen.ssk_main
-assert(LOC(window.ssk_inner.ssk_tabs.children[7].caption)=="Transfers","SE main tab must remain Transfers")
+assert(LOC(window.ssk_inner.ssk_tabs.children[9].caption)=="Transfers","SE main tab must remain Transfers")
 assert(window.ssk_window_bar.ssk_surface_picker.visible,"SE Transfers lost global surface scope")
 assert(panel().se_tabs and panel().se_tabs.se_flow and panel().se_tabs.se_items and panel().se_tabs.se_history)
 assert(panel().se_tabs.se_flow.viewport.body.se_graph,"Flow is missing the standalone diagram")

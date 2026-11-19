@@ -347,6 +347,8 @@ local function craft_productivity(e, name, force_recipe, recipe)
   return math.min(bonus, recipe and recipe.max_productivity or bonus)
 end
 
+Sm.craft_productivity = craft_productivity
+
 local function player_machine(e)
   return e and e.valid and game.forces and game.forces.player and e.force==game.forces.player
 end

@@ -8,6 +8,7 @@ local Canvas = require("scripts.canvas")
 local Transfers = require("scripts.transfers")
 local SERockets = require("scripts.se_rockets")
 local SECannons = require("scripts.se_cannons")
+local Cells = require("scripts.cells")
 
 local STATS_EVERY = 60
 local UI_REFRESH_EVERY = 300
@@ -47,6 +48,7 @@ end)
 
 script.on_event(defines.events.on_player_removed, function(e)
   UI.on_player_removed(e.player_index)
+  Cells.on_player_removed(e.player_index)
 end)
 
 script.on_event(defines.events.on_player_created, function(e)
@@ -110,6 +112,7 @@ end
 
 script.on_event(defines.events.on_pre_surface_deleted, function(e)
   Sampler.on_surface_deleted(e.surface_index)
+  Cells.on_surface_deleted(e.surface_index)
   if track_cargo then Transfers.on_surface_deleted(e) end
 end)
 
@@ -148,7 +151,7 @@ script.on_event(defines.events.on_gui_checked_state_changed, function(e) UI.on_c
 script.on_event(defines.events.on_gui_switch_state_changed, function(e) UI.on_switch(e) end)
 script.on_event(defines.events.on_gui_elem_changed, function(e) UI.on_elem_changed(e) end)
 script.on_event(defines.events.on_gui_text_changed, function(e) UI.on_text_changed(e) end)
-script.on_event(defines.events.on_string_translated, function(e) UI.on_string_translated(e) end)
+script.on_event(defines.events.on_string_translated, function(e) Cells.on_string_translated(e); UI.on_string_translated(e) end)
 script.on_event(defines.events.on_gui_selected_tab_changed, function(e) UI.on_tab_changed(e) end)
 script.on_event(defines.events.on_gui_selection_state_changed, function(e) UI.on_selection(e) end)
 script.on_event(defines.events.on_gui_value_changed, function(e) UI.on_value_changed(e) end)
@@ -169,8 +172,20 @@ local function display_changed(e)
 end
 script.on_event(defines.events.on_player_display_resolution_changed, display_changed)
 script.on_event(defines.events.on_player_display_scale_changed, display_changed)
-script.on_event(defines.events.on_player_changed_surface, function(e) UI.on_surface_changed(game.get_player(e.player_index)) end)
-script.on_event(defines.events.on_player_changed_force, function(e) UI.on_force_changed(game.get_player(e.player_index)) end)
+script.on_event(defines.events.on_player_selected_area, Cells.on_selected)
+script.on_event(defines.events.on_player_cursor_stack_changed, function(e)
+  Cells.on_cursor_changed(game.get_player(e.player_index))
+end)
+script.on_event(defines.events.on_player_changed_surface, function(e)
+  local player = game.get_player(e.player_index)
+  Cells.cancel(player)
+  UI.on_surface_changed(player)
+end)
+script.on_event(defines.events.on_player_changed_force, function(e)
+  local player = game.get_player(e.player_index)
+  Cells.cancel(player)
+  UI.on_force_changed(player)
+end)
 
 ---------------------------------------------------------------------------
 -- commands

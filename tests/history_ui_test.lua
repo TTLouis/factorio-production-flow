@@ -306,7 +306,9 @@ select_inspector(2)
 assert(named(root, "ssk_history_controls") == controls and not checkbox.state and start_zero.state)
 old = objects()
 local tabs = root.ssk_inner.ssk_tabs
-tabs.selected_tab_index = 4
+for i, id in ipairs(tabs.tags.ssk_tab_ids) do
+  if id == "transfers" then tabs.selected_tab_index = i; break end
+end
 assert(UI.on_tab_changed(event(tabs)))
 assert(us.tab_id == "transfers" and not root.ssk_window_bar.ssk_surface_picker.visible)
 assert(not old[1].valid and #objects() == 0, "leaving History clears its render objects")

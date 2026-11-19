@@ -1,0 +1,431 @@
+local Loc = require("scripts.locale")
+local Selection = require("shared.cell_selection")
+local Sampler = require("scripts.sampler")
+local Picker = require("scripts.material_picker")
+
+local Cells = { NAME = "ssk_cells", DELETE_NAME = "ssk_cell_delete" }
+local selection_prompts = {
+  select = Loc("cells-drag"),
+  add = Loc("cells-add-drag"),
+  remove = Loc("cells-remove-drag"),
+}
+local supported = {}
+for _, kind in ipairs(Selection.types) do supported[kind] = true end
+
+local function state()
+  storage.production_cells = storage.production_cells or { next_id = 1, records = {}, drafts = {} }
+  return storage.production_cells
+end
+
+local function eligible(entity, surface_index)
+  return entity.valid and supported[entity.type] and entity.unit_number
+    and entity.surface.index == surface_index and entity.force == game.forces.player
+end
+
+local function live_members(entities, surface_index)
+  local members, count = {}, 0
+  for _, entity in pairs(entities) do
+    if eligible(entity, surface_index) and not members[entity.unit_number] then
+      members[entity.unit_number] = entity
+      count = count + 1
+    end
+  end
+  return members, count
+end
+
+-- Rank by configured production capacity; activity or idle time does not rename a cell.
+local function final_items(members)
+  local recipes = storage.graph and storage.graph.recipes
+  if not recipes then return {} end
+  local consumed, output = {}, {}
+  local ids = {}
+  for id in pairs(members) do ids[#ids + 1] = id end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local machine = members[id]
+    local recipe_name, force_recipe = Sampler.current_recipe(machine)
+    local recipe = recipes[recipe_name]
+    if recipe and recipe.energy > 0 then
+      for _, ingredient in ipairs(recipe.ingredients) do
+        if ingredient.amount > 0 then consumed[ingredient.key] = true end
+      end
+      local crafts = machine.crafting_speed / recipe.energy
+      local bonus = Sampler.craft_productivity(machine, recipe_name, force_recipe, recipe)
+      for _, product in ipairs(recipe.products) do
+        if product.key:sub(1, 5) == "item/" then
+          output[product.key] = (output[product.key] or 0) + crafts * (product.amount + bonus * product.prod)
+        end
+      end
+    end
+  end
+  local names = {}
+  for key, rate in pairs(output) do
+    if not consumed[key] and rate > 0 and prototypes.item[key:sub(6)] then
+      names[#names + 1] = key
+    end
+  end
+  table.sort(names, function(a, b)
+    if output[a] ~= output[b] then return output[a] > output[b] end
+    return a < b
+  end)
+  for i, key in ipairs(names) do names[i] = key:sub(6) end
+  return names
+end
+
+function Cells.members(record)
+  return live_members(record.members, record.surface_index)
+end
+
+function Cells.display_item(record, members)
+  if record.display_item ~= nil then
+    return record.display_item and prototypes.item[record.display_item] and record.display_item or nil
+  end
+  -- Cells saved before the picker was added use the first eligible item.
+  return final_items(members)[1]
+end
+
+function Cells.close(player)
+  local picker = player.gui.screen.ssk_material_picker
+  if picker and picker.tags.target == "cell" then Picker.close(player) end
+  local window = player.gui.screen[Cells.NAME]
+  if window then window.destroy() end
+end
+
+local function clear_confirmation(player)
+  local cells = storage.production_cells
+  if cells and cells.deletions then cells.deletions[player.index] = nil end
+  local confirmation = player.gui.screen[Cells.DELETE_NAME]
+  if confirmation then confirmation.destroy() end
+end
+
+function Cells.cancel(player)
+  clear_confirmation(player)
+  if storage.production_cells then state().drafts[player.index] = nil end
+  local cursor = player.cursor_stack
+  if cursor and cursor.valid_for_read and cursor.name == Selection.tool then cursor.clear() end
+  Cells.close(player)
+end
+
+local function action(parent, name, sprite, tooltip, style, id)
+  return parent.add { type = "sprite-button", sprite = sprite, style = style or "tool_button",
+    tooltip = tooltip, tags = { ssk_cell = name, cell_id = id } }
+end
+
+function Cells.open(player)
+  Cells.close(player)
+  if player.force ~= game.forces.player then return end
+  local cells = state()
+  local draft = cells.drafts[player.index]
+  local frame = player.gui.screen.add { type = "frame", name = Cells.NAME, direction = "vertical" }
+  local title = frame.add { type = "flow", style = "frame_header_flow" }
+  title.drag_target = frame
+  title.add { type = "label", style = "frame_title", caption = Loc("cells-title"), ignored_by_interaction = true }
+  local spacer = title.add { type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true }
+  spacer.style.horizontally_stretchable = true
+  spacer.style.height = 24
+  action(title, "close", "utility/close", Loc("help-close"), "frame_action_button")
+
+  local panel = frame.add { type = "frame", name = "ssk_cell_panel", direction = "vertical", style = "inside_shallow_frame" }
+  panel.style.minimal_width = 368
+  panel.style.horizontally_stretchable = true
+  local bar = panel.add { type = "frame", style = "subheader_frame" }
+  bar.style.horizontally_stretchable = true
+  if draft then
+    local members, count = live_members(draft.members, draft.surface_index)
+    bar.add { type = "label", style = "subheader_caption_label", caption = Loc("cells-machine-count", count) }
+    local right = bar.add { type = "empty-widget" }
+    right.style.horizontally_stretchable = true
+    action(bar, "add", "utility/add", Loc("cells-add-machines"))
+    action(bar, "remove", "utility/close", Loc("cells-remove-machines"), "tool_button_red").enabled = count > 0
+    action(bar, "select", "utility/cross_select", Loc("cells-reselect"))
+    local form = panel.add { type = "flow", name = "ssk_cell_form", direction = "horizontal" }
+    form.style.padding = 8
+    form.style.horizontal_spacing = 8
+    form.style.horizontally_stretchable = true
+    local name_column = form.add { type = "flow", name = "ssk_cell_name_column", direction = "vertical" }
+    name_column.style.horizontally_stretchable = true
+    name_column.add { type = "label", caption = Loc("cells-name") }
+    local field = name_column.add { type = "textfield", name = "ssk_cell_name", text = draft.name }
+    field.style.horizontally_stretchable = true
+    field.focus()
+
+    local options = final_items(members)
+    local allowed = {}
+    for _, name in ipairs(options) do allowed["item/" .. name] = true end
+    if not draft.display_item or not allowed["item/" .. draft.display_item] then draft.display_item = options[1] end
+    draft.display_options = allowed
+    local item_column = form.add { type = "flow", name = "ssk_cell_item_column", direction = "vertical" }
+    item_column.add { type = "label", caption = Loc("cells-display-item") }
+    local key = draft.display_item and "item/" .. draft.display_item
+    local picker = Picker.button(item_column, key, "cell", "ssk_cell_display_item")
+    picker.enabled = key ~= nil
+    if not key then picker.tooltip = Loc("cells-no-display-item") end
+    local footer = frame.add { type = "flow", style = "dialog_buttons_horizontal_flow" }
+    footer.add { type = "button", style = "back_button", caption = Loc("cells-cancel"), tags = { ssk_cell = "list" } }
+    local gap = footer.add { type = "empty-widget", style = "draggable_space" }
+    gap.style.horizontally_stretchable = true
+    footer.add { type = "button", style = "confirm_button", caption = Loc("cells-save"), tags = { ssk_cell = "save" } }
+  else
+    bar.add { type = "label", style = "subheader_caption_label", caption = Loc("cells-saved") }
+    local gap = bar.add { type = "empty-widget" }
+    gap.style.horizontally_stretchable = true
+    action(bar, "select", "utility/add", Loc("cells-new"))
+    local rows = panel.add { type = "scroll-pane", style = "naked_scroll_pane", direction = "vertical", horizontal_scroll_policy = "never" }
+    rows.style.maximal_height = 350
+    rows.style.padding = 8
+    rows.style.horizontally_stretchable = true
+    local ids = {}
+    for id in pairs(cells.records) do ids[#ids + 1] = id end
+    table.sort(ids)
+    if #ids == 0 then rows.add { type = "label", style = "grey_label", caption = Loc("cells-empty") } end
+    for _, id in ipairs(ids) do
+      local record = cells.records[id]
+      local _, count = live_members(record.members, record.surface_index)
+      local surface = game.surfaces[record.surface_index]
+      local row = rows.add { type = "flow" }
+      local label = row.add { type = "label", caption = Loc("cells-row", record.name, surface.name, count) }
+      label.style.single_line = false
+      label.style.maximal_width = 290
+      row.style.horizontally_stretchable = true
+      row.style.vertical_align = "center"
+      local space = row.add { type = "empty-widget" }
+      space.style.horizontally_stretchable = true
+      action(row, "edit", "utility/rename_icon", Loc("cells-edit"), nil, id)
+      row.add { type = "sprite-button", style = "tool_button_red", sprite = "utility/trash",
+        tooltip = Loc("cells-delete"), tags = { ssk_cell_delete_request = id } }
+    end
+  end
+  frame.auto_center = true
+  player.opened = frame
+end
+
+function Cells.prompt_delete(player, id, from_tab, close_origin)
+  if player.force ~= game.forces.player then return end
+  local cells = state()
+  local record = cells.records[id]
+  if not record then return end
+  close_origin(player)
+  clear_confirmation(player)
+  cells.deletions = cells.deletions or {}
+  cells.deletions[player.index] = { id = id, record = record, from_tab = from_tab }
+
+  local window = player.gui.screen.add { type = "frame", name = Cells.DELETE_NAME, direction = "vertical" }
+  local title = window.add { type = "flow", style = "frame_header_flow" }
+  title.drag_target = window
+  title.add { type = "label", style = "frame_title", caption = Loc("cells-delete") }
+  local drag = title.add { type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true }
+  drag.style.horizontally_stretchable = true
+  drag.style.height = 24
+  title.add { type = "sprite-button", style = "frame_action_button", sprite = "utility/close",
+    tooltip = Loc("cells-cancel"), tags = { ssk_cell_delete_answer = "cancel" } }
+
+  local panel = window.add { type = "frame", style = "inside_shallow_frame_with_padding", direction = "vertical" }
+  local text = panel.add { type = "label", caption = Loc("cells-delete-question", record.name) }
+  text.style.single_line = false
+  text.style.maximal_width = 360
+  panel.add { type = "label", style = "grey_label", caption = Loc("cells-delete-machines-stay") }
+
+  local footer = window.add { type = "flow", style = "dialog_buttons_horizontal_flow" }
+  footer.add { type = "button", style = "back_button", caption = Loc("cells-cancel"),
+    tags = { ssk_cell_delete_answer = "cancel" } }
+  local gap = footer.add { type = "empty-widget", style = "draggable_space" }
+  gap.style.horizontally_stretchable = true
+  footer.add { type = "button", style = "red_confirm_button", caption = Loc("cells-delete-button"),
+    tags = { ssk_cell_delete_answer = "delete" } }
+  window.auto_center = true
+  player.opened = window
+end
+
+function Cells.finish_delete(player, confirm)
+  local cells = storage.production_cells
+  local pending = cells and cells.deletions and cells.deletions[player.index]
+  if not pending then return end
+  clear_confirmation(player)
+  if confirm and player.force == game.forces.player then
+    if cells.records[pending.id] == pending.record then
+      cells.records[pending.id] = nil
+    else
+      player.print(Loc("cells-changed"))
+    end
+  end
+  return pending
+end
+
+function Cells.on_click(player, element)
+  local tag = element.tags.ssk_cell
+  if not tag then return false end
+  if player.force ~= game.forces.player then Cells.cancel(player); return true end
+  local cells = state()
+  local draft = cells.drafts[player.index]
+  if tag == "close" then
+    Cells.cancel(player)
+  elseif tag == "list" then
+    Cells.cancel(player)
+    Cells.open(player)
+  elseif tag == "edit" then
+    local record = cells.records[element.tags.cell_id]
+    if record then
+      cells.drafts[player.index] = { id = record.id, name = record.name,
+        surface_index = record.surface_index, members = record.members, original = record,
+        display_item = record.display_item }
+      Cells.open(player)
+    end
+  elseif selection_prompts[tag] then
+    if draft and draft.surface_index ~= player.surface.index then
+      player.print(Loc("cells-wrong-surface"))
+      return true
+    end
+    local cursor = player.cursor_stack
+    if not cursor then return true end
+    local window = player.gui.screen[Cells.NAME]
+    if draft and window then
+      local form = window.ssk_cell_panel.ssk_cell_form
+      draft.name = form.ssk_cell_name_column.ssk_cell_name.text
+    end
+    if cursor.valid_for_read and not player.clear_cursor() then return true end
+    Cells.close(player)
+    if not cursor.set_stack { name = Selection.tool } then
+      Cells.open(player)
+      return true
+    end
+    if draft then draft.selection_mode = tag end
+    player.print(selection_prompts[tag])
+  elseif tag == "save" and draft then
+    local window = player.gui.screen[Cells.NAME]
+    if not window then return true end
+    local form = window.ssk_cell_panel.ssk_cell_form
+    local name = form.ssk_cell_name_column.ssk_cell_name.text:match("^%s*(.-)%s*$")
+    if name == "" or #name > 120 then player.print(Loc("cells-name-required")); return true end
+    if draft.id and cells.records[draft.id] ~= draft.original then
+      player.print(Loc("cells-changed"))
+      cells.drafts[player.index] = nil
+      Cells.open(player)
+      return true
+    end
+    local members, count = live_members(draft.members, draft.surface_index)
+    if count == 0 then player.print(Loc("cells-no-machines")); return true end
+    local id = draft.id or cells.next_id
+    if not draft.id then cells.next_id = id + 1 end
+    local display_item = draft.display_item
+    local options = final_items(members)
+    local still_available = false
+    for _, option in ipairs(options) do
+      if option == display_item then still_available = true; break end
+    end
+    cells.records[id] = { id = id, name = name, surface_index = draft.surface_index, members = members,
+      display_item = (still_available and display_item) or options[1] or false }
+    cells.drafts[player.index] = nil
+    Cells.open(player)
+  end
+  return true
+end
+
+function Cells.on_selected(e)
+  if e.item ~= Selection.tool then return end
+  local player = game.get_player(e.player_index)
+  if not player or player.force ~= game.forces.player or player.surface ~= e.surface then return end
+  local cursor = player.cursor_stack
+  if not (cursor and cursor.valid_for_read and cursor.name == Selection.tool) then return end
+  local cells = state()
+  local draft = cells.drafts[player.index]
+  local surface_index = e.surface.index
+  if draft and surface_index ~= draft.surface_index then player.print(Loc("cells-wrong-surface")); return end
+  local members, count = live_members(e.entities, surface_index)
+  draft = draft or { name = "", surface_index = surface_index }
+  if draft.selection_mode == "remove" then
+    local remaining = live_members(draft.members, surface_index)
+    local removed = false
+    for id in pairs(members) do
+      if remaining[id] then
+        remaining[id] = nil
+        removed = true
+      end
+    end
+    if not removed then player.print(Loc("cells-no-members-in-area")); return end
+    members = remaining
+  elseif count == 0 then
+    player.print(Loc("cells-no-machines"))
+    return
+  elseif draft.selection_mode == "add" then
+    local merged = live_members(draft.members, surface_index)
+    for id, entity in pairs(members) do merged[id] = entity end
+    members = merged
+  end
+  draft.members, draft.selection_mode = members, nil
+  if not draft.id and (draft.name == "" or draft.name == draft.suggested_name) then
+    local primary = final_items(members)[1]
+    local item = primary and prototypes.item[primary]
+    draft.suggested_name = item and item.name:gsub("-", " "):gsub("^%l", string.upper) or ""
+    draft.name = draft.suggested_name
+    draft.translation = item and player.request_translation(item.localised_name)
+  end
+  cells.drafts[player.index] = draft
+  Cells.open(player)
+  cursor.clear()
+end
+
+function Cells.on_string_translated(e)
+  local cells = storage.production_cells
+  local draft = cells and cells.drafts[e.player_index]
+  if not draft or draft.translation ~= e.id then return end
+  draft.translation = nil
+  if not e.translated or #e.result > 120 then return end
+  local window = game.get_player(e.player_index).gui.screen[Cells.NAME]
+  local field = window and window.ssk_cell_panel.ssk_cell_form.ssk_cell_name_column.ssk_cell_name
+  if field and field.text == draft.suggested_name then
+    field.text = e.result
+    draft.suggested_name, draft.name = e.result, e.result
+  end
+end
+
+function Cells.open_display_picker(player)
+  local cells = storage.production_cells
+  local draft = cells and cells.drafts[player.index]
+  if not (draft and draft.display_item and player.gui.screen[Cells.NAME]) then return end
+  Picker.open(player, "cell", "item/" .. draft.display_item, draft.display_options)
+end
+
+function Cells.pick_display_item(player, key)
+  local cells = storage.production_cells
+  local draft = cells and cells.drafts[player.index]
+  local window = player.gui.screen[Cells.NAME]
+  if not (window and draft and draft.display_options[key]) then return end
+  draft.display_item = key:sub(6)
+  local button = window.ssk_cell_panel.ssk_cell_form.ssk_cell_item_column.ssk_cell_display_item
+  Picker.update_button(button, key, "cell")
+end
+
+function Cells.on_cursor_changed(player)
+  if player.gui.screen[Cells.NAME] then return end
+  local cursor = player.cursor_stack
+  if cursor and cursor.valid_for_read and cursor.name == Selection.tool then return end
+  local cells = storage.production_cells
+  local draft = cells and cells.drafts[player.index]
+  if draft and draft.selection_mode then
+    draft.selection_mode = nil
+    Cells.open(player)
+  end
+end
+
+function Cells.on_player_removed(index)
+  local cells = storage.production_cells
+  if not cells then return end
+  cells.drafts[index] = nil
+  if cells.deletions then cells.deletions[index] = nil end
+end
+
+function Cells.on_surface_deleted(index)
+  if not storage.production_cells then return end
+  local cells = state()
+  for id, record in pairs(cells.records) do
+    if record.surface_index == index then cells.records[id] = nil end
+  end
+  for player_index, draft in pairs(cells.drafts) do
+    if draft.surface_index == index then
+      local player = game.get_player(player_index)
+      if player then Cells.cancel(player) else cells.drafts[player_index] = nil end
+    end
+  end
+end
+
+return Cells

@@ -217,7 +217,7 @@ for _, id in ipairs({ "balance", "focus", "sankey" }) do
     assert(LABELS > before, "tab " .. id .. " rendered nothing")
   end
 end
-assert(#win.ssk_inner.ssk_tabs.children == 8, "Release must have four tabs even with old debug preference")
+assert(#win.ssk_inner.ssk_tabs.children == 10, "Release must have five tabs even with old debug preference")
 for _, name in ipairs({"sankey-test", "sankey-probe", "sankey-export"}) do
   assert(not handlers["cmd_"..name], "Release registered development command: "..name)
 end

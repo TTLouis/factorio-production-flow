@@ -57,17 +57,21 @@ function P.sanitize_state(s)
   end
 end
 
-local function update_button(button, key, target)
+function P.update_button(button, key, target)
   if not valid_material(key) then key = nil end
   button.sprite = key or "utility/search"
   button.tags = { ssk_picker = "open", target = target, current = key or "" }
+  if target == "cell" then
+    button.tooltip = key and Loc("cells-display-item-current", label(key)) or Loc("cells-display-item-tip")
+    return
+  end
   button.tooltip = key and { "", label(key), Loc("material-picker-choose-an-item-or-fluid") } or Loc("material-picker-choose-an-item-or-fluid-2")
 end
 
 function P.button(row, key, target, name)
   local b = row.add { type = "sprite-button", name = name, style = "slot_button" }
   b.style.width, b.style.height = SLOT, SLOT
-  update_button(b, key, target)
+  P.update_button(b, key, target)
   return b
 end
 
@@ -90,7 +94,7 @@ function P.update_heading(heading, key)
   if key then kind, name = key:match("^([^/]+)/(.+)$") end
   local proto = kind and prototypes[kind] and prototypes[kind][name]
   local caption = proto and proto.localised_name or name or Loc("history-no-material-selected")
-  update_button(heading.ssk_material_slot, proto and key, "balance")
+  P.update_button(heading.ssk_material_slot, proto and key, "balance")
   if heading.ssk_material_name then
     heading.ssk_material_name.caption = caption
     heading.ssk_material_name.tooltip = caption
@@ -143,12 +147,12 @@ end
 -- and sort is the complete group/subgroup/prototype ordering key.
 -- Groups and total cover all selectable prototypes, even while searching;
 -- entries and matched_groups cover only the current text query.
-local function collect_catalog(picker_state, query)
+local function collect_catalog(picker_state, query, allowed)
   local entries, groups, matched_groups, total = {}, {}, {}, 0
   for _, kind in ipairs({ "item", "fluid" }) do
     for name, proto in pairs(prototypes[kind]) do
-      if selectable(proto) then
-        local key = Loc.join(kind, "/", name)
+      local key = Loc.join(kind, "/", name)
+      if (not allowed or allowed[key]) and selectable(proto) then
         local group = kind == "fluid" and { name = "fluids", order = "zzzz", localised_name = { "item-group-name.fluids" } }
           or proto.group or (proto.subgroup and proto.subgroup.group)
           or { name = "other", order = "z", localised_name = Loc("material-picker-other") }
@@ -238,7 +242,7 @@ local function populate(player)
   local picker_state = state(player)
   local query = frame.ssk_title.ssk_query.text:lower()
   local chosen_group = query == "" and frame.tags.group or ""
-  local entries, groups, matched_groups, total = collect_catalog(picker_state, query)
+  local entries, groups, matched_groups, total = collect_catalog(picker_state, query, frame.tags.allowed)
   local group_list = order_catalog(entries, groups)
   entries, chosen_group = filter_group(frame, query, entries, groups, group_list, chosen_group)
   local grid, keys, material_rows = render_materials(frame, entries)
@@ -281,7 +285,7 @@ function P.toggle_search(player)
   end
 end
 
-function P.open(player, target, current)
+function P.open(player, target, current, allowed)
   P.close(player)
   local group = ""
   local kind, name = (current or ""):match("^(%a+)/(.+)$")
@@ -292,7 +296,7 @@ function P.open(player, target, current)
     group = proto and proto.group and proto.group.name or ""
   end
   -- Frame tags retain the selection target, browsing group and current typed key.
-  local f = player.gui.screen.add { type = "frame", name = NAME, direction = "vertical", tags = { target = target, group = group, current = current or "" } }
+  local f = player.gui.screen.add { type = "frame", name = NAME, direction = "vertical", tags = { target = target, group = group, current = current or "", allowed = allowed } }
   local title = f.add { type = "flow", name = "ssk_title", direction = "horizontal" }
   title.style.horizontal_spacing = 8
   title.add { type = "label", caption = Loc("material-picker-select-item-fluid"), style = "frame_title" }
@@ -332,7 +336,7 @@ function P.open(player, target, current)
   for _, kind in ipairs({ "item", "fluid" }) do
     for name, proto in pairs(prototypes[kind]) do
       local key = Loc.join(kind, "/", name)
-      if selectable(proto) and not s.names[key] then
+      if (not allowed or allowed[key]) and selectable(proto) and not s.names[key] then
         keys[#keys + 1] = key
         strings[#strings + 1] = proto.localised_name or name:gsub("%-", " ")
       end
@@ -367,7 +371,7 @@ function P.selection(e)
   local player = game.get_player(e.player_index)
   local f = player.gui.screen[NAME]
   local key = tags.key
-  if not f or not key then return true end
+  if not f or not key or (f.tags.allowed and not f.tags.allowed[key]) then return true end
   local target = f.tags.target
   P.close(player)
   return true, key, target

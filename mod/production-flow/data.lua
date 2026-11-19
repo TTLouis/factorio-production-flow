@@ -117,3 +117,32 @@ data.raw["gui-style"].default.ssk_balance_header = {
   type = "frame_style", parent = "subheader_frame", padding = 0,
   vertical_flow_style = { type = "vertical_flow_style", vertical_spacing = 0 },
 }
+
+local cell_selection = require("shared.cell_selection")
+data:extend {{
+  type = "selection-tool",
+  name = cell_selection.tool,
+  icon = "__base__/graphics/icons/blueprint.png",
+  localised_name = {"production-flow.cells-title"},
+  flags = {"only-in-cursor", "not-stackable", "spawnable"},
+  hidden = true,
+  stack_size = 1,
+  select = {
+    border_color = {0.3, 0.8, 1},
+    mode = {"any-entity"},
+    cursor_box_type = "copy",
+    entity_type_filters = cell_selection.types,
+  },
+  alt_select = {border_color = {0.3, 0.8, 1}, mode = {"nothing"}, cursor_box_type = "copy"},
+}, {
+  type = "shortcut",
+  name = cell_selection.tool,
+  localised_name = {"production-flow.cells-new"},
+  order = "d[wires]-z[production-cell]",
+  action = "spawn-item",
+  item_to_spawn = cell_selection.tool,
+  icon = "__base__/graphics/icons/shortcut-toolbar/mip/new-blueprint-x56.png",
+  icon_size = 56,
+  small_icon = "__base__/graphics/icons/shortcut-toolbar/mip/new-blueprint-x24.png",
+  small_icon_size = 24,
+}}

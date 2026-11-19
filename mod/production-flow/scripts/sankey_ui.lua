@@ -109,6 +109,7 @@ end
 
 local function display_name(n)
   if n.transport then return transport_caption(n.transport) end
+  if n.caption then return n.caption end
   if n.kind == "group" then return Loc(n.flow_kind == "fluid" and "group-fluid-count" or "group-item-count", n.ginfo.localised_name or n.ginfo.name, #n.members) end
   local kind, name = base_key(n.key):match("^(%a+)/(.+)$")
   local proto = prototypes[kind] and prototypes[kind][name]
@@ -122,6 +123,7 @@ end
 
 local function sprite_for(n)
   if n.transport then return n.transport.material end
+  if n.sprite then return n.sprite end
   if n.kind == "group" then
     local t, name = string.match(n.members[1], "^(%a+)/(.+)$")
     return Loc.join(t, "/", name)
@@ -131,6 +133,7 @@ end
 
 local function localised_name(n)
   if n.transport then return transport_caption(n.transport) end
+  if n.caption then return n.caption end
   if n.kind == "group" then return n.ginfo.localised_name or n.ginfo.name end
   local kind, name = base_key(n.key):match("^(%a+)/(.+)$")
   local proto = prototypes[kind] and prototypes[kind][name]
@@ -144,7 +147,8 @@ local function ribbon_tooltip(link)
   end
   local material = link.a.kind == "recipe" and link.b or link.a
   local parts = { name(link.a), " → ", name(link.b),
-    Loc("sankey-total-flow", string.format("%.5g", link.rate), units(material)), Loc("sankey-flow-by-recipe") }
+    Loc("sankey-total-flow", string.format("%.5g", link.rate), units(material)) }
+  if #link.details > 0 then parts[#parts + 1] = Loc("sankey-flow-by-recipe") end
   table.sort(link.details, function(a, b)
     if a.rate ~= b.rate then return a.rate > b.rate end
     if a.from ~= b.from then return a.from < b.from end
@@ -851,7 +855,7 @@ local function draw(canvas, L, us, st, player, W, H)
       end
       local details = Loc.join_list(tip, "\n")
       local shown = (n.prod > 0) and n.prod or n.cons
-      local rate = n.kind == "recipe" and Loc("machine-status-recipe") or (Loc.join(fmt(shown), " ", units(n)))
+      local rate = n.caption and n.context or n.kind == "recipe" and Loc("machine-status-recipe") or (Loc.join(fmt(shown), " ", units(n)))
       local usage = not n.transport and us.neighborhood and n.selected_usage
       if usage then
         local material=L.nodes[us.focus]
@@ -877,20 +881,29 @@ local function draw(canvas, L, us, st, player, W, H)
         details=tooltip
         rate=Loc.join(fmt(n.transport.rate)," ",Loc("history-items-s"))
       end
-      local bar
-      if POLY then
-        local color = n.color or n.ginfo.color
-        local object = POLY.rect(n.x, n.y, View.NODE_W, n.h, Canvas.col(color, 1))
-        if object then visual.shapes[#visual.shapes + 1] = { object=object, color=color, alpha=1 } end
-        bar = add_sprite(canvas, "ssk-node-hit", tooltip)
-      else
-        bar = add_sprite(canvas, S.bar(n.color or n.ginfo.color), tooltip)
-        visual.sprites[#visual.sprites + 1] = { element=bar, original=bar.sprite }
+      local function node_bar(x, width, color, caption, side)
+        local bar
+        if POLY then
+          local object = POLY.rect(x, n.y, width, n.h, Canvas.col(color, 1))
+          if object then visual.shapes[#visual.shapes + 1] = { object=object, color=color, alpha=1 } end
+          bar = add_sprite(canvas, "ssk-node-hit", caption)
+        else
+          bar = add_sprite(canvas, S.bar(color), caption)
+          visual.sprites[#visual.sprites + 1] = { element=bar, original=bar.sprite }
+        end
+        place(bar, x, n.y, width, n.h)
+        bar.raise_hover_events = true
+        bar.tags = n.transport and transport_tags(n.transport,n,us)
+          or { ssk_sk = "node", key = n.key, fx = (us.view == "focus"), part = "bar", side = side }
+        count = count + 1
       end
-      place(bar, n.x, n.y, View.NODE_W, n.h)
-      bar.raise_hover_events = true
-      bar.tags = n.transport and transport_tags(n.transport,n,us) or { ssk_sk = "node", key = n.key, fx = (us.view == "focus"), part = "bar" }
-      count = count + 1
+      if n.is_cell then
+        local half = math.floor(View.NODE_W / 2)
+        node_bar(n.x, half, 4, Loc.join(tooltip, "\n", Loc("cells-inputs")), "inputs")
+        node_bar(n.x + half, View.NODE_W - half, 5, Loc.join(tooltip, "\n", Loc("cells-outputs")), "outputs")
+      else
+        node_bar(n.x, View.NODE_W, n.color or n.ginfo.color, tooltip)
+      end
       local iy = n.y - View.NODE_W - View.ICON_GAP
       local stem = add_sprite(canvas, S.bar(n.color or n.ginfo.color))
       visual.sprites[#visual.sprites + 1] = { element=stem, original=stem.sprite }
@@ -927,14 +940,14 @@ local function draw(canvas, L, us, st, player, W, H)
 
   -- 4. column headers
   for ci, t in ipairs(L.col_tiers) do
-    local heading = View.tier_label(t)
+    local heading = L.column_labels and L.column_labels[t] or View.tier_label(t)
     if us.neighborhood then
       local center = L.center_ci or 2
       local material=us.focus and localised_name({key=us.focus,kind=us.focus:match("^(%a+)/")}) or Loc("sankey-selected-material")
       heading = ci == center and Loc("sankey-selected-material-2") or ci > center and Loc("uses-material-heading", material)
         or ci == center - 1 and Loc("sankey-materials") or Loc("sankey-inputs-2", (center - ci))
     end
-    late[#late + 1] = { cx[ci], 6, us.neighborhood and L.label_w[ci] or 60, us.neighborhood and 40 or 18,
+    late[#late + 1] = { cx[ci], 6, (us.neighborhood or L.column_labels) and L.label_w[ci] or 60, us.neighborhood and 40 or 18,
       { type = "label", caption = heading, tooltip=heading, tags={ssk_column=us.neighborhood and ci>(L.center_ci or 2) and "uses" or "other"} },
       single_line=not us.neighborhood, font = "default-small-bold", color = { 0.6, 0.6, 0.6 } }
   end
@@ -975,7 +988,7 @@ function SK.toolbar_height(us)
 end
 
 -- c: tab content (vertical flow). full=false keeps the scroll-pane (and its scroll position).
-function SK.fill(player, c, us, W, viewH, full, only_auto)
+function SK.fill(player, c, us, W, viewH, full, only_auto, source)
   local hovered=storage.sk_hover and storage.sk_hover[player.index]
   if hovered and hovered.valid then
     local ancestor=hovered
@@ -994,6 +1007,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     local canvas = sp.add { type = "flow", name = "ssk_canvas", direction = "vertical" }
     canvas.style.vertical_spacing = 0
   end
+  c.ssk_bar.visible = not source
   c.ssk_bar.style.width = W
   us.toolbar_width = W
   c.ssk_sp.style.height = viewH
@@ -1012,8 +1026,8 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     place(l, 24, 40, math.max(100, W - 48), 60)
     return
   end
-  local L = View.build(player, us, W, viewH)
-  if not only_auto or #c.ssk_bar.children==0 then
+  local L = View.build(player, us, W, viewH, source)
+  if not source and (not only_auto or #c.ssk_bar.children==0) then
     build_toolbar(c.ssk_bar, us, L, player)
     settings_panel(c, us, L, player, W, viewH)
   end
@@ -1036,7 +1050,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto)
     if us.view == "focus" and L.seconds >= 2 then
       caption = Loc("no-recorded-material-flow", localised_name({key=us.focus}))
     end
-    local l = canvas.add { type = "label", caption = caption }
+    local l = canvas.add { type = "label", caption = source and source.empty or caption }
     l.style.single_line = false
     place(l, 24, 40, math.max(100, W - 48), 80)
   else

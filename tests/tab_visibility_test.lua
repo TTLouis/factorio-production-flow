@@ -24,8 +24,8 @@ return function(handlers)
       assert(us.tab_id == id and tabs.selected_tab_index == i, "Reopening lost the stable tab ID")
     end
   end
-  local base = {"balance", "focus", "sankey"}
-  local space = {"balance", "focus", "sankey", "transfers"}
+  local base = {"balance", "focus", "cells", "sankey"}
+  local space = {"balance", "focus", "cells", "sankey", "transfers"}
   UI.open(player)
   check(space)
   assert(Transfers.available(), "Space Age fixture must have cargo events")
@@ -70,7 +70,7 @@ return function(handlers)
   UI.open(player)
   check(space)
   handlers.on_player_joined_game{player_index=player.index}
-  assert(us.tab_id == "transfers" and pane().selected_tab_index == 4)
+  assert(us.tab_id == "transfers" and pane().selected_tab_index == 5)
   assert(storage.transfers == ledger and ledger.count == 1 and ledger.history[1] == record
     and us.transfers == options, "Tab visibility discarded transfer history or settings")
   storage.transfers = saved_ledger

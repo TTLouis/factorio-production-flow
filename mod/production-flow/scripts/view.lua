@@ -642,13 +642,19 @@ end
 ---------------------------------------------------------------------------
 -- public: build everything needed to draw
 ---------------------------------------------------------------------------
-function V.build(player, us, W, viewH)
+function V.build(player, us, W, viewH, source)
   local pi = player.index
   local sidx = us.sidx or player.surface.index -- surfaces are never combined
-  local m = Model.build(sidx, us.period)
-
-  local nodes, links = build_graph(pi, m, us)
-  add_transport(nodes, links, Transport.query(player.force, game.surfaces[sidx], game.tick, us.period))
+  local m, nodes, links
+  if source then
+    -- Cell graphs are self-contained; they carry no history or recorded transport.
+    m = { residuals = {}, seconds = 0 }
+    nodes, links = source.nodes, source.links
+  else
+    m = Model.build(sidx, us.period)
+    nodes, links = build_graph(pi, m, us)
+    add_transport(nodes, links, Transport.query(player.force, game.surfaces[sidx], game.tick, us.period))
+  end
   local ff = player.mod_settings["ssk-fluid-scale"].value
   local focused
   if us.neighborhood and us.focus then
@@ -678,7 +684,10 @@ function V.build(player, us, W, viewH)
   -- A group's members span tech eras. Production depth keeps the overview's
   -- raw inputs before their groups instead of hiding them as later-era sources.
   local tier_list
-  if us.neighborhood then
+  if source and source.columns then
+    tier_list = {}
+    for i = 1, #source.columns do tier_list[i] = i end
+  elseif us.neighborhood then
     tier_list = {}
     -- Keep Materials / Selected / Uses, but don't reserve empty upstream
     -- columns when the requested expansion has already reached a raw input.
@@ -693,7 +702,7 @@ function V.build(player, us, W, viewH)
   for _, l in pairs(links) do touched[l.from] = true; touched[l.to] = true end
   drop_nodes(nodes, links, function(k)
     local n = nodes[k]
-    return us.neighborhood and k == us.focus or touched[k] or n.prod > EPS or n.cons > EPS
+    return n.is_cell or us.neighborhood and k == us.focus or touched[k] or n.prod > EPS or n.cons > EPS
   end)
 
   -- tier range (values; nil = open)
@@ -881,6 +890,7 @@ function V.build(player, us, W, viewH)
 
   local L = { nodes = nodes, links = link_list, cols = cols, col_tiers = col_tiers, all_tiers = all_tiers,
               seconds = m.seconds, recipe_rates=m.rates and m.rates.recipes or {}, W = W, fluid_factor = ff,
+              column_labels = source and source.columns,
               min_t = player.mod_settings["ssk-min-ribbon-px"].value }
   -- Rates change every sample; topology and explicit layout controls define when
   -- it is useful to optimise again. Renderer changes do not invalidate geometry.

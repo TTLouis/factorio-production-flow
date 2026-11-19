@@ -1,6 +1,8 @@
 local Loc = require("scripts.locale")
+local Cells = require("scripts.cells")
+local CellsUI = require("scripts.cells_ui")
 -- Top-left toolbar button + main window.
--- Tabs: Balance · Focus · Full Sankey · Transfers.
+-- Tabs: Balance · Focus · Cells · Full Sankey · Transfers.
 
 local mod_gui = require("mod-gui")
 local Sampler = require("scripts.sampler")
@@ -21,7 +23,7 @@ local TransportHistoryUI = require("scripts.transport_history_ui")
 local TransferPanels = require("scripts.se_transfer_panels")
 
 local UI = {}
-local TAB_CAPTIONS = { balance = Loc("ui-balance"), focus = Loc("ui-focus"), sankey = Loc("ui-full-sankey"), transfers = Loc("help-transfers") }
+local TAB_CAPTIONS = { balance = Loc("ui-balance"), focus = Loc("ui-focus"), cells = Loc("cells-tab"), sankey = Loc("ui-full-sankey"), transfers = Loc("help-transfers") }
 local WIN = "ssk_main"
 -- The native window uses 12 px per side around the tab pane, and each tab keeps
 -- 12 px between its panels and the pane's border on every side (TAB_PAD_X here,
@@ -34,7 +36,7 @@ local MIN_WINDOW_WIDTH = 880
 local MIN_SAFE_WINDOW_WIDTH = 396
 
 local function visible_tabs()
-  local list = { "balance", "focus", "sankey" }
+  local list = { "balance", "focus", "cells", "sankey" }
   if Transfers.available() or SERockets.available() then list[#list + 1] = "transfers" end
   return list
 end
@@ -249,7 +251,9 @@ local function update_header(player,us)
   local frame=player.gui.screen[WIN]
   local bar=frame and frame.ssk_window_bar
   if not bar then return end
-  local scoped = us.tab_id ~= "transfers" or us.transport_history~=nil or (SERockets.available() and not Transfers.available())
+  local scoped = us.tab_id ~= "cells" and (us.tab_id ~= "transfers" or us.transport_history~=nil or (SERockets.available() and not Transfers.available()))
+  bar.ssk_period_label.visible = us.tab_id ~= "cells"
+  bar.ssk_period_picker.visible = us.tab_id ~= "cells"
   bar.ssk_surface_label.visible = scoped
   bar.ssk_surface_picker.visible = scoped
   local label=bar.ssk_history
@@ -282,6 +286,13 @@ function UI.refresh(player, only_auto, full, keep_balance_rows)
   if us.sidx ~= surface then close_inspectors(player) end
   us.sidx = surface
   update_header(player,us)
+  if id == "cells" then
+    if only_auto then return end
+    us.cells = us.cells or {}
+    us.cells.chart = us.cells.chart or {}
+    CellsUI.fill(player, c, us.cells, us.canvas_w, tab_pane_height(us), full)
+    return
+  end
   if id == "focus" then
     local fx = SK.focus_state(us)
     fx.sidx = us.sidx
@@ -344,6 +355,7 @@ function UI.on_player_removed(index)
 end
 
 function UI.open(player)
+  Cells.cancel(player)
   UI.close(player)
   if player.force~=game.forces.player then player.print(Loc("ui-player-force-only"));return end
   local res, sc = player.display_resolution, player.display_scale
@@ -385,17 +397,18 @@ function UI.open(player)
   local surface_picker = tb.add { type = "drop-down", name = "ssk_surface_picker", items = sitems, selected_index = ssel,
            tags = { ssk_ui = "surface" }, tooltip = SERockets.available() and Loc("se-surface-help") or Loc("ui-surface-for-balance-focus-and-full-sankey") }
   surface_picker.style.width = math.min(240, math.floor(W * 0.22))
-  local pl = tb.add { type = "label", caption = Loc("ui-period") }
+  local pl = tb.add { type = "label", name = "ssk_period_label", caption = Loc("ui-period") }
   -- 16 px between each label + drop-down pair and the next group.
   pl.style.left_margin = 8
   local psel = 2
   for i, v in ipairs(Sampler.PERIODS) do if us.period == v then psel = i end end
-  tb.add { type = "drop-down", items = Sampler.PERIOD_CAPTIONS, selected_index = psel, tags = { ssk_ui = "period" },
+  tb.add { type = "drop-down", name = "ssk_period_picker", items = Sampler.PERIOD_CAPTIONS, selected_index = psel, tags = { ssk_ui = "period" },
            tooltip = Loc("ui-how-far-back-rates-and-transfers-are") }
   local history=tb.add{type="label",name="ssk_history"}
   history.style.font="default-small-bold";history.style.font_color={1,0.82,0.35}
   history.style.maximal_width=190
   history.style.left_margin,history.style.right_margin=8,8
+  action_button("utility/list_view", Loc("cells-title"), "cells")
   action_button("utility/questionmark", Loc("ui-help-controls-calculations-stock-alerts-and-chart"), "help")
   action_button("utility/refresh", Loc("ui-refresh"), "refresh")
   action_button("utility/close", Loc("help-close"), "close")
@@ -454,10 +467,19 @@ function UI.is_open(player) return player.gui.screen[WIN] ~= nil end
 ---------------------------------------------------------------------------
 -- event handlers (return true when handled)
 ---------------------------------------------------------------------------
+local function finish_cell_delete(player, confirm)
+  local pending = Cells.finish_delete(player, confirm)
+  if not pending then return end
+  if pending.from_tab then UI.open(player) else Cells.open(player) end
+end
+
 function UI.on_click(e)
   local el = e.element
   local player = game.get_player(e.player_index)
-  if el.tags and el.tags.ssk_picker == "open" and (el.tags.target == "focus" or el.tags.target == "balance") then
+  if el.tags and el.tags.ssk_picker == "open" and el.tags.target == "cell" then
+    Cells.open_display_picker(player)
+    return true
+  elseif el.tags and el.tags.ssk_picker == "open" and (el.tags.target == "focus" or el.tags.target == "balance") then
     close_inspectors(player)
     MaterialPicker.open(player, el.tags.target, el.tags.current)
     return true
@@ -474,6 +496,14 @@ function UI.on_click(e)
     return true
   end
   if el.name == "ssk_toggle" then UI.toggle(player); return true end
+  if el.tags.ssk_cell_delete_answer then
+    finish_cell_delete(player, el.tags.ssk_cell_delete_answer == "delete")
+    return true
+  elseif el.tags.ssk_cell_delete_request then
+    Cells.prompt_delete(player, el.tags.ssk_cell_delete_request, false, Cells.close)
+    return true
+  end
+  if Cells.on_click(player, el) then return true end
   if MachineStatus.on_click(player, el, UI.close) then return true end
   local us = ustate(e.player_index)
   if el.tags and el.tags.ssk_ui=="transport_history" then
@@ -496,6 +526,12 @@ function UI.on_click(e)
     UI.refresh(player)
     return true
   end
+  if us.tab_id == "cells" and el.tags.ssk_sk == "node" then
+    local chart = us.cells.chart
+    chart.sel = chart.sel ~= el.tags.key and el.tags.key or nil
+    UI.refresh(player)
+    return true
+  end
   local chart = chart_state(us)
   local previous = chart.focus
   local r = SK.on_click(e, chart)
@@ -506,6 +542,9 @@ function UI.on_click(e)
   local a = el.tags and el.tags.ssk_ui
   if not a then return false end
   if a == "close" then UI.close(player)
+  elseif a == "cells" then UI.close(player); Cells.open(player)
+  elseif a == "cell_delete" and us.tab_id == "cells" and us.cells.selected then
+    Cells.prompt_delete(player, us.cells.selected, true, UI.close)
   elseif a == "help" then close_inspectors(player); Help.open(player)
   elseif a == "help_close" then Help.close(player);player.opened=player.gui.screen[WIN]
   elseif a == "watch" or a == "machine_status" then
@@ -564,7 +603,9 @@ function UI.on_selection(e)
     if key then
       local player = game.get_player(e.player_index)
       local us = ustate(e.player_index)
-      if target == us.tab_id and (target == "focus" or target == "balance") then
+      if target == "cell" then
+        Cells.pick_display_item(player, key)
+      elseif target == us.tab_id and (target == "focus" or target == "balance") then
         local chart = chart_state(us)
         local previous = chart.focus
         if target == "focus" then
@@ -593,6 +634,12 @@ function UI.on_selection(e)
     return true
   end
   if us.tab_id == "transfers" and TransfersUI.on_selection(e, us.transfers) then
+    UI.refresh(game.get_player(e.player_index))
+    return true
+  end
+  if tags and tags.ssk_ui == "cell_list" and us.tab_id == "cells" then
+    us.cells.selected = us.cells.ids[e.element.selected_index - 1]
+    us.cells.chart = {}
     UI.refresh(game.get_player(e.player_index))
     return true
   end
@@ -753,6 +800,19 @@ end
 function UI.on_closed(e)
   if MaterialPicker.on_closed(e) then return true end
   local player = game.get_player(e.player_index)
+  if e.element and e.element.valid and e.element.name == Cells.DELETE_NAME then
+    finish_cell_delete(player, false)
+    return true
+  end
+  if e.element and e.element.valid and e.element.name == Cells.NAME then
+    if player.gui.screen.ssk_material_picker then
+      MaterialPicker.close(player)
+      player.opened = e.element
+    else
+      Cells.cancel(player)
+    end
+    return true
+  end
   if MachineStatus.on_closed(player, e.element) then return true end
   if e.element and e.element.valid and (e.element.name == Watch.NAME or e.element.name == WIN) and Watch.close(player) then
     player.opened = player.gui.screen[WIN]

@@ -73,6 +73,14 @@ ignored stages, and leave the live profile and source saves untouched. The Lua
 suite additionally checks Transfer hover geometry, target reuse and hidden
 targets at fractional scales, and normal-window native checks cover indexed GUI insertion.
 
+Run `python tests/cells_native.py` to validate manual production cell selection
+on a disposable vanilla map. The fixture dispatches registered handlers with
+native entities and GUI elements, checks that saving and replacing membership
+require confirmation, and captures the draft, saved list, and both Cells
+Sankey views at 100% UI scale. The Cells tab uses estimated recipe capacity
+and groups the All view by surface. Its figures are separate from production
+history and recorded cargo.
+
 For an authorized modded save, use Factorio's `--sync-mods` with an isolated
 `--config` and `--mod-directory` first. Then run
 `python tests/modded_gui.py --save PATH --mods SYNCED_MOD_DIRECTORY`.
