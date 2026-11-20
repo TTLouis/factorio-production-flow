@@ -130,6 +130,44 @@ Cells.on_click_anywhere { player_index = player.index, element = { parent = nil 
 assert(not window(), "A click outside the list must close it")
 Cells.on_click_anywhere { player_index = player.index }
 
+-- Sequencing: cells are staged by what they make for each other, not by creation order.
+Cells.cancel(player)
+Cells.close(player)
+storage.production_cells = nil
+local made = {}
+local function save_cell(name, entities)
+  Cells.on_selected { item = Selection.tool, player_index = player.index, surface = nauvis, entities = entities }
+  name_field().text = name
+  click { ssk_cell = "save" }
+  Cells.close(player)
+  for cell_id, saved in pairs(storage.production_cells.records) do if saved.name == name then made[name] = cell_id end end
+end
+save_cell("Inserters", { machine(20.5, "inserter") })
+save_cell("Circuits", { machine(24.5, "electronic-circuit") })
+save_cell("Cable", { machine(28.5, "copper-cable") })
+local ordered, stage = Flow.ids(nauvis.index)
+assert(ordered[1] == made.Cable and ordered[2] == made.Circuits and ordered[3] == made.Inserters,
+  "Cells must be listed in production order")
+assert(stage[made.Cable] == 1 and stage[made.Circuits] == 2 and stage[made.Inserters] == 3)
+local staged = Flow.build(nil, { mode = "capacity", surface = nauvis.index })
+local function cell_node(name) return staged.nodes["recipe/cell-" .. made[name]] end
+assert(cell_node("Cable").tier == 2 and cell_node("Circuits").tier == 4 and cell_node("Inserters").tier == 6)
+assert(#staged.columns == 7 and staged.columns[4][1] == "production-flow.cells-stage", "Each stage gets its own column")
+local function linked(from, to) return staged.links[from .. ">" .. to] end
+local cable_key = "item/copper-cable#surface-" .. nauvis.index .. "-output"
+assert(linked(cell_node("Cable").key, cable_key) and linked(cable_key, cell_node("Circuits").key),
+  "A material made by one cell and used by a later one must join them")
+assert(not staged.nodes["item/copper-cable#surface-" .. nauvis.index .. "-input"], "Joined materials are not imported again")
+local iron_key = "item/iron-plate#surface-" .. nauvis.index .. "-input"
+assert(staged.nodes[iron_key].tier == 3 and linked(iron_key, cell_node("Circuits").key) and linked(iron_key, cell_node("Inserters").key),
+  "An import enters just before its first user")
+-- A loop is broken at the oldest cell; its backward use gets its own input node.
+local loop = Flow.stages({ 1, 2 }, {
+  [1] = { surface_index = 1, ports = { inputs = { a = true }, outputs = { b = true } } },
+  [2] = { surface_index = 1, ports = { inputs = { b = true }, outputs = { a = true } } },
+})
+assert(loop[1] == 1 and loop[2] == 2, "Loops are ordered by creation")
+
 Cells.cancel(player)
 storage.production_cells, player.cursor_stack, player.request_translation = saved_storage, saved_cursor, saved_translate
-print("CELL PORTS PASS: suggestions, remove/restore, lock on save, edit section, All view filter, surface scope, show button, list docks left and closes on outside click")
+print("CELL PORTS PASS: suggestions, remove/restore, lock on save, edit section, All view filter, surface scope, show button, list docks left and closes on outside click, production-order stages")

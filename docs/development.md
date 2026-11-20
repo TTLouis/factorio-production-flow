@@ -97,7 +97,10 @@ The create and edit forms list the cell's boundary items, suggested from the
 members' recipes (net consumption as inputs, net production as outputs). The
 player removes items that do not really cross the boundary; saving locks the
 rest, and the All view shows only locked items. Cells saved before the lock show
-every net flow until they are edited. Like the other tabs, the Cells tab lists
+every net flow until they are edited. The All view orders cells into stages from their
+boundaries (`Flow.stages`): a cell whose input another cell makes comes one
+stage later, the shared item becomes one node between them, and the tab's list
+follows the same order. Loops are ordered by creation. Like the other tabs, the Cells tab lists
 and charts only the cells on the surface chosen in the window header. Surface
 labels use the header picker's localised name and icon, and cell nodes do not
 repeat the surface. The saved-cells list's Production Flow button opens the

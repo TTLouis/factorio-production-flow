@@ -47,6 +47,13 @@ local function cells_tab(player)
   error("Cells tab missing")
 end
 
+-- The tab lists cells in production order, so look rows up by cell id.
+local function row_of(player, id)
+  for i, cell_id in ipairs(storage.ui[player.index].cells.ids) do
+    if cell_id == id then return i + 1 end
+  end
+end
+
 local function has_caption(element, key)
   local caption = element.caption
   if type(caption) == "table" and caption[1] == key then return true end
@@ -123,7 +130,8 @@ function T.tick(UI)
     click(player, window(), "ssk_cell", "show")
     assert(not player.gui.screen.ssk_cells, "Show must close the saved-cells list")
     local split = cells_tab(player)
-    assert(storage.ui[player.index].tab_id == "cells" and split.ssk_cell_sidebar.ssk_cell_list.selected_index == 2,
+    assert(storage.ui[player.index].tab_id == "cells" and storage.ui[player.index].cells.selected == 1
+      and split.ssk_cell_sidebar.ssk_cell_list.selected_index == row_of(player, 1),
       "Show must open the Cells tab on the chosen cell")
     assert(player.gui.screen.ssk_main.ssk_window_bar.ssk_surface_picker.selected_index == 1,
       "A cell on the player's surface keeps Where I am")
@@ -178,7 +186,10 @@ function T.tick(UI)
     local all = Flow.build(nil, CAPACITY)
     local copper = "item/copper-cable#surface-" .. player.surface.index
     assert(all.links["recipe/cell-2>" .. copper .. "-output"].rate == 2)
-    assert(all.links[copper .. "-input>recipe/cell-1"].rate == 3)
+    -- The cable cell feeds the circuit cell, so the circuits come one stage later.
+    assert(all.links[copper .. "-output>recipe/cell-1"].rate == 3, "Cable made by cell 2 must feed cell 1")
+    assert(all.nodes["recipe/cell-2"].tier == 2 and all.nodes["recipe/cell-1"].tier == 4)
+    assert(Flow.ids()[1] == 2, "The supplying cell is listed first")
     assert(cells.records[2].display_item == "iron-gear-wheel")
     assert(all.nodes["recipe/cell-2"].sprite == "item/iron-gear-wheel")
     assert(all.nodes["recipe/cell-1"].caption[1] == "production-flow.cells-node-name")
@@ -237,7 +248,8 @@ function T.tick(UI)
     click(player, window(), "ssk_cell", "close")
     UI.open(player)
     local listed = cells_tab(player).ssk_cell_sidebar.ssk_cell_list.items
-    assert(serpent.line(listed[3]):find("warning_icon", 1, true) and not serpent.line(listed[2]):find("warning_icon", 1, true),
+    assert(serpent.line(listed[row_of(player, 2)]):find("warning_icon", 1, true)
+      and not serpent.line(listed[row_of(player, 1)]):find("warning_icon", 1, true),
       "A cell with missing machines must carry a warning in the Cells tab: " .. serpent.line(listed))
     UI.close(player)
     local _, revived = storage.cell_test_ghost.revive{raise_revive = true}
@@ -317,7 +329,7 @@ function T.tick(UI)
   elseif stage == "open-inside" then
     local tabs = player.gui.screen.ssk_main.ssk_inner.ssk_tabs
     local rows = tabs.content_cells.ssk_cell_split.ssk_cell_sidebar.ssk_cell_list
-    rows.selected_index = 2
+    rows.selected_index = row_of(player, 1)
     script.get_event_handler(defines.events.on_gui_selection_state_changed){player_index = player.index, element = rows}
     local split = tabs.content_cells.ssk_cell_split
     assert(find(split.ssk_cell_chart, "key", "recipe/electronic-circuit"), "Individual cell must render its recipe")
@@ -363,7 +375,7 @@ function T.tick(UI)
     player.exit_remote_view()
     assert(player.controller_type == defines.controllers.character, "Leaving remote view returns to the character")
     UI.open(player)
-    assert(cells_tab(player).ssk_cell_sidebar.ssk_cell_list.selected_index == 2, "Reopening keeps the selected cell")
+    assert(cells_tab(player).ssk_cell_sidebar.ssk_cell_list.selected_index == row_of(player, 1), "Reopening keeps the selected cell")
     storage.cell_test_phase = "capacity"
   elseif stage == "capacity" then
     local main = player.gui.screen.ssk_main
@@ -394,7 +406,7 @@ function T.tick(UI)
     click(player, window(), "ssk_cell", "list")
     click(player, window(), "ssk_cell", "close")
     UI.open(player)
-    assert(cells_tab(player).ssk_cell_sidebar.ssk_cell_list.selected_index == 2, "Reopening keeps the selected cell")
+    assert(cells_tab(player).ssk_cell_sidebar.ssk_cell_list.selected_index == row_of(player, 1), "Reopening keeps the selected cell")
     click(player, player.gui.screen.ssk_main, "ssk_ui", "cell_new")
     assert(not player.gui.screen.ssk_main and player.cursor_stack.valid_for_read
       and player.cursor_stack.name == Selection.tool, "New must hand over the selection tool")
@@ -419,7 +431,7 @@ function T.tick(UI)
     local function sidebar()
       return player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_cells.ssk_cell_split.ssk_cell_sidebar
     end
-    assert(cells.records[1] and sidebar().ssk_cell_list.selected_index == 2, "Cancel must restore the selected cell")
+    assert(cells.records[1] and sidebar().ssk_cell_list.selected_index == row_of(player, 1), "Cancel must restore the selected cell")
     click(player, main, "ssk_ui", "cell_delete")
     click(player, confirmation(), "ssk_cell_delete_answer", "delete")
     assert(not cells.records[1] and cells.records[2] and machines[2].valid)

@@ -15,15 +15,85 @@ function Flow.records()
   return storage.production_cells and storage.production_cells.records or {}
 end
 
----@param surface_index integer? Only cells on this surface.
-function Flow.ids(surface_index)
-  local ids = sorted_keys(Flow.records())
-  if not surface_index then return ids end
-  local records, out = Flow.records(), {}
-  for _, id in ipairs(ids) do
-    if records[id].surface_index == surface_index then out[#out + 1] = id end
+-- A cell's boundary: its locked items, or for cells saved before the lock,
+-- what its machines' recipes suggest.
+local function boundary(record)
+  if record.ports then return record.ports end
+  local suggested, ports = Cells.suggest_ports(Cells.members(record)), { inputs = {}, outputs = {} }
+  for side, keys in pairs(suggested) do
+    for _, key in ipairs(keys) do ports[side][key] = true end
   end
-  return out
+  return ports
+end
+
+-- Production order. A cell is in stage 1 unless another cell on its surface
+-- makes one of its inputs; then it comes one stage after the latest such cell.
+-- Smelting therefore precedes casting, which precedes the cells using the
+-- castings. Cells feeding each other in a loop are ordered by creation: the
+-- oldest waiting cell is placed first.
+function Flow.stages(ids, records)
+  local makers, ports = {}, {}
+  for _, id in ipairs(ids) do
+    local record = records[id]
+    ports[id] = boundary(record)
+    for key in pairs(ports[id].outputs) do
+      local where = record.surface_index .. "|" .. key
+      makers[where] = makers[where] or {}
+      table.insert(makers[where], id)
+    end
+  end
+  local feeds = {}
+  for _, id in ipairs(ids) do
+    feeds[id] = {}
+    for key in pairs(ports[id].inputs) do
+      for _, maker in ipairs(makers[records[id].surface_index .. "|" .. key] or {}) do
+        if maker ~= id then feeds[id][maker] = true end
+      end
+    end
+  end
+  local stage, waiting = {}, #ids
+  while waiting > 0 do
+    local placed = false
+    for _, id in ipairs(ids) do
+      if not stage[id] then
+        local ready, at = true, 1
+        for maker in pairs(feeds[id]) do
+          if not stage[maker] then ready = false; break end
+          at = math.max(at, stage[maker] + 1)
+        end
+        if ready then stage[id], waiting, placed = at, waiting - 1, true end
+      end
+    end
+    if not placed then
+      for _, id in ipairs(ids) do
+        if not stage[id] then
+          local at = 1
+          for maker in pairs(feeds[id]) do
+            if stage[maker] then at = math.max(at, stage[maker] + 1) end
+          end
+          stage[id], waiting = at, waiting - 1
+          break
+        end
+      end
+    end
+  end
+  return stage
+end
+
+---@param surface_index integer? Only cells on this surface.
+---@return integer[] ids In production order, then by creation.
+---@return table<integer, integer> stage
+function Flow.ids(surface_index)
+  local records, ids = Flow.records(), {}
+  for _, id in ipairs(sorted_keys(records)) do
+    if not surface_index or records[id].surface_index == surface_index then ids[#ids + 1] = id end
+  end
+  local stage = Flow.stages(ids, records)
+  table.sort(ids, function(a, b)
+    if stage[a] ~= stage[b] then return stage[a] < stage[b] end
+    return a < b
+  end)
+  return ids, stage
 end
 
 -- Capacity: every member running its configured recipe at full speed.
@@ -159,9 +229,8 @@ function Flow.build(selected, opts)
 
   -- A machine in multiple cells cannot be assigned to either one from selection
   -- evidence. It stays visible in each individual cell and is omitted here.
-  graph.columns = { Loc("cells-inputs"), Loc("cells-tab"), Loc("cells-outputs") }
   local seen, shared, memberships = {}, {}, {}
-  local ids = Flow.ids(opts.surface)
+  local ids, stage = Flow.ids(opts.surface)
   for _, id in ipairs(ids) do
     local members = Cells.members(records[id])
     memberships[id] = members
@@ -170,6 +239,7 @@ function Flow.build(selected, opts)
       seen[unit] = true
     end
   end
+  local entries = {}
   for _, id in ipairs(ids) do
     local record = records[id]
     local surface = game.surfaces[record.surface_index]
@@ -192,7 +262,7 @@ function Flow.build(selected, opts)
       local display_item = Cells.display_item(record, memberships[id])
       n.sprite = display_item and "item/" .. display_item or "entity/assembling-machine-1"
       n.context = surface.name
-      n.tier, n.is_cell = 2, true
+      n.tier, n.is_cell = 2 * stage[id], true
       if measured_mode then
         local used = utilisation(rates, capacity)
         -- The tab already follows the header's surface, so nodes do not repeat it.
@@ -202,23 +272,71 @@ function Flow.build(selected, opts)
         end
       end
       -- Saved cells lock their boundary; cells from before the lock show every net flow.
-      local ports = record.ports
+      local ports, flows = record.ports, {}
       for _, key in ipairs(sorted_keys(net)) do
         local amount = net[key]
         if math.abs(amount) > 1e-6 and (not ports or ports[amount > 0 and "outputs" or "inputs"][key]) then
-          local side = amount > 0 and "-output" or "-input"
-          local material = key .. "#surface-" .. surface.index .. side
-          local material_node = node(graph, material)
-          material_node.group_key = key
-          material_node.tier = amount > 0 and 3 or 1
-          material_node.context = surface.name
-          if amount > 0 then connect(graph, cell, material, amount)
-          else connect(graph, material, cell, -amount) end
+          flows[#flows + 1] = { key = key, amount = amount }
         end
       end
+      entries[#entries + 1] = { id = id, cell = cell, surface = surface, stage = stage[id], flows = flows }
     end
   end
+  Flow.link_stages(graph, entries)
   return graph
+end
+
+-- Material columns sit between cell stages. An item made by earlier cells and
+-- used by later ones is a single node joining them; items no cell makes enter
+-- just before their first user. A loop's backward use gets its own input node.
+function Flow.link_stages(graph, entries)
+  local last, materials, order = 1, {}, {}
+  for _, entry in ipairs(entries) do
+    last = math.max(last, entry.stage)
+    for _, flow in ipairs(entry.flows) do
+      local where = entry.surface.index .. "|" .. flow.key
+      local material = materials[where]
+      if not material then
+        material = { key = flow.key, surface = entry.surface, makers = {}, users = {} }
+        materials[where], order[#order + 1] = material, where
+      end
+      table.insert(flow.amount > 0 and material.makers or material.users, { entry = entry, rate = math.abs(flow.amount) })
+    end
+  end
+  local function material_node(material, suffix, tier)
+    local n = node(graph, material.key .. "#surface-" .. material.surface.index .. suffix)
+    n.group_key, n.tier, n.context = material.key, tier, material.surface.name
+    return n.key
+  end
+  for _, where in ipairs(order) do
+    local material = materials[where]
+    local made_by = 0
+    for _, maker in ipairs(material.makers) do made_by = math.max(made_by, maker.entry.stage) end
+    local joined, early = nil, {}
+    if made_by > 0 then
+      joined = material_node(material, "-output", 2 * made_by + 1)
+      for _, maker in ipairs(material.makers) do connect(graph, maker.entry.cell, joined, maker.rate) end
+    end
+    for _, user in ipairs(material.users) do
+      if joined and user.entry.stage > made_by then
+        connect(graph, joined, user.entry.cell, user.rate)
+      else
+        early[#early + 1] = user
+      end
+    end
+    local first = math.huge
+    for _, user in ipairs(early) do first = math.min(first, user.entry.stage) end
+    if #early > 0 then
+      local supply = material_node(material, "-input", 2 * first - 1)
+      for _, user in ipairs(early) do connect(graph, supply, user.entry.cell, user.rate) end
+    end
+  end
+  graph.stages = last
+  graph.columns = { Loc("cells-inputs") }
+  for s = 1, last do
+    graph.columns[2 * s] = last == 1 and Loc("cells-tab") or Loc("cells-stage", s)
+    graph.columns[2 * s + 1] = s == last and Loc("cells-outputs") or Loc("cells-between-stages")
+  end
 end
 
 return Flow
