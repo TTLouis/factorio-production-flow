@@ -1,5 +1,6 @@
 -- Private native fixture. Dispatches registered handlers using real GUI and entities.
 local T = {}
+local RecipeDetails = require("scripts.recipe_details")
 local Selection = require("shared.cell_selection")
 local Flow = require("scripts.cell_flow")
 local Cells = require("scripts.cells")
@@ -241,6 +242,16 @@ function T.tick(UI)
     assert(all.nodes["recipe/cell-1"].caption[1] == "production-flow.cells-node-name")
     local inside = Flow.build(1, CAPACITY)
     assert(inside.links["item/copper-cable>recipe/electronic-circuit"].rate == 3)
+    -- Recipe bar details read real entities: the cell's members, and the sampler's
+    -- registry for the surface view (whose name and quality are then kept).
+    local cell_detail = serpent.line(RecipeDetails.recipe({ rates = inside.recipe_rates, members = inside.members,
+      capacity = true, sidx = player.surface.index }, "electronic-circuit", tostring))
+    assert(cell_detail:find("recipe-details-capacity", 1, true) and cell_detail:find("recipe-details-machine\"", 1, true)
+      and cell_detail:find("[entity=assembling-machine-1]", 1, true), cell_detail)
+    local surface_detail = serpent.line(RecipeDetails.recipe({ rates = {}, sidx = player.surface.index }, "copper-cable", tostring))
+    assert(surface_detail:find("[entity=assembling-machine-1]", 1, true) and not surface_detail:find("recipe-details-measured", 1, true),
+      surface_detail)
+    log("CELL RECIPE DETAILS: " .. cell_detail .. " | " .. surface_detail)
     assert(inside.links["recipe/electronic-circuit>item/electronic-circuit"].rate == 1)
     local cable = storage.cell_test_machines[1]
     cells.records[1].members[cable.unit_number] = cable

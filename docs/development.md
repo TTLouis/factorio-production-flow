@@ -93,6 +93,20 @@ engine's `products_finished`, and captures the Capacity view. The offline
 `cells_measured_test.lua` covers attribution, ring roll-up, creation clipping,
 shared exclusion, membership changes, utilisation and purge on delete.
 
+Sankey bar hover cards carry recipe details (`scripts/recipe_details.lua`). A
+recipe bar lists the recipe per craft, its rates summed over all machines
+(measured, or at full speed in a cell's Capacity view) and the machines running
+it, one line per type, quality and crafting speed with the speed bonus over the
+prototype's quality speed. An item or fluid bar lists up to three running
+recipes that make it and three that use it, each with its rate line. The main
+views read the period's model rates and the sampler's machine registry, whose
+records keep the entity name and quality (`n`, `q`) after the first read and
+use the sampled speed, so redraws make no per-machine entity calls. A cell's
+graph passes its own rates and members; the All view has no recipe bars. The
+counts are cached for one tick only, so every client builds identical cards.
+`hover_labels_test.lua` checks the card layout and both kinds of details, and
+`cells_native.lua` builds them from real entities.
+
 The display item can be any item or fluid; until the player picks one it
 follows the cell's main product, and a picked one is kept through membership
 changes. The main product is the members' item product furthest along the

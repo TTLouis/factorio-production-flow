@@ -20,6 +20,7 @@ local palette = require("shared.palette")
 local S = require("shared.sprites")
 local Neighborhood = require("scripts.neighborhood")
 local Transport = require("scripts.transport_flows")
+local RecipeDetails = require("scripts.recipe_details")
 
 local V = {}
 V.MAX_INPUT_DEPTH = Neighborhood.MAX_DEPTH
@@ -892,6 +893,14 @@ function V.build(player, us, W, viewH, source)
               seconds = m.seconds, recipe_rates=m.rates and m.rates.recipes or {}, W = W, fluid_factor = ff,
               column_labels = source and source.columns,
               min_t = player.mod_settings["ssk-min-ribbon-px"].value }
+  -- Recipe details for bar tooltips: the view's rates and the machines behind
+  -- them. A cell's graph brings its own rates and members; its All view has none.
+  if source then
+    L.details = source.recipe_rates and { rates = source.recipe_rates, members = source.members,
+      capacity = source.mode == "capacity", sidx = sidx }
+  else
+    L.details = { rates = RecipeDetails.from_model(m.rates and m.rates.recipes), sidx = sidx }
+  end
   -- Rates change every sample; topology and explicit layout controls define when
   -- it is useful to optimise again. Renderer changes do not invalidate geometry.
   local signature = { "readable-fit-v3", tostring(sidx), tostring(us.period), tostring(W), tostring(viewH),

@@ -50,6 +50,8 @@ end
 ---@field cp number? Previous crafting progress, sampled on productive machines.
 ---@field bp number? Previous productivity bar progress, sampled on productive machines.
 ---@field spd number Last observed crafting speed.
+---@field n string? Entity name, kept by recipe tooltips after their first read.
+---@field q string? Quality name, kept with n.
 ---@field silo boolean? Whether rocket-part accounting applies.
 ---@field rp number? Previous rocket_parts counter.
 ---@field req number? Rocket parts required per rocket.

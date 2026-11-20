@@ -37,11 +37,28 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
     local icon, bar = elements.icons[k], elements.bars[k]
     assert(icon.raise_hover_events and bar.raise_hover_events, "both hit areas must highlight")
     assert(type(icon.tooltip) == "table" and icon.tooltip == bar.tooltip, "one native hover card on either target")
-    assert(icon.tooltip[5] == "\n" and (#icon.tooltip == 6
-      or (#icon.tooltip == 7 and LOC(icon.tooltip[7]):find("Labs (estimated)", 1, true))),
+    -- Name and rate first; then a lab estimate for science packs and the recipe details.
+    local tail = #icon.tooltip
+    if tail >= 8 and icon.tooltip[tail - 1] == "\n\n" then
+      local text = LOC(icon.tooltip[tail])
+      assert(text:find("Made by:", 1, true) or text:find("Used by:", 1, true) or text:find("Recipe (", 1, true),
+        "recipe details close the hover card: " .. text)
+      tail = tail - 2
+    end
+    assert(icon.tooltip[5] == "\n" and (tail == 6
+      or (tail == 7 and LOC(icon.tooltip[7]):find("Labs (estimated)", 1, true))),
       "compact name and rate on separate lines with a lab estimate for science packs")
     if renderer == "poly" then assert(bar.sprite == "ssk-node-hit", "polygon hit area must be transparent") end
   end
+  -- Recipe bars show the recipe, its measured rates and the machines running it.
+  local oil = assert(elements.bars["recipe/advanced-oil-processing"], "fixture needs a recipe bar")
+  local recipe_text = LOC(oil.tooltip[#oil.tooltip])
+  assert(recipe_text:find("Recipe (", 1, true) and recipe_text:find("[fluid=crude-oil]", 1, true)
+    and recipe_text:find("→", 1, true), "recipe bar lists the recipe per craft: " .. recipe_text)
+  local made = LOC(elements.bars[key].tooltip[#elements.bars[key].tooltip])
+  assert(made:find("Made by:", 1, true) and made:find("[recipe=electronic-circuit]", 1, true)
+    and made:find("[item=iron-plate]", 1, true), "material bar lists the recipes making it: " .. made)
+  if renderer == "sprites" then print("RECIPE DETAILS SAMPLE:\n" .. recipe_text .. "\n--\n" .. made) end
   -- Hover does not rebuild the chart or change selection/positions.
   local icon, bar = elements.icons[key], elements.bars[key]
   assert(SK.on_hover(event(bar), true))

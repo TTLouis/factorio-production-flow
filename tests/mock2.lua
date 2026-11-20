@@ -74,6 +74,8 @@ local sub = { name = "x" }
 prototypes = { recipe = recipes,
   item = setmetatable({}, { __index = function(_, k) return { name = k, subgroup = sub, group = { name = "g" } } end }),
   fluid = setmetatable({}, { __index = function(_, k) return { name = k, subgroup = { name = "fluid" } } end }),
+  entity = setmetatable({}, { __index = function(_, k)
+    return { name = k, get_crafting_speed = function(quality) return quality == "rare" and 1.25 or 0.75 end } end }),
   technology = {
     ["logistics"] = { research_unit_ingredients = { { name = "automation-science-pack" } }, prerequisites = {},
                       effects = { { type = "unlock-recipe", recipe = "logistic-science-pack" }, { type = "unlock-recipe", recipe = "inserter" }, { type = "unlock-recipe", recipe = "transport-belt" } } },

@@ -13,6 +13,7 @@ local Geometry = require("scripts.ribbon_geometry")
 local MaterialPicker = require("scripts.material_picker")
 local Watch = require("scripts.watch")
 local Tooltip = require("scripts.tooltip")
+local RecipeDetails = require("scripts.recipe_details")
 local GuiPlot = require("scripts.gui_plot")
 
 local SK = {}
@@ -877,6 +878,21 @@ local function draw(canvas, L, us, st, player, W, H)
         tooltip[#tooltip+1]="\n\n"
         tooltip[#tooltip+1]=imports
         details=Tooltip.lines({details,"\n\n",imports})
+      end
+      -- Recipe bars list their recipe, rates and machines; material bars the
+      -- recipes making and using them.
+      local recipe_info
+      if L.details and not n.transport and not n.is_cell then
+        if n.kind == "recipe" then
+          recipe_info = RecipeDetails.recipe(L.details, base_key(n.key):sub(8), fmt)
+        elseif n.kind == "item" or n.kind == "fluid" then
+          recipe_info = RecipeDetails.material(L.details, base_key(n.key), fmt)
+        end
+      end
+      if recipe_info then
+        tooltip[#tooltip+1]="\n\n"
+        tooltip[#tooltip+1]=recipe_info
+        details=Tooltip.lines({details,"\n\n",recipe_info})
       end
       if n.transport then
         tooltip=transport_tooltip(n.transport,true)

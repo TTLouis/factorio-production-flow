@@ -199,6 +199,8 @@ function Flow.build(selected, opts)
       graph.utilisation = utilisation(rates, capacity)
       graph.partial = seconds + 1 < requested
     end
+    -- Recipe bar tooltips list these rates and the members running each recipe.
+    graph.recipe_rates, graph.members = rates, members
     recipe_flows(rates,
       function(recipe, key, rate) connect(graph, key, "recipe/" .. recipe, rate) end,
       function(recipe, key, rate) connect(graph, "recipe/" .. recipe, key, rate) end)
