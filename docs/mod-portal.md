@@ -62,13 +62,13 @@ Use **Focus** to trace the inputs and consumers of one item or fluid. Open **Mac
 
 Use **Back**, **Forward** or **Last visits** to revisit materials in Focus. Zoom, Fit and Show labels are on the chart toolbar. Hover a ribbon to see its total flow and rates by recipe, or use the gear for more chart settings.
 
-![Focus traces the recipes connected to electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/35-focus-circuit.png)
+![Focus traces the recipes connected to electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/40-focus-electronic-circuit.png)
 
 ![Machine status lists sampled machines that make or use electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/36-machine-status.png)
 
 **Full Sankey** gives you a broader view of recipe flows on one surface. Dense charts and optional grouping are still being refined.
 
-![Full Sankey shows recipe flows across Nauvis](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/37-full-sankey.png)
+![Full Sankey shows recipe flows across Nauvis](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/41-full-sankey-oil-chain.png)
 
 ### How the calculations work
 

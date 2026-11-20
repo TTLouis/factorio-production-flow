@@ -166,6 +166,11 @@ before publishing and never re-uploads an existing version with the same archive
 A differing archive for the same version stops the run. Interrupted page/gallery
 updates can be resumed by running the same release again.
 
+For screenshots after a release ships, update the image references in
+`docs/mod-portal.md` on `main` and run the workflow with **Refresh screenshots**
+enabled. This mode verifies the existing release on both sites and requires
+the live description text and image captions to match before replacing URLs.
+
 Local publishing checks: `python -m unittest discover -s tests -p publish_test.py -v`.
 The tests use synthetic files and mocked APIs, never live credentials. API
 contracts: [initial publication](https://wiki.factorio.com/Mod_publish_API),

@@ -144,15 +144,16 @@ def page(source):
     return short, description, images
 
 
-def prepare(source, tag, output):
+def prepare(source, tag, output, gallery_source=None):
     info = json.loads((source / "mod" / MOD / "info.json").read_text())
     require(tag == "v" + info["version"], "Release tag and source version differ")
     changelog_check = source / "tools/changelog.py"
     release_notes = None
     if changelog_check.is_file():
         subprocess.run([sys.executable, str(changelog_check), "--check"], check=True)
-        release_notes = subprocess.check_output(
-            [sys.executable, str(changelog_check), "--release", info["version"]], encoding="utf-8").strip()
+        if gallery_source is None:
+            release_notes = subprocess.check_output(
+                [sys.executable, str(changelog_check), "--release", info["version"]], encoding="utf-8").strip()
     remote = release(tag)
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"{MOD}_{info['version']}.zip"
@@ -167,14 +168,16 @@ def prepare(source, tag, output):
         if checksum:
             require(checksum == "sha256:" + digest(archive), "GitHub asset checksum differs")
     else:
+        require(gallery_source is None, "Gallery refresh requires an existing GitHub ZIP")
         subprocess.run([sys.executable, str(source / "tools/build.py")], check=True)
         shutil.copyfile(source / "dist" / archive.name, archive)
     info = validate_archive(archive, source, tag)
-    short, description, images = page(source)
+    page_source = gallery_source or source
+    short, description, images = page(page_source)
     gallery = output / "gallery"
     gallery.mkdir(exist_ok=True)
     for name in images:
-        shutil.copyfile(source / "docs/screenshots" / name, gallery / name)
+        shutil.copyfile(page_source / "docs/screenshots" / name, gallery / name)
     config = json.loads((ROOT / "tools/mod_portal.json").read_text())
     metadata = dict(config, title=info["title"], summary=short, description=description,
                     source_url=f"https://github.com/{REPOSITORY}")
@@ -185,6 +188,8 @@ def prepare(source, tag, output):
                          "sha256": digest(gallery / name)} for name in images]}
     if release_notes is not None:
         plan["release_notes"] = release_notes
+    if gallery_source is not None:
+        plan["gallery_only"] = True
     (output / "plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     print(f"Verified {archive.name}: SHA256 {plan['sha256']}; {len(images)} screenshots; category: {config['category']}; tags: {', '.join(config['tags']) or 'none'}")
 
@@ -257,7 +262,7 @@ def existing_release(state, plan):
     return False
 
 
-def gallery_description(previous, proposed):
+def gallery_description(previous, proposed, *, gallery_only=False):
     image = r"(!\[[^]]*\]\()([^)]+)(\))"
     # Screenshot-only updates retain the live wording, wrapping and blank lines.
     # Keep image captions in the comparison so images still map in the same order.
@@ -266,11 +271,13 @@ def gallery_description(previous, proposed):
     if urls and template(previous) == template(proposed):
         replacements = iter(urls)
         return re.sub(image, lambda match: match[1] + next(replacements) + match[3], previous)
+    require(not gallery_only, "Gallery refresh would change the live description text or image captions")
     return proposed
 
 
 def deploy(bundle):
     plan = verify_bundle(bundle)
+    gallery_only = plan.get("gallery_only") is True
     require(os.getenv("FACTORIO_API_KEY"), "Add the FACTORIO_API_KEY repository secret before publishing")
     remote = release(plan["tag"])
     require(remote["id"] == plan["release_id"], "GitHub release changed after validation")
@@ -284,10 +291,11 @@ def deploy(bundle):
             raw = request(f"https://github.com/{REPOSITORY}/releases/download/{plan['tag']}/{plan['archive']}", binary=True)
             require(hashlib.sha256(raw).hexdigest() == plan["sha256"], "Release asset changed after validation")
     else:
+        require(not gallery_only, "Gallery refresh requires an existing GitHub ZIP")
         path = f"/uploads/repos/{REPOSITORY}/releases/{plan['release_id']}/assets?" + urlencode({"name": plan["archive"]})
         uploaded = github(path, data=(bundle / plan["archive"]).read_bytes(), method="POST", content_type="application/zip")
         require(uploaded.get("state") == "uploaded", "GitHub release asset did not finish uploading")
-    if "release_notes" in plan:
+    if not gallery_only and "release_notes" in plan:
         notes = plan["release_notes"]
         require(isinstance(notes, str) and notes.strip(), "Generated release notes are empty or invalid")
         if (remote.get("body") or "").replace("\r\n", "\n").strip() != notes:
@@ -298,6 +306,7 @@ def deploy(bundle):
                     "GitHub release notes differ from the canonical changelog")
     state = portal_state()
     if not existing_release(state, plan):
+        require(not gallery_only, "Gallery refresh requires an existing Mod Portal release")
         if state and state.get("releases"):
             version = lambda v: tuple(map(int, v.split(".")))
             require(max(version(x["version"]) for x in state["releases"]) < version(plan["version"]), "Refusing to publish an older version")
@@ -316,7 +325,11 @@ def deploy(bundle):
     previous_inline = {key for key, image in current.items() if image.get("url")
                        and (image["url"] in previous_description
                             or urljoin(PORTAL, image["url"]) in previous_description)}
-    desired, description = [], gallery_description(previous_description, plan["metadata"]["description"])
+    desired = []
+    description = gallery_description(previous_description, plan["metadata"]["description"], gallery_only=gallery_only)
+    unchanged_details = {key: state.get(key) for key in (
+        "title", "summary", "category", "tags", "license", "homepage", "source_url", "faq", "deprecated"
+    )} if gallery_only else {}
     for entry in plan["gallery"]:
         image = current.get(entry["sha1"])
         if not image:
@@ -331,18 +344,26 @@ def deploy(bundle):
     desired.extend(key for key in current if key not in desired and key not in previous_inline)
     edited = portal_post("/api/v2/mods/images/edit", {"mod": MOD, "images": ",".join(desired)})
     require(edited.get("success") is True, "Portal did not confirm gallery ordering")
-    fields = dict(plan["metadata"], mod=MOD, description=description)
+    fields = {"mod": MOD, "description": description}
+    if not gallery_only:
+        fields = dict(plan["metadata"], **fields)
     edited = portal_post("/api/v2/mods/edit_details", fields)
     require(edited.get("success") is True, "Portal did not confirm the page update")
     def complete(final):
-        return (existing_release(final, plan)
+        if not (existing_release(final, plan)
                 and final.get("description", "").replace("\r\n", "\n").strip() == description.replace("\r\n", "\n").strip()
-                and set(plan["metadata"]["tags"]) == set(final.get("tags", []))
+                and set(desired).issubset({x["id"] for x in final.get("images", [])})):
+            return False
+        if gallery_only:
+            return all(final.get(key) == value for key, value in unchanged_details.items())
+        return (set(plan["metadata"]["tags"]) == set(final.get("tags", []))
                 and final.get("category") == plan["metadata"]["category"]
-                and final.get("summary") == plan["metadata"]["summary"]
-                and set(desired).issubset({x["id"] for x in final.get("images", [])}))
+                and final.get("summary") == plan["metadata"]["summary"])
     wait_for_portal(complete, "Portal release, description, category, tags or gallery did not finish updating")
     url = f"{PORTAL}/mod/{MOD}"
+    if gallery_only:
+        print(f"Refreshed and verified the screenshot gallery at {url}")
+        return
     print(f"Published and verified {url} version {plan['version']} SHA256 {plan['sha256']}")
     if os.getenv("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
@@ -358,6 +379,7 @@ def main():
     stage.add_argument("--tag", required=True)
     stage.add_argument("--source", type=Path, required=True)
     stage.add_argument("--output", type=Path, required=True)
+    stage.add_argument("--gallery-source", type=Path, help="Use screenshots and matching description from this checkout")
     publish = commands.add_parser("deploy")
     publish.add_argument("--bundle", type=Path, required=True)
     args = parser.parse_args()
@@ -365,7 +387,7 @@ def main():
     if args.command == "resolve":
         resolve(args.tag)
     elif args.command == "prepare":
-        prepare(args.source.resolve(), args.tag, args.output.resolve())
+        prepare(args.source.resolve(), args.tag, args.output.resolve(), args.gallery_source)
     else:
         deploy(args.bundle.resolve())
 

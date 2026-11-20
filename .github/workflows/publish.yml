@@ -13,6 +13,10 @@ on:
         description: Validate only; do not upload or edit the Mod Portal
         type: boolean
         default: true
+      gallery_only:
+        description: Refresh screenshots for an existing release using the description on main
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -61,7 +65,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-        run: python automation/tools/publish.py prepare --tag "$RELEASE_TAG" --source release-source --output verified-release
+          GALLERY_ONLY: ${{ inputs.gallery_only }}
+        run: |
+          set --
+          if [ "$GALLERY_ONLY" = true ]; then
+            set -- --gallery-source automation
+          fi
+          python automation/tools/publish.py prepare --tag "$RELEASE_TAG" --source release-source --output verified-release "$@"
       - name: Save verified release bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
