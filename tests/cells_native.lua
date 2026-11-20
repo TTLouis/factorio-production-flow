@@ -315,12 +315,12 @@ function T.tick(UI)
       split = player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_cells.ssk_cell_split
     end
     assert(split.ssk_cell_sidebar.ssk_cell_list.selected_index == 1)
-    assert(has_caption(split.ssk_cell_chart.ssk_cell_toolbar, "production-flow.cells-flow-newest")
-      or serpent.line(split.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_scope.caption):find("cells-flow-newest", 1, true),
+    assert(has_caption(split.ssk_cell_views.ssk_cell_chart.ssk_cell_toolbar, "production-flow.cells-flow-newest")
+      or serpent.line(split.ssk_cell_views.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_scope.caption):find("cells-flow-newest", 1, true),
       "The All caption must say the newest cell has less data than the period")
-    assert(find(split.ssk_cell_chart, "key", "recipe/cell-2"), "Overview must render a single cell node")
-    assert(not split.ssk_cell_sidebar.ssk_cell_preview.visible, "All has no single area to preview")
-    assert(find(split.ssk_cell_chart, "side", "inputs") and find(split.ssk_cell_chart, "side", "outputs"),
+    assert(find(split.ssk_cell_views.ssk_cell_chart, "key", "recipe/cell-2"), "Overview must render a single cell node")
+    assert(split.ssk_cell_views.ssk_cell_map_tab.enabled, "All shows every cell on the map")
+    assert(find(split.ssk_cell_views.ssk_cell_chart, "side", "inputs") and find(split.ssk_cell_views.ssk_cell_chart, "side", "outputs"),
       "The cell renderer must draw both bar halves")
     storage.cell_test_phase = "capture-overview"
   elseif stage == "capture-overview" then
@@ -332,16 +332,8 @@ function T.tick(UI)
     rows.selected_index = row_of(player, 1)
     script.get_event_handler(defines.events.on_gui_selection_state_changed){player_index = player.index, element = rows}
     local split = tabs.content_cells.ssk_cell_split
-    assert(find(split.ssk_cell_chart, "key", "recipe/electronic-circuit"), "Individual cell must render its recipe")
-    assert(not find(split.ssk_cell_chart, "key", "recipe/copper-cable"), "Another cell's recipe leaked into the view")
-    local preview = split.ssk_cell_sidebar.ssk_cell_preview
-    local camera = preview.ssk_cell_camera
-    local chosen = storage.ui[player.index].cells.selected
-    local center = CellsUI.area(storage.production_cells.records[chosen])
-    assert(preview.visible and camera.surface_index == player.surface.index
-      and math.abs(camera.position.x - center.x) < 0.01 and math.abs(camera.position.y - center.y) < 0.01,
-      "A selected cell must preview its area")
-    assert(preview.ssk_cell_preview_bar.ssk_cell_jump_button.sprite == "utility/go_to_arrow")
+    assert(find(split.ssk_cell_views.ssk_cell_chart, "key", "recipe/electronic-circuit"), "Individual cell must render its recipe")
+    assert(not find(split.ssk_cell_views.ssk_cell_chart, "key", "recipe/copper-cable"), "Another cell's recipe leaked into the view")
     storage.cell_test_phase = "capture-inside"
   elseif stage == "capture-inside" then
     screenshot(player, "inside")
@@ -350,7 +342,7 @@ function T.tick(UI)
     -- A chart wider than its tab must scroll inside the frame, not push it out of the window.
     local content = player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_cells
     CellsUI.fill(player, content, storage.ui[player.index].cells, 600, 520, true)
-    local chart = content.ssk_cell_split.ssk_cell_chart
+    local chart = content.ssk_cell_split.ssk_cell_views.ssk_cell_chart
     local sp = chart.ssk_cell_plot.ssk_sp
     log("CELL WIDE: canvas " .. tostring(sp.ssk_canvas.style.minimal_width) .. " viewport max " .. tostring(sp.style.maximal_width))
     assert(sp.horizontal_scroll_policy == "auto", "A wide cell chart must scroll horizontally")
@@ -358,9 +350,48 @@ function T.tick(UI)
     storage.cell_test_phase = "capture-wide"
   elseif stage == "capture-wide" then
     screenshot(player, "inside-wide")
+    storage.cell_test_phase = "map"
+  elseif stage == "map" then
+    UI.open(player)
+    local views = cells_tab(player).ssk_cell_views
+    assert(views.ssk_cell_map_tab.enabled)
+    views.selected_tab_index = 2
+    script.get_event_handler(defines.events.on_gui_selected_tab_changed){player_index = player.index, element = views}
+    local state = storage.ui[player.index].cells
+    views = cells_tab(player).ssk_cell_views
+    assert(state.view == "map" and views.selected_tab_index == 2, "The Map tab must stay selected")
+    local map = views.ssk_cell_map
+    local camera = map.ssk_cell_camera
+    local center = CellsUI.area(storage.production_cells.records[state.selected])
+    assert(camera.surface_index == player.surface.index and math.abs(camera.position.x - center.x) < 0.01
+      and math.abs(camera.position.y - center.y) < 0.01, "The map must centre on the cell")
+    local bar = map.ssk_cell_map_bar
+    assert(bar.ssk_cell_jump_button.sprite == "utility/go_to_arrow" and bar.ssk_cell_map_edit.enabled)
+    local slider = bar.ssk_cell_map_zoom
+    slider.slider_value = 1
+    script.get_event_handler(defines.events.on_gui_value_changed){player_index = player.index, element = slider}
+    assert(math.abs(camera.zoom - 1) < 0.001, "Zoom must apply to the map")
+    local before = camera.position.x
+    click(player, map, "dx", 1)
+    camera = cells_tab(player).ssk_cell_views.ssk_cell_map.ssk_cell_camera
+    assert(camera.position.x > before and math.abs(camera.zoom - 1) < 0.001, "Moving the view keeps the zoom")
+    storage.cell_test_phase = "capture-map"
+  elseif stage == "capture-map" then
+    screenshot(player, "map")
+    storage.cell_test_phase = "fit"
+  elseif stage == "fit" then
+    local state = storage.ui[player.index].cells
+    click(player, cells_tab(player).ssk_cell_views.ssk_cell_map, "ssk_ui", "cell_map_fit")
+    local camera = cells_tab(player).ssk_cell_views.ssk_cell_map.ssk_cell_camera
+    local center = CellsUI.area(storage.production_cells.records[state.selected])
+    assert(math.abs(camera.position.x - center.x) < 0.01 and math.abs(camera.zoom - state.fitted.zoom) < 0.001
+      and not state.maps[state.selected], "Fit must return to the machines")
+    log("CELL MAP: fitted zoom " .. state.fitted.zoom .. " at " .. serpent.line({ state.fitted.x, state.fitted.y }))
+    storage.cell_test_phase = "capture-fit"
+  elseif stage == "capture-fit" then
+    screenshot(player, "map-fit")
     storage.cell_test_phase = "jump"
   elseif stage == "jump" then
-    UI.open(player)
     cells_tab(player)
     click(player, player.gui.screen.ssk_main, "ssk_ui", "cell_jump")
     assert(not player.gui.screen.ssk_main, "Jump must close the window")
@@ -375,7 +406,13 @@ function T.tick(UI)
     player.exit_remote_view()
     assert(player.controller_type == defines.controllers.character, "Leaving remote view returns to the character")
     UI.open(player)
-    assert(cells_tab(player).ssk_cell_sidebar.ssk_cell_list.selected_index == row_of(player, 1), "Reopening keeps the selected cell")
+    local split = cells_tab(player)
+    assert(split.ssk_cell_sidebar.ssk_cell_list.selected_index == row_of(player, 1), "Reopening keeps the selected cell")
+    assert(split.ssk_cell_views.selected_tab_index == 2, "Reopening keeps the Map tab")
+    split.ssk_cell_views.selected_tab_index = 1
+    script.get_event_handler(defines.events.on_gui_selected_tab_changed){player_index = player.index, element = split.ssk_cell_views}
+    assert(not storage.ui[player.index].cells.view and find(cells_tab(player).ssk_cell_views.ssk_cell_chart, "key", "recipe/electronic-circuit"),
+      "Flow must chart the cell again")
     storage.cell_test_phase = "capacity"
   elseif stage == "capacity" then
     local main = player.gui.screen.ssk_main
@@ -386,7 +423,7 @@ function T.tick(UI)
     script.get_event_handler(defines.events.on_gui_switch_state_changed){player_index = player.index, element = switch}
     main = player.gui.screen.ssk_main
     assert(not main.ssk_window_bar.ssk_period_picker.visible, "Capacity does not depend on the period")
-    local chart = main.ssk_inner.ssk_tabs.content_cells.ssk_cell_split.ssk_cell_chart
+    local chart = main.ssk_inner.ssk_tabs.content_cells.ssk_cell_split.ssk_cell_views.ssk_cell_chart
     assert(find(chart, "key", "recipe/electronic-circuit"), "Capacity must chart the configured recipe")
     storage.cell_test_phase = "capture-capacity"
   elseif stage == "capture-capacity" then
@@ -514,8 +551,8 @@ function T.tick(UI)
     script.get_event_handler(defines.events.on_gui_selection_state_changed){player_index = player.index, element = picker}
     local split = cells_tab(player)
     assert(#split.ssk_cell_sidebar.ssk_cell_list.items == 1, "Only All is listed on a surface without cells")
-    assert(has_caption(split.ssk_cell_chart, "production-flow.cells-empty-surface"), "Empty surfaces need their own message")
-    assert(serpent.line(split.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_scope.caption):find("duration-minutes", 1, true),
+    assert(has_caption(split.ssk_cell_views.ssk_cell_chart, "production-flow.cells-empty-surface"), "Empty surfaces need their own message")
+    assert(serpent.line(split.ssk_cell_views.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_scope.caption):find("duration-minutes", 1, true),
       "An empty surface's caption must name the selected period")
     storage.cell_test_phase = "capture-empty"
   elseif stage == "capture-empty" then

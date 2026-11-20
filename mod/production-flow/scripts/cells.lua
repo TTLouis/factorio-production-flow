@@ -5,11 +5,7 @@ local Picker = require("scripts.material_picker")
 local Su = require("scripts.surfaces")
 
 local Cells = { NAME = "ssk_cells", DELETE_NAME = "ssk_cell_delete" }
-local selection_prompts = {
-  select = Loc("cells-drag"),
-  add = Loc("cells-add-drag"),
-  remove = Loc("cells-remove-drag"),
-}
+local selection_modes = { select = true, add = true, remove = true }
 local supported = {}
 for _, kind in ipairs(Selection.types) do supported[kind] = true end
 
@@ -588,7 +584,7 @@ function Cells.on_click(player, element)
       draft.excluded[side] = {}
     end
     Cells.open(player)
-  elseif selection_prompts[tag] then
+  elseif selection_modes[tag] then
     if draft and draft.surface_index ~= player.surface.index then
       player.print(Loc("cells-wrong-surface"))
       return true
@@ -607,7 +603,6 @@ function Cells.on_click(player, element)
       return true
     end
     if draft then draft.selection_mode = tag end
-    player.print(selection_prompts[tag])
   elseif tag == "save" and draft then
     local window = player.gui.screen[Cells.NAME]
     if not window then return true end

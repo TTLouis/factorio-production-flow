@@ -6,19 +6,109 @@ local Sampler = require("scripts.sampler")
 local Su = require("scripts.surfaces")
 
 local UI = {}
-local PREVIEW_H = 150
+-- Vanilla tab strip and its top content padding, as on the Balance tab.
+local TAB_HEADER = 48
+local MAP_BAR = 40
+UI.ZOOM_MIN, UI.ZOOM_MAX = 0.05, 2
 
--- Centre and size (tiles) of the area the cell's machines cover.
-function UI.area(record)
+-- Centre and size (tiles) of the area the cells' machines cover.
+function UI.area(...)
   local x1, y1, x2, y2
-  for unit, p in pairs(record and record.positions or {}) do
-    local entity = record.members[unit]
-    if entity and entity.valid then p = entity.position end
-    x1, y1 = math.min(x1 or p.x, p.x), math.min(y1 or p.y, p.y)
-    x2, y2 = math.max(x2 or p.x, p.x), math.max(y2 or p.y, p.y)
+  for _, record in ipairs({ ... }) do
+    for unit, p in pairs(record.positions or {}) do
+      local entity = record.members[unit]
+      if entity and entity.valid then p = entity.position end
+      x1, y1 = math.min(x1 or p.x, p.x), math.min(y1 or p.y, p.y)
+      x2, y2 = math.max(x2 or p.x, p.x), math.max(y2 or p.y, p.y)
+    end
   end
   if not x1 then return end
   return { x = (x1 + x2) / 2, y = (y1 + y2) / 2 }, x2 - x1 + 6, y2 - y1 + 6
+end
+
+-- Fitting never zooms in past normal map scale; the slider goes further.
+UI.FIT_MAX = 1
+
+local function clamp_zoom(zoom) return math.max(UI.ZOOM_MIN, math.min(UI.ZOOM_MAX, zoom)) end
+
+-- The Map tab's view of the selected cell, or of every listed cell for All.
+-- It is fitted to the machines' current positions on each refresh; once the
+-- player zooms or moves, their view is kept until Fit or a surface change.
+function UI.map_view(state, records, ids)
+  local key = state.selected or "all"
+  local chosen = {}
+  if state.selected then chosen[1] = records[state.selected]
+  else for _, id in ipairs(ids) do chosen[#chosen + 1] = records[id] end end
+  local center, w, h = UI.area(table.unpack(chosen))
+  if not center then state.fitted = nil; return end
+  local cam_w, cam_h = state.map_w or 600, state.map_h or 400
+  local fitted = { key = key, x = center.x, y = center.y, surface = chosen[1].surface_index,
+    zoom = clamp_zoom(math.min(UI.FIT_MAX, cam_w / (w * 32), cam_h / (h * 32))) }
+  state.fitted = fitted
+  local own = state.maps and state.maps[key]
+  if own and own.surface == fitted.surface then return own end
+  if own then state.maps[key] = nil end
+  return fitted
+end
+
+-- The player's own view of the shown cell, started from the fitted one.
+function UI.own_view(state)
+  local key = state.selected or "all"
+  state.maps = state.maps or {}
+  local fitted = state.fitted
+  if not state.maps[key] and fitted and fitted.key == key then
+    state.maps[key] = { x = fitted.x, y = fitted.y, surface = fitted.surface, zoom = fitted.zoom }
+  end
+  return state.maps[key]
+end
+
+-- Where the Map tab is looking now.
+function UI.current_view(state)
+  local key = state.selected or "all"
+  local fitted = state.fitted
+  return state.maps and state.maps[key] or (fitted and fitted.key == key and fitted or nil)
+end
+
+-- Moves the view a quarter of the visible map in a direction.
+function UI.pan(state, dx, dy)
+  local view = UI.own_view(state)
+  if not view then return end
+  view.x = view.x + dx * (state.map_w or 600) / (32 * view.zoom) / 4
+  view.y = view.y + dy * (state.map_h or 400) / (32 * view.zoom) / 4
+end
+
+function UI.zoom(state, zoom)
+  local view = UI.own_view(state)
+  if view then view.zoom = clamp_zoom(zoom) end
+  return view
+end
+
+function UI.fit(state)
+  if state.maps then state.maps[state.selected or "all"] = nil end
+end
+
+local function map_button(bar, sprite, tooltip, tags)
+  return bar.add { type = "sprite-button", style = "tool_button", sprite = sprite, tooltip = tooltip, tags = tags }
+end
+
+local function build_map(map, width, height)
+  local bar = map.add { type = "frame", name = "ssk_cell_map_bar", style = "subheader_frame", direction = "horizontal" }
+  bar.style.horizontally_stretchable, bar.style.vertical_align = true, "center"
+  bar.add { type = "label", name = "ssk_cell_map_heading", style = "subheader_caption_label" }
+  bar.add { type = "empty-widget" }.style.horizontally_stretchable = true
+  bar.add { type = "label", caption = Loc("machine-status-zoom") }
+  local slider = bar.add { type = "slider", name = "ssk_cell_map_zoom", minimum_value = UI.ZOOM_MIN,
+    maximum_value = UI.ZOOM_MAX, value = 0.5, value_step = 0.05, tags = { ssk_ui = "cell_map_zoom" } }
+  slider.style.width = math.max(80, math.min(160, width - 420))
+  for _, move in ipairs({ { "left", -1, 0 }, { "up", 0, -1 }, { "down", 0, 1 }, { "right", 1, 0 } }) do
+    map_button(bar, "utility/hint_arrow_" .. move[1], Loc("cells-map-move"),
+      { ssk_ui = "cell_map_pan", dx = move[2], dy = move[3] })
+  end
+  map_button(bar, "utility/center", Loc("cells-map-fit"), { ssk_ui = "cell_map_fit" })
+  map_button(bar, "utility/go_to_arrow", Loc("cells-jump"), { ssk_ui = "cell_jump" }).name = "ssk_cell_jump_button"
+  map_button(bar, "utility/rename_icon", Loc("cells-edit"), { ssk_ui = "cell_edit" }).name = "ssk_cell_map_edit"
+  local camera = map.add { type = "camera", name = "ssk_cell_camera", position = { 0, 0 }, surface_index = 1, zoom = 0.5 }
+  camera.style.width, camera.style.height = width, height - MAP_BAR
 end
 
 -- Measured (default) shows what the cell's machines actually crafted over the
@@ -72,23 +162,24 @@ function UI.fill(player, container, state, width, height, full, only_auto)
     list.add { type = "list-box", name = "ssk_cell_list", tags = { ssk_ui = "cell_list" } }
     list.ssk_cell_list.style.horizontally_stretchable = true
     list.ssk_cell_list.style.height = height - 40
-    -- The selected cell's area on the map, with a jump to it in remote view.
-    local preview = list.add { type = "frame", name = "ssk_cell_preview", style = "inside_deep_frame", direction = "vertical" }
-    preview.style.horizontally_stretchable = true
-    local head = preview.add { type = "frame", name = "ssk_cell_preview_bar", style = "subheader_frame" }
-    head.style.horizontally_stretchable = true
-    head.add { type = "label", style = "subheader_caption_label", caption = Loc("cells-preview") }
-    head.add { type = "empty-widget" }.style.horizontally_stretchable = true
-    head.add { type = "sprite-button", name = "ssk_cell_jump_button", style = "tool_button",
-      sprite = "utility/go_to_arrow", tooltip = Loc("cells-jump"), tags = { ssk_ui = "cell_jump" } }
-    local camera = preview.add { type = "camera", name = "ssk_cell_camera", surface_index = player.surface.index,
-      position = player.position, zoom = 0.5 }
-    camera.style.horizontally_stretchable = true
-    camera.style.height = PREVIEW_H
-    local right = split.add { type = "frame", name = "ssk_cell_chart", style = "inside_deep_frame", direction = "vertical" }
-    right.style.height = height
+    -- Flow charts the cells; Map shows where they are, like Balance's Flow and History.
+    local views = split.add { type = "tabbed-pane", name = "ssk_cell_views", style = "tabbed_pane_with_no_side_padding",
+      tags = { ssk_ui = "cell_views" } }
+    views.style.top_margin = 0
     -- A fixed width keeps wide cells inside the window; the chart scrolls instead.
-    right.style.width = width - side - 8
+    views.style.width = width - side - 8
+    local flow_tab = views.add { type = "tab", caption = Loc("help-flow"), tooltip = Loc("cells-flow-tab") }
+    local right = views.add { type = "frame", name = "ssk_cell_chart", style = "inside_deep_frame", direction = "vertical" }
+    views.add_tab(flow_tab, right)
+    local map_tab = views.add { type = "tab", name = "ssk_cell_map_tab", caption = Loc("cells-map"), tooltip = Loc("cells-map-tab") }
+    local map = views.add { type = "frame", name = "ssk_cell_map", style = "inside_deep_frame", direction = "vertical" }
+    views.add_tab(map_tab, map)
+    for _, panel in ipairs({ right, map }) do
+      panel.style.width, panel.style.height = width - side - 8, height - TAB_HEADER
+      panel.style.padding = 0
+    end
+    state.map_w, state.map_h = width - side - 8, height - TAB_HEADER - MAP_BAR
+    build_map(map, width - side - 8, height - TAB_HEADER)
     local toolbar = right.add { type = "frame", name = "ssk_cell_toolbar", style = "subheader_frame", direction = "vertical" }
     toolbar.style.horizontally_stretchable = true
     -- subheader_frame is one line tall; let it grow for the wrapped scope text so
@@ -123,24 +214,30 @@ function UI.fill(player, container, state, width, height, full, only_auto)
   list_bar.ssk_cell_edit_button.enabled = state.selected ~= nil
   list_bar.ssk_cell_delete_button.enabled = state.selected ~= nil
   local rows = sidebar.ssk_cell_list
-  local center, area_w, area_h = UI.area(state.selected and records[state.selected])
-  local preview = sidebar.ssk_cell_preview
-  preview.visible = center ~= nil
-  rows.style.height = height - 40 - (center and PREVIEW_H + 48 or 0)
-  if center then
-    local camera = preview.ssk_cell_camera
-    camera.surface_index = records[state.selected].surface_index
-    camera.position = center
-    camera.zoom = math.max(0.05, math.min(1, (side - 8) / (area_w * 32), PREVIEW_H / (area_h * 32)))
-  end
   local listed = table.concat(signature, ",")
   if full or state.listed ~= listed then rows.items = items end
   state.listed = listed
   rows.selected_index = selected_index
   state.ids = ids
+  local views = split.ssk_cell_views
+  local view = UI.map_view(state, records, ids)
+  views.ssk_cell_map_tab.enabled = view ~= nil
+  if not view then state.view = nil end
+  views.selected_tab_index = state.view == "map" and 2 or 1
+  if view then
+    local map = views.ssk_cell_map
+    local bar = map.ssk_cell_map_bar
+    bar.ssk_cell_map_heading.caption = state.selected and records[state.selected].name or Loc("cells-all")
+    bar.ssk_cell_map_zoom.slider_value = view.zoom
+    bar.ssk_cell_map_edit.enabled = state.selected ~= nil
+    local camera = map.ssk_cell_camera
+    camera.surface_index, camera.position, camera.zoom = view.surface, { view.x, view.y }, view.zoom
+  end
+  -- The chart is rebuilt when Flow is shown again.
+  if state.view == "map" then state.rendered_selection = false; return end
   local mode = UI.mode(state)
   local graph = Flow.build(state.selected, { mode = mode, period = state.period, surface = state.sidx })
-  local right = split.ssk_cell_chart
+  local right = views.ssk_cell_chart
   local bar = right.ssk_cell_toolbar
   bar.ssk_cell_title.ssk_cell_heading.caption = state.selected and records[state.selected].name or Loc("cells-all")
   bar.ssk_cell_title.ssk_cell_mode.switch_state = mode == "capacity" and "right" or "left"
@@ -153,7 +250,7 @@ function UI.fill(player, container, state, width, height, full, only_auto)
   local changed = state.rendered_selection ~= state.selected
   state.rendered_selection = state.selected
   local plot = right.ssk_cell_plot
-  SK.fill(player, plot, chart, width - side - 28, math.max(100, height - (width >= 780 and 58 or 88)),
+  SK.fill(player, plot, chart, width - side - 28, math.max(100, height - TAB_HEADER - (width >= 780 and 58 or 88)),
     full or changed, only_auto, graph)
   -- Cap the viewport to the frame so content wider than the chart scrolls.
   if plot.ssk_sp then plot.ssk_sp.style.maximal_width = width - side - 16 end

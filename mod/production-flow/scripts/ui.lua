@@ -493,17 +493,16 @@ local function show_cell(player, id)
   UI.open(player)
 end
 
--- Closes the window and centres remote view on the cell's machines.
-local function jump_to_cell(player, id)
-  local cells = storage.production_cells
-  local record = cells and cells.records[id]
-  local center = record and CellsUI.area(record)
-  if not center or player.force ~= game.forces.player then return end
+-- Closes the window and opens remote view where the Map tab is looking.
+local function jump_to_map(player, state)
+  local view = CellsUI.current_view(state)
+  if not view or player.force ~= game.forces.player then return end
   UI.close(player)
   local ok = pcall(player.set_controller, { type = defines.controllers.remote,
-    surface = record.surface_index, position = center })
+    surface = view.surface, position = { view.x, view.y } })
   if ok then return end
-  for _, entity in pairs(record.members) do
+  local record = state.selected and storage.production_cells.records[state.selected]
+  for _, entity in pairs(record and record.members or {}) do
     if entity.valid then player.centered_on = entity; return end
   end
 end
@@ -585,8 +584,14 @@ function UI.on_click(e)
   elseif a == "cell_edit" and us.tab_id == "cells" and us.cells.selected then
     UI.close(player)
     Cells.on_click(player, { tags = { ssk_cell = "edit", cell_id = us.cells.selected } })
-  elseif a == "cell_jump" and us.tab_id == "cells" and us.cells.selected then
-    jump_to_cell(player, us.cells.selected)
+  elseif a == "cell_jump" and us.tab_id == "cells" then
+    jump_to_map(player, us.cells)
+  elseif a == "cell_map_pan" and us.tab_id == "cells" then
+    CellsUI.pan(us.cells, el.tags.dx, el.tags.dy)
+    UI.refresh(player)
+  elseif a == "cell_map_fit" and us.tab_id == "cells" then
+    CellsUI.fit(us.cells)
+    UI.refresh(player)
   elseif a == "cell_delete" and us.tab_id == "cells" and us.cells.selected then
     Cells.prompt_delete(player, us.cells.selected, true, UI.close)
   elseif a == "help" then close_inspectors(player); Help.open(player)
@@ -821,6 +826,11 @@ function UI.on_tab_changed(e)
     UI.refresh(player)
     return true
   end
+  if f.name == "ssk_cell_views" and us.tab_id == "cells" then
+    us.cells.view = f.selected_tab_index == 2 and "map" or nil
+    UI.refresh(player)
+    return true
+  end
   if f.name == "ssk_balance_inspector_tabs" then
     local c = content(player, "balance")
     local split = c and c.ssk_balance_split
@@ -895,7 +905,17 @@ function UI.on_closed(e)
 end
 
 function UI.on_value_changed(e)
-  if e.element and e.element.valid then return MachineStatus.on_value_changed(game.get_player(e.player_index), e.element) end
+  local el = e.element
+  if not (el and el.valid) then return end
+  if el.tags.ssk_ui == "cell_map_zoom" then
+    local state = ustate(e.player_index).cells
+    local view = state and CellsUI.zoom(state, el.slider_value)
+    if view then
+      el.parent.parent.ssk_cell_camera.zoom = view.zoom
+    end
+    return true
+  end
+  return MachineStatus.on_value_changed(game.get_player(e.player_index), el)
 end
 
 function UI.on_text_changed(e)
