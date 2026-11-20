@@ -55,6 +55,7 @@ end
 ---@field req number? Rocket parts required per rocket.
 ---@field status_due integer? Earliest tick to observe status again unless the recipe changes.
 ---@field status_row table? Shared recipe status aggregate for this machine's last observation.
+---@field status_entity string? Prototype counted in the recipe's observed machine types.
 ---@field status_surface integer? Last observed surface for status.
 ---@field status_force integer? Last observed force for status.
 ---@field issue string? Last observed category of production issue.
@@ -401,6 +402,12 @@ local function remove_observation(rec)
   local row = rec.status_row
   if not row then return end
   remove_issue(row, rec.issue, rec.u)
+  local name = rec.status_entity
+  if name then
+    local remaining = row.entities[name] - 1
+    row.entities[name] = remaining > 0 and remaining or nil
+    rec.status_entity = nil
+  end
   row.observed = row.observed - 1
   if row.observed == 0 then
     local surfaces = storage.machine_status
@@ -433,6 +440,11 @@ local function observe_status(rec, e, recipe, tick)
     if not row then row = { observed = 0, issues = {} }; recipes[recipe] = row end
     row.observed = row.observed + 1
     rec.status_row, rec.status_surface, rec.status_force = row, surface, force
+  end
+  if e.name and not rec.status_entity then
+    row.entities = row.entities or {}
+    row.entities[e.name] = (row.entities[e.name] or 0) + 1
+    rec.status_entity = e.name
   end
   row.sample_tick = tick
   local category = status_categories[e.status]

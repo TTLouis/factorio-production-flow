@@ -10,6 +10,13 @@ for name,color in pairs(require("shared.plot_colors")) do
   protos[#protos+1]={type="sprite",name="ssk-plot-"..name,filename="__core__/graphics/white-square.png",
     width=10,height=10,tint=color,flags={"gui"}}
 end
+for step, alpha in ipairs(palette.stub_alpha) do
+  for _, dim in ipairs{false, true} do
+    protos[#protos+1] = {type="sprite", name=S.stub_step(step, dim), filename="__core__/graphics/white-square.png",
+      width=10, height=10, tint=palette.tint(dim and palette.DIM or palette.GREY, dim and alpha * palette.dim.alpha or alpha),
+      flags={"gui"}}
+  end
+end
 -- Sprite charts use the same fade direction and peak opacity as the polygon stubs.
 for _, right in ipairs({false, true}) do
   for _, color in ipairs({palette.GREY, palette.DIM}) do
@@ -27,16 +34,18 @@ for d, dir in ipairs(S.DIRS) do
     local idx = (d - 1) * steps.count + (k - 1)
     local x = (idx % steps.grid_cols) * steps.cell_w
     local y = math.floor(idx / steps.grid_cols) * steps.cell_h
+    local solid = k == steps.count
     for c = 1, palette.count do
       protos[#protos + 1] = {
         type = "sprite",
         name = S.name(dir, k, c),
-        filename = ATLAS,
+        -- A separate white square keeps atlas filtering out of straight joins.
+        filename = solid and "__core__/graphics/white-square.png" or ATLAS,
         priority = "extra-high-no-scale",
-        x = x,
-        y = y,
-        width = steps.cell_w,
-        height = steps.cell_h,
+        x = solid and 0 or x,
+        y = solid and 0 or y,
+        width = solid and 10 or steps.cell_w,
+        height = solid and 10 or steps.cell_h,
         tint = palette.tint(c),
         flags = { "gui" },
       }

@@ -17,7 +17,7 @@ local Gr = require("scripts.groups")
 local Graph = require("scripts.graph")
 local Default = require("shared.groups_default")
 local palette = require("shared.palette")
-local S = require("shared.sprites")
+local Geometry = require("scripts.ribbon_geometry")
 local Neighborhood = require("scripts.neighborhood")
 local Transport = require("scripts.transport_flows")
 
@@ -265,7 +265,54 @@ local function build_graph(pi, m, us)
       rn.shown_in = math.huge -- recipe nodes have no stubs
     end
   end
-  return nodes, links
+  return nodes, links, by_recipe
+end
+
+local function recipe_rows(nodes, links, recipes)
+  local materials, shown = {}, {}
+  for _, n in pairs(nodes) do
+    if n.kind == "item" or n.kind == "fluid" then
+      local key = (n.key:gsub("#.*$", ""))
+      materials[key] = materials[key] or {made={}, used={}, masked_made={}, masked_used={}}
+      n.recipe_rows = materials[key]
+    end
+  end
+  local function mark(key, direction, recipe)
+    if not materials[key] then return end
+    shown[key] = shown[key] or {made={}, used={}}
+    shown[key][direction][recipe] = true
+  end
+  for _, l in ipairs(links) do
+    for _, item in ipairs(l.details or {}) do
+      mark(item.from, "used", item.recipe)
+      mark(item.to, "made", item.recipe)
+    end
+  end
+  local function add(recipe, edges, endpoint, direction)
+    local totals = {}
+    for _, edge in ipairs(edges) do
+      local key = edge[endpoint]
+      if materials[key] then totals[key] = (totals[key] or 0) + edge.rate end
+    end
+    for key, rate in pairs(totals) do
+      if rate > EPS then
+        local visible = shown[key] and shown[key][direction][recipe]
+        local rows = materials[key][visible and direction or "masked_" .. direction]
+        rows[#rows + 1] = {recipe=recipe, rate=rate}
+      end
+    end
+  end
+  for recipe, sides in pairs(recipes) do
+    add(recipe, sides.ins, "from", "used")
+    add(recipe, sides.outs, "to", "made")
+  end
+  local function order(a, b)
+    if a.rate ~= b.rate then return a.rate > b.rate end
+    return a.recipe < b.recipe
+  end
+  for _, sides in pairs(materials) do
+    for _, rows in pairs(sides) do table.sort(rows, order) end
+  end
 end
 
 local function drop_nodes(nodes, links, keep_fn)
@@ -647,7 +694,7 @@ function V.build(player, us, W, viewH)
   local sidx = us.sidx or player.surface.index -- surfaces are never combined
   local m = Model.build(sidx, us.period)
 
-  local nodes, links = build_graph(pi, m, us)
+  local nodes, links, recipes = build_graph(pi, m, us)
   add_transport(nodes, links, Transport.query(player.force, game.surfaces[sidx], game.tick, us.period))
   local ff = player.mod_settings["ssk-fluid-scale"].value
   local focused
@@ -882,11 +929,12 @@ function V.build(player, us, W, viewH)
   local L = { nodes = nodes, links = link_list, cols = cols, col_tiers = col_tiers, all_tiers = all_tiers,
               seconds = m.seconds, recipe_rates=m.rates and m.rates.recipes or {}, W = W, fluid_factor = ff,
               min_t = player.mod_settings["ssk-min-ribbon-px"].value }
+  if us.view ~= "focus" and not us.neighborhood then recipe_rows(nodes, link_list, recipes) end
   -- Rates change every sample; topology and explicit layout controls define when
   -- it is useful to optimise again. Renderer changes do not invalidate geometry.
-  local signature = { "readable-fit-v3", tostring(sidx), tostring(us.period), tostring(W), tostring(viewH),
+  local signature = { "readable-fit-v4", tostring(sidx), tostring(us.period), tostring(W), tostring(viewH),
     us.view or "detail", tostring(us.neighborhood), us.layout or "clean", us.heights or "sqrt", us.lines or "metro",
-    tostring(us.zoom), tostring(us.reflow), tostring(L.min_t), tostring(ff) }
+    tostring(focused and us.zoom or 1), tostring(us.reflow), tostring(L.min_t), tostring(ff) }
   for _, k in ipairs(sorted_keys(nodes)) do
     local n = nodes[k]
     signature[#signature + 1] = k .. ":" .. n.ci .. ":" .. n.group
@@ -1209,9 +1257,8 @@ end
 -- long links (spanning several columns): flat segment + one curve. Choose the variant whose
 -- flat segment overlaps fewer node slots: flat at the source height then curve into the
 -- target ("late"), or curve out of the source then flat at the target height ("early").
-function V.route(L, us)
-  -- right-angle preference: more ribbons take the metro route (90° crossings)
-  local steep = (us and us.lines == "metro") and 0.3 or 0.9
+function V.route(L, us, keep_header_level)
+  local metro = us.lines == "metro"
   local cx = L.col_x
   local function overlap(ci0, ci1, y0, y1)
     local o = 0
@@ -1226,7 +1273,10 @@ function V.route(L, us)
   end
   for _, l in ipairs(L.links) do
     local ca, cb = l.a.ci, l.b.ci
-    if cb - ca > 1 then
+    if keep_header_level then
+      l.route = "late"
+      l.curve_x0, l.curve_x1 = l.a.x + V.HEADER_W, l.b.x
+    elseif cb - ca > 1 then
       local late = overlap(ca + 1, cb - 1, l.y1, l.y1 + l.t)
       local early = overlap(ca + 1, cb - 1, l.y2, l.y2 + l.t)
       if early < late then
@@ -1244,22 +1294,16 @@ function V.route(L, us)
     else l.cx0, l.cx1 = l.curve_x0 or (cx[ca] + V.NODE_W), l.curve_x1 or cx[ca + 1] end
   end
 
-  -- Orthogonal ("metro") routing for steep ribbons: an S-curve keeps a constant VERTICAL
-  -- thickness, so a steep one turns into a hairline. Instead: bar → rounded corner →
-  -- vertical bar → rounded corner → bar. Vertical runs get their own track in the gap.
+  -- Rounded bends keep their width through steep runs in either line mode.
   local gaps = {}
   for _, l in ipairs(L.links) do
     local w = l.cx1 - l.cx0
     local D = math.abs(l.y2 - l.y1)
-    if w > 0 and D > steep * w then
-      local k, q = S.elbow_index(math.min(0.7, l.t / (l.t + math.max(8, l.t * 0.6))))
-      local R = l.t * (1 - q) / q
-      if w >= 2 * R + l.t + 4 and D >= 2 * R + l.t + 2 then
-        l.ortho = { k = k, R = R }
-        local g = gaps[l.cx0]
-        if not g then g = { x0 = l.cx0, x1 = l.cx1, links = {} }; gaps[l.cx0] = g end
-        table.insert(g.links, l)
-      end
+    l.ortho = Geometry.steep(w, D, l.t, metro) and Geometry.bend(l.t, D, w) or nil
+    if l.ortho then
+      local g = gaps[l.cx0]
+      if not g then g = { x0 = l.cx0, x1 = l.cx1, links = {} }; gaps[l.cx0] = g end
+      table.insert(g.links, l)
     end
   end
   for _, g in pairs(gaps) do
@@ -1412,7 +1456,7 @@ function V.layout(L, us, W, viewH)
   end
   if s <= 0 or s ~= s then s = 1e-6 end
   L.fit = s
-  L.scale = us.keep_layout and us.layout_snapshot.scale or s * (us.zoom or 1)
+  L.scale = us.keep_layout and us.layout_snapshot.scale or s * (us.view == "focus" and us.zoom or 1)
   size_nodes(L, L.scale)
   L.H = measure(L)
   if not us.keep_layout then V.optimise_lanes(L, us) end
@@ -1481,8 +1525,7 @@ end
 --     stacked like a node, so its straight run can never lie on a node or another run
 --   * order: barycenter sweeps + transpose over nodes AND vias (crossings minimised)
 --   * y: stacked with gaps, then pulled toward their neighbours' ports (keeps vias straight)
---   * gaps between columns are widened until every vertical (right-angle) run has its own
---     track; ribbons only ever CROSS, never run on top of each other
+--   * gaps reserve space for vertical tracks, shared in Full Sankey by bends with disjoint spans
 --   * labels sit above their node, inside the node's slot
 ---------------------------------------------------------------------------
 V.F_GAP = 14       -- vertical gap between slots
@@ -1490,11 +1533,45 @@ V.F_BAR_MIN = 22   -- a node bar is never thinner than this (ribbons are centred
 V.F_MIN_GAP = 140  -- minimum horizontal gap between columns
 V.F_MAX_GAP = 420
 
+-- The occupied vertical span includes the horizontal ports and both corners.
+-- Disjoint bends can use the same X track without drawing over one another.
+local function pack_tracks(segments)
+  table.sort(segments, function(a, b)
+    if a.y1 ~= b.y1 then return a.y1 < b.y1 end
+    if a.y2 ~= b.y2 then return a.y2 < b.y2 end
+    if a.from ~= b.from then return a.from < b.from end
+    return a.to < b.to
+  end)
+  local tracks = {}
+  for _, sg in ipairs(segments) do
+    local top = math.min(sg.y1, sg.y2)
+    local bottom = math.max(sg.y1, sg.y2) + sg.t
+    local slot
+    for _, track in ipairs(tracks) do
+      local clear = true
+      for _, other in ipairs(track.segments) do
+        if top < other.bottom + 2 and bottom + 2 > other.top then clear = false; break end
+      end
+      if clear then slot = track; break end
+    end
+    if not slot then
+      slot = { width = 0, segments = {} }
+      tracks[#tracks + 1] = slot
+    end
+    slot.width = math.max(slot.width, sg.t)
+    slot.segments[#slot.segments + 1] = {segment=sg, top=top, bottom=bottom}
+  end
+  local width = 0
+  for _, track in ipairs(tracks) do width = width + track.width + 6 end
+  return tracks, width
+end
+
 function V.layout_focus(L, us, W, viewH, wide)
   local ncol = #L.cols
   -- the whole-base view is wide (scrolls sideways): tighter gaps, fewer dedicated tracks
-  local MIN_GAP = (wide and 32 or V.F_MIN_GAP) + V.HEADER_W - V.NODE_W
-  local MAX_GAP = wide and 300 or V.F_MAX_GAP
+  local header_w = wide and 128 or V.HEADER_W
+  local MIN_GAP = (wide and 32 or V.F_MIN_GAP) + header_w - V.NODE_W
+  local MAX_GAP = wide and 222 or V.F_MAX_GAP
   local cols = {}
   for ci = 1, ncol do cols[ci] = {} end
   for ci, col in ipairs(L.cols) do
@@ -1552,7 +1629,7 @@ function V.layout_focus(L, us, W, viewH, wide)
   end
   local s=lo
   L.fit = s
-  L.scale = us.keep_layout and us.layout_snapshot.scale or s * (us.zoom or 1)
+  L.scale = us.keep_layout and us.layout_snapshot.scale or s * (not wide and us.zoom or 1)
   for _, l in ipairs(L.links) do l.t = math.max(L.min_t, l.w * L.scale) end
   for _, sg in ipairs(segs) do sg.t = sg.link.t end
   for ci = 1, ncol do
@@ -1847,48 +1924,62 @@ function V.layout_focus(L, us, W, viewH, wide)
     end
   end
 
-  -- 6. columns' x: every gap gets room for its vertical tracks (right angles) + stubs
+  -- 6. Reserve room for rounded bends that would otherwise be too steep at
+  -- the normal column spacing, including curves mode.
   local metro = us.lines == "metro"
   local gap_need = {}
-  for ci = 1, ncol - 1 do gap_need[ci] = MIN_GAP end
-  local function ortho_params(sg)
-    local k, q = S.elbow_index(math.min(0.7, sg.t / (sg.t + math.max(8, sg.t * 0.6))))
-    return k, sg.t * (1 - q) / q
-  end
+  local band = header_w - V.NODE_W
+  local clearance = V.STUB + 8
+  local right_pad = header_w + 8 - V.NODE_W
+  local packed_gaps = {}
+  local avail = W - V.PAD_L - right_pad - ncol * V.NODE_W
+  local default_gap = ncol > 1 and math.max(MIN_GAP, math.min(MAX_GAP, avail / (ncol - 1))) or MIN_GAP
   local gap_segs = {}
   for _, sg in ipairs(segs) do
     local ci = sg.a.ci
     gap_segs[ci] = gap_segs[ci] or {}
     table.insert(gap_segs[ci], sg)
   end
-  if metro then
-    for ci, list in pairs(gap_segs) do
-      local need, rmax = 0, 0
-      for _, sg in ipairs(list) do
-        local D = math.abs(sg.y2 - sg.y1)
-        if D > 0.3 * MIN_GAP then
-          local _, R = ortho_params(sg)
+  for ci = 1, ncol - 1 do
+    local width = default_gap - band
+    local need, rmax, curve_width = 0, 0, 0
+    local bends = {}
+    for _, sg in ipairs(gap_segs[ci] or {}) do
+      local drop = math.abs(sg.y2 - sg.y1)
+      if Geometry.steep(width, drop, sg.t, metro) then
+        sg.ortho = Geometry.bend(sg.t, drop, math.huge)
+        if sg.ortho then
           need = need + sg.t + 6
-          if R > rmax then rmax = R end
+          rmax = math.max(rmax, sg.ortho.R)
+          if wide then bends[#bends + 1] = sg end
         end
+      else
+        curve_width = math.max(curve_width, Geometry.curve_width(drop, sg.t, metro))
       end
-      gap_need[ci] = math.max(MIN_GAP, V.HEADER_W - V.NODE_W + need + 2 * rmax + 2 * V.STUB + 16)
     end
+    if wide then
+      local slots
+      slots, need = pack_tracks(bends)
+      packed_gaps[ci] = {slots=slots, radius=rmax}
+    end
+    local tracks = need > 0 and need + 2 * (rmax + clearance) or 0
+    gap_need[ci] = math.ceil(math.max(MIN_GAP, band + math.max(curve_width, tracks)))
   end
-  local right_pad = V.HEADER_W + 8 - V.NODE_W
-  local avail = W - V.PAD_L - right_pad - ncol * V.NODE_W
   local sum = 0
   for ci = 1, ncol - 1 do sum = sum + gap_need[ci] end
-  local extra = (ncol > 1) and math.max(0, (avail - sum) / (ncol - 1)) or 0
+  local slack = 0
+  for ci = 1, ncol - 1 do slack = slack + math.max(0, default_gap - gap_need[ci]) end
+  local fill = slack > 0 and math.min(1, math.max(0, (avail - sum) / slack)) or 0
   local x = V.PAD_L
-  if ncol == 1 then x = math.max(V.PAD_L,math.floor((W-V.HEADER_W)/2)) end
+  if ncol == 1 then x = math.max(V.PAD_L,math.floor((W-header_w)/2)) end
   if us.keep_layout then x=us.layout_snapshot.col_x[1] or x end
   L.col_x = {}
   for ci = 1, ncol do
     L.col_x[ci] = math.floor(x + 0.5)
     for _, n in ipairs(cols[ci]) do n.x = L.col_x[ci] end
     if ci < ncol then
-      x = math.floor(L.col_x[ci] + V.NODE_W + math.max(gap_need[ci], math.min(MAX_GAP, gap_need[ci] + extra)) + 0.5)
+      local gap = gap_need[ci] + fill * math.max(0, default_gap - gap_need[ci])
+      x = math.floor(L.col_x[ci] + V.NODE_W + gap + 0.5)
       if us.keep_layout then
         x = math.max(us.layout_snapshot.col_x[ci + 1] or x,
           math.floor(L.col_x[ci] + V.NODE_W + gap_need[ci] + 0.5))
@@ -1908,18 +1999,19 @@ function V.layout_focus(L, us, W, viewH, wide)
 
   -- 7. routes: straight if level, else S-curve or right-angle track inside the gap
   for ci, list in pairs(gap_segs) do
-    local x0, x1 = L.col_x[ci] + V.HEADER_W, L.col_x[ci + 1]
+    local x0, x1 = L.col_x[ci] + header_w, L.col_x[ci + 1]
     local tracks = {}
     for _, sg in ipairs(list) do
       -- Stay level throughout the header band; all turns happen beyond labels.
       sg.route, sg.curve_x0, sg.cx0, sg.cx1 = "late", x0, x0, x1
-      local D = math.abs(sg.y2 - sg.y1)
-      if metro and D > 0.3 * (x1 - x0) then
-        local k, R = ortho_params(sg)
-        if D >= 2 * R + sg.t + 2 then
-          sg.ortho = { k = k, R = R }
-          tracks[#tracks + 1] = sg
-        end
+      if sg.ortho and not wide then tracks[#tracks + 1] = sg end
+    end
+    if wide then
+      local packed = packed_gaps[ci]
+      local xv = x0 + clearance + packed.radius
+      for _, track in ipairs(packed.slots) do
+        for _, entry in ipairs(track.segments) do entry.segment.ortho.xv = xv end
+        xv = xv + track.width + 6
       end
     end
     -- downward runs on the left, ordered so corners nest instead of crossing
@@ -1934,11 +2026,12 @@ function V.layout_focus(L, us, W, viewH, wide)
     -- has to turn before the other one comes in
     local placed = {}
     local function yover(a0, a1, b0, b1) return math.min(a1, b1) - math.max(a0, b0) > 0.5 end
-    local xv = x0 + V.STUB + 8
+    local xv = x0 + clearance
     for _, sg in ipairs(tracks) do
       local R, t = sg.ortho.R, sg.t
-      local lo = math.max(xv, x0 + V.STUB + 8 + R)
-      local hi = x1 - V.STUB - 8 - t - R
+      local first = math.max(xv, x0 + clearance + R)
+      local last = x1 - clearance - t - R
+      local lo, hi = first, last
       for _, p in ipairs(placed) do
         if yover(sg.y1, sg.y1 + t, p.y2, p.y2 + p.t) then
           hi = math.min(hi, p.ortho.xv + p.t + p.ortho.R + R)       -- turn before p arrives
@@ -1947,12 +2040,13 @@ function V.layout_focus(L, us, W, viewH, wide)
           lo = math.max(lo, p.ortho.xv - p.ortho.R - t - R)          -- arrive after p left
         end
       end
-      if lo > hi then
-        sg.ortho = nil -- no clean track: an S-curve crosses instead
-      else
+      if lo > hi then lo = first end -- keep a dedicated track even when legs must cross
+      if lo <= last then
         sg.ortho.xv = lo
         xv = lo + t + 6
         placed[#placed + 1] = sg
+      else
+        sg.ortho = nil
       end
     end
   end
@@ -1972,7 +2066,7 @@ function V.layout_focus(L, us, W, viewH, wide)
   L.label_above = true
   L.label_w = {}
   for ci = 1, ncol do
-    L.label_w[ci] = V.HEADER_W - 8
+    L.label_w[ci] = header_w - 8
   end
   L.lane_list = {}
   -- ribbons that cross inside a gap get different colours

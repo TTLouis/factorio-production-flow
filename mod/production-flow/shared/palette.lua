@@ -32,6 +32,7 @@ end
 
 P.GREY = P.NCAT + 1
 P.grey = { color = { 0xA0, 0xA0, 0xA0 }, alpha = 0.25 }
+P.stub_alpha = { P.grey.alpha, 0.17, 0.09 }
 P.DIM = P.NCAT + 2
 P.dim = { color = { 0x80, 0x80, 0x80 }, alpha = 0.16 }
 -- Opaque subdued variants avoid seams where GUI sprite fragments meet.

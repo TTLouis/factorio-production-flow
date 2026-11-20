@@ -17,6 +17,7 @@ Sm.init()
 local machines, status_reads = {}, 0
 local function machine(recipe, state, surface, force, furnace)
   local e = setmetatable({ valid = true, type = furnace and "furnace" or "assembling-machine",
+    name = furnace and "stone-furnace" or "assembling-machine-1",
     unit_number = #machines + 1, products_finished = 0, crafting_speed = 1,
     surface = surface, surface_index = surface.index, force_index = force,force=forces[force],
     position = { x = #machines * 4, y = 0 }, recipe = recipe, state = state }, {
@@ -55,6 +56,8 @@ assert(not warming and status_reads == #machines-1, "sample only player-force ma
 assert(rows["iron-plate"].observed == 3 and rows["iron-plate"].issues.input.count == 1)
 assert(rows["iron-plate"].issues.power.count == 2 and rows.gear.issues.output.count == 1)
 assert(rows.gear.observed == 2 and not rows.gear.issues.power and not rows.gear.issues.input)
+assert(rows["iron-plate"].entities["stone-furnace"] == 1 and rows["iron-plate"].entities["assembling-machine-1"] == 2)
+assert(Sm.machine_status(2, 1)["iron-plate"].entities["assembling-machine-1"] == 1)
 assert(Sm.machine_status(1, 2)==nil, "foreign candidates must not populate sampled machine status")
 assert(Sm.machine_status(2, 1)["iron-plate"].issues.input.count == 1, "surface isolation")
 assert(Sm.find_status_machine(1, 1, "iron-plate", "input") == starved, "furnace previous recipe")
@@ -72,6 +75,7 @@ disabled.force=forces[2]
 disabled.recipe, disabled.state = "iron-plate", status.low_power
 advance(105)
 assert(rows.gear.observed == 1, "recipe transition should remove the previous observation promptly")
+assert(rows.gear.entities["assembling-machine-1"] == 1, "moving a machine must update its recipe's prototype counts")
 assert(Sm.machine_status(2, 2)==nil, "force transition must remove status without sampling foreign work")
 disabled.valid = false
 advance(110)

@@ -149,7 +149,7 @@ local BALANCE_TAB_HEADER_HEIGHT = 48 -- Vanilla tab strip and its top content pa
 local TAB_PAD_Y = 12
 local function tab_pane_height(us) return us.canvas_h + 100 end
 
-function fill.balance(player, c, us, only_auto, keep_balance_rows)
+function fill.balance(player, c, us, only_auto, keep_balance_rows, refresh_graph)
   local pane_height = tab_pane_height(us)
   local inspector_height = pane_height - BALANCE_TAB_HEADER_HEIGHT
   local split = c.ssk_balance_split
@@ -184,7 +184,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     end
     modes.selected_tab_index = us.bal_mode == "history" and 2 or 1
   end
-  local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto or keep_balance_rows)
+  local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto or keep_balance_rows or refresh_graph)
   local fx = SK.balance_state(us)
   if not fx.focus then fx.focus = first end
   fx.sel = fx.focus
@@ -195,7 +195,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
   local flow = modes.ssk_balance_flow_panel
   fx.canvas_w, fx.canvas_h = us.bal_chart_w, inspector_height - SK.toolbar_height(fx)
   if not only_auto or fx.live ~= false then
-    SK.fill(player, flow, fx, fx.canvas_w, fx.canvas_h, false, only_auto)
+    SK.fill(player, flow, fx, fx.canvas_w, fx.canvas_h, false, only_auto, refresh_graph)
   end
   SK.update_balance_actions(flow, us, fx.focus, player.index)
 end
@@ -273,7 +273,7 @@ local function close_inspectors(player)
 end
 
 -- full = rebuild the Sankey tab from scratch (otherwise its scroll position is kept)
-function UI.refresh(player, only_auto, full, keep_balance_rows)
+function UI.refresh(player, only_auto, full, keep_balance_rows, refresh_graph)
   local us = ustate(player.index)
   local id = us.tab_id
   local c = content(player, id)
@@ -287,16 +287,16 @@ function UI.refresh(player, only_auto, full, keep_balance_rows)
     fx.sidx = us.sidx
     SK.defaults(fx)
     if only_auto and not fx.live then return end
-    SK.fill(player, chart_panel(c), fx, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(fx)), full, only_auto)
+    SK.fill(player, chart_panel(c), fx, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(fx)), full, only_auto, refresh_graph)
     return
   end
   if id == "sankey" then
     SK.defaults(us)
     if only_auto and not us.live then return end
-    SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(us)), full, only_auto)
+    SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(us)), full, only_auto, refresh_graph)
     return
   end
-  fill[id](player, c, us, only_auto, keep_balance_rows)
+  fill[id](player, c, us, only_auto, keep_balance_rows, refresh_graph)
 end
 
 -- Chart settings float over the chart; Esc, tab changes and reopening close them.
@@ -440,9 +440,9 @@ local function chart_state(us)
   return us.tab_id == "focus" and SK.focus_state(us) or us
 end
 
-local function refresh_material(player, state, previous, full)
+local function refresh_material(player, state, previous, full, refresh_graph)
   if state.view == "focus" and state.focus ~= previous then close_inspectors(player) end
-  UI.refresh(player, false, full, true)
+  UI.refresh(player, false, full, true, refresh_graph)
 end
 
 function UI.toggle(player)
@@ -500,7 +500,12 @@ function UI.on_click(e)
   local previous = chart.focus
   local r = SK.on_click(e, chart)
   if r then
-    if r ~= "none" then refresh_material(player, chart, previous, false) end
+    if r ~= "none" then
+      local action = el.tags.ssk_sk
+      local graph_only = action == "zoom_in" or action == "zoom_out" or action == "zoom_fit"
+        or action == "center_selection" or action == "reflow"
+      refresh_material(player, chart, previous, false, graph_only)
+    end
     return true
   end
   local a = el.tags and el.tags.ssk_ui
@@ -509,17 +514,22 @@ function UI.on_click(e)
   elseif a == "help" then close_inspectors(player); Help.open(player)
   elseif a == "help_close" then Help.close(player);player.opened=player.gui.screen[WIN]
   elseif a == "watch" or a == "machine_status" then
-    local focus_inspection = us.tab_id == "focus" and a == "machine_status"
-    if (us.tab_id ~= "balance" and not focus_inspection) or not chart.focus then return true end
+    local material = chart.focus
+    if a == "machine_status" and us.tab_id == "sankey" then
+      material = el.tags.key
+    elseif us.tab_id ~= "balance" and not (us.tab_id == "focus" and a == "machine_status") then
+      return true
+    end
+    if not material then return true end
     local surface = sidx_for(player, us)
     MaterialPicker.close(player)
     Help.close(player)
     if a == "watch" then
       MachineStatus.close(player)
-      if not Watch.close(player) then Watch.open(player, us, surface, chart.focus) end
+      if not Watch.close(player) then Watch.open(player, us, surface, material) end
     else
       Watch.close(player)
-      MachineStatus.open(player, surface, chart.focus)
+      MachineStatus.open(player, surface, material)
     end
   elseif a == "watch_close" then Watch.close(player)
   elseif a == "watch_apply" or a == "watch_remove" then
@@ -533,7 +543,7 @@ function UI.on_click(e)
     UI.refresh(player)
   elseif a == "refresh" then
     if us.tab_id=="transfers" and us.se_logistics then us.se_logistics.rescan_endpoints=true end
-    UI.refresh(player)
+    UI.refresh(player, false, false, false, true)
   elseif a == "bal_more" then
     us.bal_limit = (us.bal_limit or 200) + 200
     UI.refresh(player)
@@ -546,6 +556,17 @@ function UI.on_click(e)
       if chart.focus and not Watch.available(player.index, us, chart.focus) then Watch.close(player) end
     end
     UI.refresh(player)
+  elseif a == "sankey_material_tab" and us.tab_id == "sankey" then
+    local key, target = el.tags.key, el.tags.target
+    if type(key) ~= "string" then return true end
+    local kind, name = key:match("^(%a+)/(.+)$")
+    if (kind ~= "item" and kind ~= "fluid") or not prototypes[kind][name] then return true end
+    if target ~= "focus" and target ~= "balance" then return true end
+    local fx = target == "balance" and SK.balance_state(us) or SK.focus_state(us)
+    if SK.select_focus(fx, key) then fx.pinned = nil end
+    if target == "balance" then us.bal_mode = "flow" end
+    us.tab_id = target
+    UI.open(player)
   elseif a == "focus_item" or a == "bal_material" then
     local fx = us.tab_id == "balance" and SK.balance_state(us) or SK.focus_state(us)
     local previous = fx.focus

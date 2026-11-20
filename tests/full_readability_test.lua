@@ -14,7 +14,8 @@ for _,renderer in ipairs({"poly","sprites"}) do
   local us={view="detail",layout="clean",lines="curves",heights="sqrt",renderer=renderer,
     period=600,canvas_w=1600,settings_open=true} -- Unpin and Colors live in Chart settings
   SK.fill(player,c,us,1600,850,true)
-  local L=V.build(player,us,1600,850)
+  assert(#c.ssk_bar.ssk_toolbar_strip.ssk_toolbar_rows.children==1,"Full Sankey must reclaim the hint row")
+  local L=V.build(player,us,SK.scroll_pane(c).style.width,850)
   local before={}
   for k,n in pairs(L.nodes) do before[k]={n.top,n.x} end
   local segments=0
@@ -32,13 +33,84 @@ for _,renderer in ipairs({"poly","sprites"}) do
   assert(storage.sk_render[1].selected==us.sel)
   SK.on_click(event(find(c,"center_selection")),us)
   SK.fill(player,c,us,1600,850,false)
-  assert(c.ssk_sp.last_scroll_target and not us.center_pending)
-  L=V.build(player,us,1600,850)
+  assert(SK.scroll_pane(c).last_scroll_target and not us.center_pending)
+  L=V.build(player,us,SK.scroll_pane(c).style.width,850)
   for k,n in pairs(L.nodes) do assert(n.top==before[k][1] and n.x==before[k][2],"pin/center must not reflow") end
   SK.on_click(event(find(c,"unpin")),us); assert(us.sel==nil)
   local colors=find(c,"balance_colors"); colors.selected_index=2
   SK.on_selection(event(colors),us); SK.fill(player,c,us,1600,850,false)
   for _,r in ipairs(storage.sk_render[1].ribbons) do assert(r.color==P.material(r.from)) end
+end
+
+for _,renderer in ipairs({"poly","sprites"}) do
+  local us={view="detail",layout="clean",renderer=renderer,period=600,show_labels=true,
+    hidden={["item/transport-belt"]=true}}
+  local key="item/iron-plate"
+  SK.fill(player,c,us,900,360,true)
+  local pane=SK.scroll_pane(c)
+  local layout=V.build(player,us,pane.style.width,360)
+  local tip=LOC(assert(find(pane,"node",key)).tooltip)
+  assert(tip:find("Made by",1,true) and tip:find("Used by",1,true) and tip:find("items/s",1,true))
+  local masked=assert(tip:find("Masked from the chart",1,true))
+  assert(tip:find("transport belt",masked,true),tip)
+  assert(SK.on_click(event(assert(find(c,"overview_jump",key))),us)=="rebuild")
+  SK.fill(player,c,us,900,360,false)
+  assert(us.sel==key and pane.last_scroll_target,"overview node must select and center")
+  local side=c.ssk_body.ssk_sidebar.ssk_selected_material
+  assert(find(side,"hide") and find(side,"move_group") and find(side,"new_group") and find(side,"deselect"),
+    "selection controls must live with the selected material")
+  assert(not find(c.ssk_bar,"hide") and not find(c.ssk_bar,"move_group"))
+  assert(SK.toolbar_height(us,900)<SK.toolbar_height(us,600),"toolbar must only allocate selection space for narrow windows")
+  local group=find(side,"move_group")
+  local field=find(side,"new_group").parent.ssk_newgroup
+  local preset=find(c.ssk_bar,"preset")
+  local mark=find(c,"overview_jump",key)
+  field.text="Unsubmitted group"
+  for _,automatic in ipairs{true,false} do
+    local rate=side.ssk_selected_scroll.ssk_selected_rates.children[1]
+    SK.fill(player,c,us,900,360,false,automatic,not automatic)
+    assert(group==find(side,"move_group") and field.text=="Unsubmitted group")
+    assert(preset==find(c.ssk_bar,"preset") and mark==find(c,"overview_jump",key))
+    assert(not rate.valid,"displayed rates must refresh independently of the controls")
+  end
+  SK.on_click(event(find(c,"zoom_in")),us)
+  SK.fill(player,c,us,900,360,false)
+  assert(us.render_zoom==1.1 and pane.ssk_canvas.style.width>layout.content_w and pane.ssk_canvas.style.height>layout.content_h)
+  SK.on_click(event(find(c,"zoom_out")),us)
+  SK.fill(player,c,us,900,360,false)
+  assert(math.abs(us.render_zoom-1)<1e-8)
+  SK.on_click(event(find(c,"zoom_fit")),us)
+  SK.fill(player,c,us,900,360,false)
+  assert(us.render_zoom<0.8 and us.sel==key and pane.horizontal_scroll_policy=="never")
+  assert(pane.ssk_canvas.style.height<=360 and find(pane,"node",key).tags.part=="bar")
+  local fitted=V.build(player,us,pane.style.width,360)
+  local limit=math.min(1,(pane.style.width-26)/fitted.content_w,(360-12)/fitted.content_h)
+  assert(us.render_zoom==math.floor(limit*10)/10,"Fit must round down to the largest fitting 10% step")
+  for k,n in pairs(fitted.nodes) do
+    assert(n.x==layout.nodes[k].x and n.y==layout.nodes[k].y,"zoom must preserve the routing layout")
+  end
+  local function overview_labels()
+    local labels={}
+    for _, wrapper in ipairs(pane.ssk_canvas.children) do
+      local child=wrapper.children[1]
+      if child and child.tags.ssk_label then
+        assert(wrapper.ignored_by_interaction and child.ignored_by_interaction)
+        labels[child.tags.ssk_label]=child
+      end
+      assert(not child or (not child.tags.ssk_rate and child.type~="sprite-button"),
+        "Labels below 80% must show just material names")
+    end
+    return labels
+  end
+  us.chart_zoom,us.chart_fit=0.4,false
+  SK.fill(player,c,us,900,360,false)
+  local labels=overview_labels()
+  assert(labels[key] and labels["item/iron-ore"] and LOC(labels["item/iron-ore"].caption):lower()=="iron ore")
+  us.show_labels=false
+  SK.fill(player,c,us,900,360,false)
+  labels=overview_labels()
+  local name=next(labels)
+  assert(name==key and next(labels,name)==nil,"Show labels off must keep only the selected material name")
 end
 -- Native GUI lengths are rounded separately after scaling. Each tight wrapper
 -- and its following Y-reset must return to the canvas origin.
@@ -54,7 +126,7 @@ for _,scale in ipairs({1,1.25,1.5}) do
     local us={view="detail",layout="clean",renderer=renderer,period=600,show_labels=true}
     SK.fill(player,c,us,1600,850,true)
     local advance=0
-    local overlays=c.ssk_sp.ssk_canvas.children
+    local overlays=SK.scroll_pane(c).ssk_canvas.children
     assert(#overlays>20,"scaling regression needs multiple overlays")
     for i,overlay in ipairs(overlays) do
       local s=overlay.style

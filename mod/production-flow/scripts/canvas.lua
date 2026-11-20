@@ -6,6 +6,7 @@
 --   Each player draws in its own region of the surface; objects are visible only to them.
 
 local palette = require("shared.palette")
+local Colors = require("shared.plot_colors")
 local Geometry = require("scripts.ribbon_geometry")
 
 local C = {}
@@ -108,7 +109,7 @@ function C.begin(player, W, H)
 
   -- background (also defines what the camera shows outside the drawing)
   keep(rendering.draw_rectangle { surface = s, players = players, filled = true,
-    left_top = wp(-64, -64), right_bottom = wp(W + 64, H + 64), color = { r = 0.16, g = 0.16, b = 0.17, a = 1 } })
+    left_top = wp(-64, -64), right_bottom = wp(W + 64, H + 64), color = Colors.background })
 
   function P.rect(x, y, w, h, color, existing)
     x, y, w, h = Geometry.box(x, y, w, h)

@@ -50,9 +50,12 @@ def prepare(stage,args,scale):
         'expect_obstruction':args.expect_obstruction,'fixture':'vanilla synthetic recipe rates; new disposable map',
         'checks':'native properties and modeled canvas hit regions; handler dispatch is not engine mouse input'}
     helpers={'gui_interaction.lua':'gui_interaction.lua','development/gui_interaction_checks.lua':'gui_interaction_checks.lua'}
+    if args.ribbon_checks:
+        helpers['development/gui_ribbon_checks.lua']='gui_ribbon_checks.lua'
     manifest['test_sha256']={name:digest(TESTS/name) for name in helpers}
     for name,out in helpers.items(): shutil.copyfile(TESTS/name,target/'scripts'/out)
-    (target/'scripts/gui_interaction_mode.lua').write_text('return '+('true' if args.expect_obstruction else 'false')+'\n')
+    (target/'scripts/gui_interaction_mode.lua').write_text(
+        f'return {{broken={str(args.expect_obstruction).lower()}, ribbons={str(args.ribbon_checks).lower()}}}\n')
     control=target/'control.lua'
     source=control.read_text(encoding='utf-8')
     needle='  Sampler.on_tick(e.tick)'
@@ -68,11 +71,62 @@ def prepare(stage,args,scale):
     (stage/'config.ini').write_text(
         f'[path]\nread-data={args.exe.parents[2].as_posix()}/data\nwrite-data={stage.as_posix()}\n'
         '[graphics]\nfull-screen=false\n[other]\nautosave-interval=0\nhide-achievement-popups=true\n'
-        f'[interface]\nui-scale-mode=manual-pixels\ncustom-ui-scale={scale}\n[general]\nlocale=en\n'
+        f'[interface]\nui-scale-mode=manual-pixels\ncustom-ui-scale={scale}\nshow-tips-and-tricks-notifications=false\n'
+        '[general]\nlocale=en\n'
         '[sound]\nmaster-volume=0\nmaster-muted=true\n')
     (stage/'map-gen.json').write_text(json.dumps({'width':64,'height':64,'seed':3,'peaceful_mode':True}))
     (stage/'manifest.json').write_text(json.dumps(manifest,indent=2))
     return manifest
+
+def ribbon_pixels(path, checks, scale, required=('straight','curve','elbow')):
+    from PIL import Image
+
+    def distance(a, b):
+        return max(abs(x-y) for x,y in zip(a,b))
+
+    with Image.open(path) as screenshot:
+        img=screenshot.convert('RGB')
+    pixels=img.load()
+    first,second=checks['marker']
+    size=int(4*scale)
+    # The paired solid swatches mark (0, 0) in the same GUI coordinate space as the ribbons.
+    origins=[]
+    for y in range(img.height//2):
+        for x in range(0,img.width-2*size):
+            if (distance(pixels[x,y],first)<=5 and distance(pixels[x+size,y],second)<=5
+                and (not x or distance(pixels[x-1,y],first)>5)
+                and (not y or distance(pixels[x,y-1],first)>5)):
+                origins.append((x,y))
+    if len(origins)!=1: raise RuntimeError(f'Expected one chart origin in {path.name}, found {origins}')
+    ox,oy=origins[0]
+    background=pixels[ox+size*3,oy+size*2]
+    # Use the empty strip below the tier labels to find the start of the scrollbar.
+    # The screenshot can include a scrollable chart wider than its viewport.
+    right=next((x for x in range(ox+size*3,img.width)
+                if distance(pixels[x,oy+int(32*scale)],background)>8),img.width)
+    bottom=next((y for y in range(oy+size*2,img.height)
+                 if distance(pixels[ox+size*3,y],background)>8),img.height)
+    observed={}
+    solid_colors={}
+    for probe in checks['probes']:
+        edge,center=int(probe['edge']*scale),int(probe['center']*scale)
+        across=lambda offset: (ox+edge+offset,oy+center) if probe['axis']=='x' else (ox+center,oy+edge+offset)
+        sample=[across(i) for i in range(-3,4)]
+        if not all(ox<=x<right and oy<=y<bottom for x,y in sample): continue
+        colors=[pixels[xy] for xy in sample]
+        if min(distance(colors[0],background),distance(colors[-1],background))<22: continue
+        if probe['kind']!='node' and distance(colors[0],colors[-1])>12: continue
+        if any(distance(color,background)<6 for color in colors[2:5]):
+            raise RuntimeError(f'Background breaks {probe["kind"]} ribbon join in {path.name}: {sample} {colors}')
+        if probe['kind']=='straight' and colors[0]==colors[-1]:
+            if colors[2:5]!=[colors[0]]*3:
+                raise RuntimeError(f'Visible straight join in {path.name}: {sample} {colors}')
+            solid_colors[(probe['axis'],edge,center)]=colors[0]
+        observed[probe['kind']]=observed.get(probe['kind'],0)+1
+    if not all(observed.get(kind,0)>0 for kind in required):
+        raise RuntimeError(f'Missing visible join coverage in {path.name}: {observed}')
+    return observed,solid_colors
+
 
 def run(stage,args):
     common=[str(args.exe),'--config',str(stage/'config.ini'),'--mod-directory',str(stage/'mods')]
@@ -92,14 +146,38 @@ def run(stage,args):
                 output=log_path.read_text(encoding='utf-8',errors='replace')
                 if 'GUI INTERACTION NATIVE PASS' in output:
                     results=json.loads((stage/'script-output/gui-interaction/results.json').read_text())
-                    if len(results['cases'])!=6: raise RuntimeError('Incomplete native case matrix')
+                    if len(results['cases'])!=6+args.ribbon_checks: raise RuntimeError('Incomplete native case matrix')
                     if results['scale']!=json.loads((stage/'manifest.json').read_text())['scale']:
                         raise RuntimeError('Unexpected native GUI scale')
-                    captures={}
+                    captures,colors={},{}
                     for case in results['cases']:
                         image=stage/'script-output/gui-interaction'/f"{case['name']}.png"
                         if not image.is_file() or image.stat().st_size<10000: raise RuntimeError(f'Missing native screenshot {image}')
                         captures[image.name]=digest(image)
+                        if 'fit_capture' in case:
+                            fitted=image.with_name(case['fit_capture'])
+                            if not fitted.is_file() or fitted.stat().st_size<10000: raise RuntimeError(f'Missing native screenshot {fitted}')
+                            captures[fitted.name]=digest(fitted)
+                            if 'fit_join' in case:
+                                case['fit_pixels_checked'],_=ribbon_pixels(fitted,case['fit_join'],results['scale'],('node',))
+                        for name in ('producer_capture', 'machine_capture'):
+                            if name in case:
+                                shot=image.with_name(case[name])
+                                if not shot.is_file() or shot.stat().st_size<10000: raise RuntimeError(f'Missing native screenshot {shot}')
+                                captures[shot.name]=digest(shot)
+                        if case.get('sidebar_made_by') and 'machine_capture' not in case:
+                            raise RuntimeError('Missing Full Sankey machine inspection')
+                        if 'ribbon_checks' in case:
+                            count,samples=ribbon_pixels(image,case['ribbon_checks'],results['scale'])
+                            case['ribbon_pixels_checked']=count
+                            colors[case['name']]=samples
+                    if args.ribbon_checks:
+                        normal=colors['sankey-sprites']
+                        equipped=colors['sankey-night-vision']
+                        shared=normal.keys() & equipped.keys()
+                        if not shared or any(normal[key]!=equipped[key] for key in shared):
+                            raise RuntimeError('Night vision changed the colour of a matched sprite ribbon')
+                        results['night_vision_ribbon_colors_matched']=len(shared)
                     results['screenshots_sha256']=captures
                     (stage/'evidence.json').write_text(json.dumps(results,indent=2))
                     print(f'PASS native contracts at {results["scale"]:.0%}: {stage}',flush=True)
@@ -118,6 +196,7 @@ def main():
     parser.add_argument('--scales',type=float,nargs='+',default=[1,1.25,1.5])
     parser.add_argument('--source-ref',help='Test an immutable local Git ref without changing the checkout')
     parser.add_argument('--expect-obstruction',action='store_true',help='Require the historical wrapper obstruction to reproduce')
+    parser.add_argument('--ribbon-checks',action='store_true',help='Measure native ribbon joins and verify powered night vision')
     parser.add_argument('--timeout',type=int,default=120)
     args=parser.parse_args()
     root=TESTS/'out'/datetime.now().strftime('gui-interaction-%Y%m%d-%H%M%S-%f');root.mkdir(parents=True)
