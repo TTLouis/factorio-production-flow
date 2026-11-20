@@ -180,6 +180,7 @@ end
 script.on_event(defines.events.on_player_display_resolution_changed, display_changed)
 script.on_event(defines.events.on_player_display_scale_changed, display_changed)
 script.on_event(defines.events.on_player_selected_area, Cells.on_selected)
+script.on_event(require("shared.cell_selection").click, Cells.on_click_anywhere)
 script.on_event(defines.events.on_player_cursor_stack_changed, function(e)
   Cells.on_cursor_changed(game.get_player(e.player_index))
 end)

@@ -180,6 +180,7 @@ if mode=="ux" then
     {name="ux-help-basics",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,help_tab=1},
     {name="ux-help-stock",surface="nauvis",tab="balance",focus="item/steel-plate",depth=1,help_tab=2},
     {name="ux-help-alerts",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,help_tab=3},
+    {name="ux-help-cells",surface="nauvis",tab="balance",focus="item/iron-plate",depth=1,help_tab=4},
     {name="ux-recent",surface="vulcanus",tab="balance",focus="fluid/steam",depth=1,recent=true},
   }
 elseif mode=="warmup" then

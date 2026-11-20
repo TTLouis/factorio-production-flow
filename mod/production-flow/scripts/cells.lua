@@ -2,6 +2,7 @@ local Loc = require("scripts.locale")
 local Selection = require("shared.cell_selection")
 local Sampler = require("scripts.sampler")
 local Picker = require("scripts.material_picker")
+local Su = require("scripts.surfaces")
 
 local Cells = { NAME = "ssk_cells", DELETE_NAME = "ssk_cell_delete" }
 local selection_prompts = {
@@ -236,6 +237,69 @@ local function final_items(members)
   return names
 end
 
+-- Boundary suggestions at configured full speed: net consumption is an input,
+-- net production an output. Players remove the ones that do not really cross
+-- the cell boundary; the rest are locked into the saved cell.
+local SIDES = { "inputs", "outputs" }
+Cells.SIDES = SIDES
+
+function Cells.suggest_ports(members)
+  local recipes = storage.graph and storage.graph.recipes
+  local net = {}
+  if recipes then
+    local ids = {}
+    for id in pairs(members) do ids[#ids + 1] = id end
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+      local machine = members[id]
+      local recipe_name, force_recipe = Sampler.current_recipe(machine)
+      local recipe = recipes[recipe_name]
+      if recipe and recipe.energy > 0 then
+        local crafts = machine.crafting_speed / recipe.energy
+        local bonus = Sampler.craft_productivity(machine, recipe_name, force_recipe, recipe)
+        for _, ingredient in ipairs(recipe.ingredients) do
+          net[ingredient.key] = (net[ingredient.key] or 0) - crafts * ingredient.amount
+        end
+        for _, product in ipairs(recipe.products) do
+          net[product.key] = (net[product.key] or 0) + crafts * (product.amount + bonus * product.prod)
+        end
+      end
+    end
+  end
+  local ports = { inputs = {}, outputs = {} }
+  for key, amount in pairs(net) do
+    if amount < -1e-9 then ports.inputs[#ports.inputs + 1] = key
+    elseif amount > 1e-9 then ports.outputs[#ports.outputs + 1] = key end
+  end
+  for _, side in ipairs(SIDES) do
+    table.sort(ports[side], function(a, b)
+      local x, y = math.abs(net[a]), math.abs(net[b])
+      if x ~= y then return x > y end
+      return a < b
+    end)
+  end
+  return ports
+end
+
+local function copy_excluded(excluded)
+  local out = { inputs = {}, outputs = {} }
+  for _, side in ipairs(SIDES) do
+    for key in pairs(excluded and excluded[side] or {}) do out[side][key] = true end
+  end
+  return out
+end
+
+local function port_prototype(key)
+  local kind, name = key:match("^(%a+)/(.+)$")
+  return kind == "item" and prototypes.item[name] or kind == "fluid" and prototypes.fluid[name] or nil
+end
+
+local function remember_name(player, draft)
+  local window = player.gui.screen[Cells.NAME]
+  local form = window and window.ssk_cell_panel.ssk_cell_form
+  if form then draft.name = form.ssk_cell_name_column.ssk_cell_name.text end
+end
+
 function Cells.members(record)
   return live_members(record.members, record.surface_index)
 end
@@ -330,6 +394,44 @@ function Cells.open(player)
     local picker = Picker.button(item_column, key, "cell", "ssk_cell_display_item")
     picker.enabled = key ~= nil
     if not key then picker.tooltip = Loc("cells-no-display-item") end
+
+    -- Locked boundary: suggested from the recipes; clicking an item removes it.
+    draft.excluded = draft.excluded or copy_excluded()
+    local suggested = Cells.suggest_ports(members)
+    local ports = panel.add { type = "flow", name = "ssk_cell_ports", direction = "vertical" }
+    ports.style.left_padding, ports.style.right_padding, ports.style.bottom_padding = 8, 8, 8
+    ports.style.vertical_spacing = 4
+    ports.add { type = "label", style = "caption_label", caption = Loc("cells-ports"), tooltip = Loc("cells-ports-tip") }
+    for _, side in ipairs(SIDES) do
+      local row = ports.add { type = "flow", name = "ssk_cell_" .. side, direction = "horizontal" }
+      row.style.vertical_align = "center"
+      row.style.horizontally_stretchable = true
+      local label = row.add { type = "label", caption = Loc(side == "inputs" and "cells-inputs" or "cells-outputs") }
+      label.style.width = 96
+      local kept, hidden = {}, 0
+      for _, port in ipairs(suggested[side]) do
+        if draft.excluded[side][port] then hidden = hidden + 1 else kept[#kept + 1] = port end
+      end
+      if #kept > 0 then
+        local slots = row.add { type = "frame", style = "slot_button_deep_frame" }
+        local grid = slots.add { type = "table", name = "ssk_cell_port_grid", style = "filter_slot_table", column_count = 6 }
+        for _, port in ipairs(kept) do
+          local proto = port_prototype(port)
+          grid.add { type = "sprite-button", style = "slot_button", sprite = port,
+            tooltip = { "", proto and proto.localised_name or port, "\n", Loc("cells-port-remove") },
+            tags = { ssk_cell = "port", side = side, key = port } }
+        end
+      else
+        row.add { type = "label", style = "grey_label", caption = Loc("cells-ports-none") }
+      end
+      local gap = row.add { type = "empty-widget" }
+      gap.style.horizontally_stretchable = true
+      if hidden > 0 then
+        row.add { type = "sprite-button", style = "tool_button", sprite = "utility/reset",
+          tooltip = Loc("cells-ports-restore", hidden), tags = { ssk_cell = "ports_reset", side = side } }
+      end
+    end
+
     local footer = frame.add { type = "flow", style = "dialog_buttons_horizontal_flow" }
     footer.add { type = "button", style = "back_button", caption = Loc("cells-cancel"), tags = { ssk_cell = "list" } }
     local gap = footer.add { type = "empty-widget", style = "draggable_space" }
@@ -354,8 +456,10 @@ function Cells.open(player)
       local missing = Cells.missing(record)
       local surface = game.surfaces[record.surface_index]
       local row = rows.add { type = "flow" }
-      local caption = missing > 0 and Loc("cells-row-missing", record.name, surface.name, count, missing)
-        or Loc("cells-row", record.name, surface.name, count)
+      -- Same surface label as the Production Flow header's surface picker.
+      local where = Su.rich(surface)
+      local caption = missing > 0 and Loc("cells-row-missing", record.name, where, count, missing)
+        or Loc("cells-row", record.name, where, count)
       local label = row.add { type = "label", caption = caption }
       label.style.single_line = false
       label.style.maximal_width = 290
@@ -363,13 +467,36 @@ function Cells.open(player)
       row.style.vertical_align = "center"
       local space = row.add { type = "empty-widget" }
       space.style.horizontally_stretchable = true
+      action(row, "show", "ssk-icon", Loc("cells-show"), nil, id)
       action(row, "edit", "utility/rename_icon", Loc("cells-edit"), nil, id)
       row.add { type = "sprite-button", style = "tool_button_red", sprite = "utility/trash",
         tooltip = Loc("cells-delete"), tags = { ssk_cell_delete_request = id } }
     end
   end
-  frame.auto_center = true
+  if draft then
+    frame.auto_center = true
+  else
+    -- The saved-cells list docks at the left edge, below the top-left buttons.
+    local scale = player.display_scale
+    frame.location = { x = math.floor(8 * scale), y = math.floor(64 * scale) }
+  end
   player.opened = frame
+end
+
+-- A click anywhere outside the saved-cells list closes it; the editor (a draft)
+-- stays open until it is saved or cancelled.
+function Cells.on_click_anywhere(e)
+  local player = game.get_player(e.player_index)
+  local window = player and player.gui.screen[Cells.NAME]
+  if not window then return end
+  local cells = storage.production_cells
+  if cells and cells.drafts[player.index] then return end
+  local element = e.element
+  while element do
+    if element == window then return end
+    element = element.parent
+  end
+  Cells.close(player)
 end
 
 function Cells.prompt_delete(player, id, from_tab, close_origin)
@@ -442,13 +569,24 @@ function Cells.on_click(player, element)
     if record then
       cells.drafts[player.index] = { id = record.id, name = record.name,
         surface_index = record.surface_index, members = record.members, original = record,
-        display_item = record.display_item, vacant = vacant_slots(record) }
+        display_item = record.display_item, vacant = vacant_slots(record),
+        excluded = copy_excluded(record.excluded) }
       Cells.open(player)
     end
   elseif tag == "forget" and draft then
-    local window = player.gui.screen[Cells.NAME]
-    if window then draft.name = window.ssk_cell_panel.ssk_cell_form.ssk_cell_name_column.ssk_cell_name.text end
+    remember_name(player, draft)
     draft.vacant = nil
+    Cells.open(player)
+  elseif (tag == "port" or tag == "ports_reset") and draft then
+    local side = element.tags.side
+    if side ~= "inputs" and side ~= "outputs" then return true end
+    remember_name(player, draft)
+    draft.excluded = draft.excluded or copy_excluded()
+    if tag == "port" then
+      draft.excluded[side][element.tags.key] = true
+    else
+      draft.excluded[side] = {}
+    end
     Cells.open(player)
   elseif selection_prompts[tag] then
     if draft and draft.surface_index ~= player.surface.index then
@@ -504,10 +642,20 @@ function Cells.on_click(player, element)
         members[unit], positions[unit], occupied[key] = previous[unit], position, true
       end
     end
+    -- Lock the boundary the player kept; exclusions are remembered for later edits.
+    local excluded = copy_excluded(draft.excluded)
+    local suggested = Cells.suggest_ports(members)
+    local locked = { inputs = {}, outputs = {} }
+    for _, side in ipairs(SIDES) do
+      for _, port in ipairs(suggested[side]) do
+        if not excluded[side][port] then locked[side][port] = true end
+      end
+    end
     -- Measured history continues across edits; a new cell starts measuring now.
     cells.records[id] = { id = id, name = name, surface_index = draft.surface_index, members = members,
       positions = positions, since = draft.original and draft.original.since or game.tick,
-      display_item = (still_available and display_item) or options[1] or false }
+      display_item = (still_available and display_item) or options[1] or false,
+      ports = locked, excluded = excluded }
     cells.drafts[player.index] = nil
     Cells.reindex()
     Cells.open(player)

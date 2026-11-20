@@ -15,8 +15,15 @@ function Flow.records()
   return storage.production_cells and storage.production_cells.records or {}
 end
 
-function Flow.ids()
-  return sorted_keys(Flow.records())
+---@param surface_index integer? Only cells on this surface.
+function Flow.ids(surface_index)
+  local ids = sorted_keys(Flow.records())
+  if not surface_index then return ids end
+  local records, out = Flow.records(), {}
+  for _, id in ipairs(ids) do
+    if records[id].surface_index == surface_index then out[#out + 1] = id end
+  end
+  return out
 end
 
 -- Capacity: every member running its configured recipe at full speed.
@@ -114,7 +121,7 @@ local function fmt(value)
 end
 
 ---@param selected integer? Cell id; nil builds the All view.
----@param opts table? { mode = "measured"|"capacity", period = seconds }
+---@param opts table? { mode = "measured"|"capacity", period = seconds, surface = index? }
 function Flow.build(selected, opts)
   opts = opts or {}
   local measured_mode = opts.mode ~= "capacity"
@@ -154,7 +161,7 @@ function Flow.build(selected, opts)
   -- evidence. It stays visible in each individual cell and is omitted here.
   graph.columns = { Loc("cells-inputs"), Loc("cells-tab"), Loc("cells-outputs") }
   local seen, shared, memberships = {}, {}, {}
-  local ids = sorted_keys(records)
+  local ids = Flow.ids(opts.surface)
   for _, id in ipairs(ids) do
     local members = Cells.members(records[id])
     memberships[id] = members
@@ -173,6 +180,7 @@ function Flow.build(selected, opts)
       if measured_mode then
         rates, seconds, requested = measured_rates(record, opts.period, true)
         graph.requested = requested
+        if seconds + 1 < requested then graph.newest = math.min(graph.newest or seconds, seconds) end
       end
       local net = {}
       recipe_flows(rates,
@@ -187,14 +195,17 @@ function Flow.build(selected, opts)
       n.tier, n.is_cell = 2, true
       if measured_mode then
         local used = utilisation(rates, capacity)
-        if used then n.rate_line = Loc("cells-node-utilisation", surface.name, percent(used)) end
+        -- The tab already follows the header's surface, so nodes do not repeat it.
+        if used then n.rate_line = Loc("cells-node-utilisation", percent(used)) end
         if seconds + 1 < requested then
           n.note = Loc("cells-node-measured-since", Sampler.duration(seconds))
         end
       end
+      -- Saved cells lock their boundary; cells from before the lock show every net flow.
+      local ports = record.ports
       for _, key in ipairs(sorted_keys(net)) do
         local amount = net[key]
-        if math.abs(amount) > 1e-6 then
+        if math.abs(amount) > 1e-6 and (not ports or ports[amount > 0 and "outputs" or "inputs"][key]) then
           local side = amount > 0 and "-output" or "-input"
           local material = key .. "#surface-" .. surface.index .. side
           local material_node = node(graph, material)

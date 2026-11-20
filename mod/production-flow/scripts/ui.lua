@@ -251,7 +251,7 @@ local function update_header(player,us)
   local frame=player.gui.screen[WIN]
   local bar=frame and frame.ssk_window_bar
   if not bar then return end
-  local scoped = us.tab_id ~= "cells" and (us.tab_id ~= "transfers" or us.transport_history~=nil or (SERockets.available() and not Transfers.available()))
+  local scoped = us.tab_id ~= "transfers" or us.transport_history~=nil or (SERockets.available() and not Transfers.available())
   local periodic = us.tab_id ~= "cells" or CellsUI.mode(us.cells or {}) == "measured"
   bar.ssk_period_label.visible = periodic
   bar.ssk_period_picker.visible = periodic
@@ -259,7 +259,7 @@ local function update_header(player,us)
   bar.ssk_surface_picker.visible = scoped
   local label=bar.ssk_history
   if not scoped then label.visible = false; return end
-  if us.tab_id=="transfers" then label.visible=false;return end
+  if us.tab_id=="transfers" or not periodic then label.visible=false;return end
   local seconds=Sampler.coverage(us.sidx,us.period)
   local target=us.period
   label.visible=seconds<target
@@ -291,7 +291,7 @@ function UI.refresh(player, only_auto, full, keep_balance_rows)
     us.cells = us.cells or {}
     if only_auto and CellsUI.mode(us.cells) ~= "measured" then return end
     us.cells.chart = us.cells.chart or {}
-    us.cells.period = us.period
+    us.cells.period, us.cells.sidx = us.period, us.sidx
     CellsUI.fill(player, c, us.cells, us.canvas_w, tab_pane_height(us), full, only_auto)
     return
   end
@@ -397,7 +397,7 @@ function UI.open(player)
     if us.surface == x.name then ssel = i + 1 end
   end
   local surface_picker = tb.add { type = "drop-down", name = "ssk_surface_picker", items = sitems, selected_index = ssel,
-           tags = { ssk_ui = "surface" }, tooltip = SERockets.available() and Loc("se-surface-help") or Loc("ui-surface-for-balance-focus-and-full-sankey") }
+           tags = { ssk_ui = "surface" }, tooltip = SERockets.available() and Loc("se-surface-help") or Loc("ui-surface-for-balance-focus-cells-and-full-sankey") }
   surface_picker.style.width = math.min(240, math.floor(W * 0.22))
   local pl = tb.add { type = "label", name = "ssk_period_label", caption = Loc("ui-period") }
   -- 16 px between each label + drop-down pair and the next group.
@@ -475,6 +475,24 @@ local function finish_cell_delete(player, confirm)
   if pending.from_tab then UI.open(player) else Cells.open(player) end
 end
 
+-- Opens the Cells tab on a saved cell, switching the header's surface to the
+-- cell's surface the way choosing it from the surface picker would.
+local function show_cell(player, id)
+  local cells = storage.production_cells
+  local record = cells and cells.records[id]
+  local surface = record and game.surfaces[record.surface_index]
+  if not surface or player.force ~= game.forces.player then return end
+  local us = ustate(player.index)
+  if sidx_for(player, us) ~= surface.index then
+    us.surface = surface ~= player.surface and surface.name or nil
+  end
+  us.tab_id = "cells"
+  us.cells = us.cells or {}
+  us.cells.selected, us.cells.chart = id, {}
+  Cells.close(player)
+  UI.open(player)
+end
+
 function UI.on_click(e)
   local el = e.element
   local player = game.get_player(e.player_index)
@@ -505,6 +523,7 @@ function UI.on_click(e)
     Cells.prompt_delete(player, el.tags.ssk_cell_delete_request, false, Cells.close)
     return true
   end
+  if el.tags.ssk_cell == "show" then show_cell(player, el.tags.cell_id); return true end
   if Cells.on_click(player, el) then return true end
   if MachineStatus.on_click(player, el, UI.close) then return true end
   local us = ustate(e.player_index)
@@ -545,6 +564,12 @@ function UI.on_click(e)
   if not a then return false end
   if a == "close" then UI.close(player)
   elseif a == "cells" then UI.close(player); Cells.open(player)
+  elseif a == "cell_new" and us.tab_id == "cells" then
+    UI.close(player)
+    Cells.on_click(player, { tags = { ssk_cell = "select" } })
+  elseif a == "cell_edit" and us.tab_id == "cells" and us.cells.selected then
+    UI.close(player)
+    Cells.on_click(player, { tags = { ssk_cell = "edit", cell_id = us.cells.selected } })
   elseif a == "cell_delete" and us.tab_id == "cells" and us.cells.selected then
     Cells.prompt_delete(player, us.cells.selected, true, UI.close)
   elseif a == "help" then close_inspectors(player); Help.open(player)

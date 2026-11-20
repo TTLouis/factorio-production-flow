@@ -145,4 +145,12 @@ data:extend {{
   icon_size = 56,
   small_icon = "__base__/graphics/icons/shortcut-toolbar/mip/new-blueprint-x24.png",
   small_icon_size = 24,
+}, {
+  -- Clicking outside the saved-cells list closes it. Never consumes the click.
+  type = "custom-input",
+  name = cell_selection.click,
+  key_sequence = "mouse-button-1",
+  alternative_key_sequence = "mouse-button-2",
+  consuming = "none",
+  action = "lua",
 }}

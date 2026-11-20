@@ -31,6 +31,14 @@ local topics={
     {Loc("help-widths-colors-and-navigation"), Loc("help-compressed-widths-use-a-square-root-scale")},
     {Loc("help-scope"), Loc("help-balance-focus-and-full-sankey-each-cover")},
   }},
+  {name=Loc("cells-tab"),sections={
+    {Loc("help-cells-what"), Loc("help-cells-what-text")},
+    {Loc("help-cells-create"), Loc("help-cells-create-text")},
+    {Loc("help-cells-boundary"), Loc("help-cells-boundary-text")},
+    {Loc("help-cells-rates"), Loc("help-cells-rates-text")},
+    {Loc("help-cells-replacements"), Loc("help-cells-replacements-text")},
+    {Loc("help-cells-scope"), Loc("help-cells-scope-text")},
+  }},
   {name=Loc("help-transfers"),sections={
     {Loc("se-logistics"), Loc("se-help")},
     {Loc("help-flow"), Loc("help-select-a-space-platform-to-see-where")},

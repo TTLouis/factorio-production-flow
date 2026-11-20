@@ -32,6 +32,27 @@ local function screenshot(player, name)
     resolution = {1920, 1080}, show_gui = true, force_render = true}
 end
 
+local function cells_tab(player)
+  local tabs = player.gui.screen.ssk_main.ssk_inner.ssk_tabs
+  for i, id in ipairs(tabs.tags.ssk_tab_ids) do
+    if id == "cells" then
+      if tabs.selected_tab_index ~= i then
+        tabs.selected_tab_index = i
+        script.get_event_handler(defines.events.on_gui_selected_tab_changed){player_index = player.index, element = tabs}
+      end
+      return player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_cells.ssk_cell_split
+    end
+  end
+  error("Cells tab missing")
+end
+
+local function has_caption(element, key)
+  local caption = element.caption
+  if type(caption) == "table" and caption[1] == key then return true end
+  for _, child in ipairs(element.children) do if has_caption(child, key) then return true end end
+  return false
+end
+
 function T.tick(UI)
   local player = game.connected_players[1]
   if not player or game.tick < 30 then return end
@@ -96,6 +117,16 @@ function T.tick(UI)
     storage.cell_test_phase = "capture-list"
   elseif stage == "capture-list" then
     screenshot(player, "saved")
+    storage.cell_test_phase = "show"
+  elseif stage == "show" then
+    click(player, window(), "ssk_cell", "show")
+    assert(not player.gui.screen.ssk_cells, "Show must close the saved-cells list")
+    local split = cells_tab(player)
+    assert(storage.ui[player.index].tab_id == "cells" and split.ssk_cell_sidebar.ssk_cell_list.selected_index == 2,
+      "Show must open the Cells tab on the chosen cell")
+    assert(player.gui.screen.ssk_main.ssk_window_bar.ssk_surface_picker.selected_index == 1,
+      "A cell on the player's surface keeps Where I am")
+    click(player, player.gui.screen.ssk_main, "ssk_ui", "cells")
     storage.cell_test_phase = "edit"
   elseif stage == "edit" then
     click(player, window(), "ssk_cell", "edit")
@@ -203,6 +234,11 @@ function T.tick(UI)
     click(player, window(), "ssk_cell", "list")
     assert(cells.records[2] and Cells.missing(cells.records[2]) == 1, "Leaving the editor must not change the cell")
     click(player, window(), "ssk_cell", "close")
+    UI.open(player)
+    local listed = cells_tab(player).ssk_cell_sidebar.ssk_cell_list.items
+    assert(serpent.line(listed[3]):find("warning_icon", 1, true) and not serpent.line(listed[2]):find("warning_icon", 1, true),
+      "A cell with missing machines must carry a warning in the Cells tab: " .. serpent.line(listed))
+    UI.close(player)
     local _, revived = storage.cell_test_ghost.revive{raise_revive = true}
     assert(revived and revived.valid, "Ghost revival failed")
     if not revived.get_recipe() then revived.set_recipe("copper-cable") end
@@ -245,6 +281,7 @@ function T.tick(UI)
     local overview = Flow.build(nil, {mode = "measured", period = 600})
     assert(overview.nodes["recipe/cell-1"].rate_line and overview.nodes["recipe/cell-2"].note,
       "Measured cell nodes need utilisation and a partial-window note")
+    assert(overview.newest and overview.newest < 600, "The All view must report how much data the newest cell has")
     log(string.format("CELL MEASURED PASS: cable crafts engine=%d measured=%.1f over %.0f s; cell 2 utilisation %.2f",
       cable.products_finished, measured, seconds, inside.utilisation))
 
@@ -258,7 +295,16 @@ function T.tick(UI)
     end
     script.get_event_handler(defines.events.on_gui_selected_tab_changed){player_index = player.index, element = tabs}
     local split = tabs.content_cells.ssk_cell_split
+    local all_rows = split.ssk_cell_sidebar.ssk_cell_list
+    if all_rows.selected_index ~= 1 then
+      all_rows.selected_index = 1
+      script.get_event_handler(defines.events.on_gui_selection_state_changed){player_index = player.index, element = all_rows}
+      split = player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_cells.ssk_cell_split
+    end
     assert(split.ssk_cell_sidebar.ssk_cell_list.selected_index == 1)
+    assert(has_caption(split.ssk_cell_chart.ssk_cell_toolbar, "production-flow.cells-flow-newest")
+      or serpent.line(split.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_scope.caption):find("cells-flow-newest", 1, true),
+      "The All caption must say the newest cell has less data than the period")
     assert(find(split.ssk_cell_chart, "key", "recipe/cell-2"), "Overview must render a single cell node")
     assert(find(split.ssk_cell_chart, "side", "inputs") and find(split.ssk_cell_chart, "side", "outputs"),
       "The cell renderer must draw both bar halves")
@@ -299,6 +345,21 @@ function T.tick(UI)
     switch.switch_state = "left"
     script.get_event_handler(defines.events.on_gui_switch_state_changed){player_index = player.index, element = switch}
     assert(player.gui.screen.ssk_main.ssk_window_bar.ssk_period_picker.visible)
+    local bar = cells_tab(player).ssk_cell_sidebar.ssk_cell_list_bar
+    assert(bar.ssk_cell_edit_button.enabled and bar.ssk_cell_delete_button.enabled)
+    click(player, player.gui.screen.ssk_main, "ssk_ui", "cell_edit")
+    local draft = storage.production_cells.drafts[player.index]
+    assert(not player.gui.screen.ssk_main and draft and draft.id == 1 and window(), "Edit must open the cell's editor")
+    click(player, window(), "ssk_cell", "list")
+    click(player, window(), "ssk_cell", "close")
+    UI.open(player)
+    assert(cells_tab(player).ssk_cell_sidebar.ssk_cell_list.selected_index == 2, "Reopening keeps the selected cell")
+    click(player, player.gui.screen.ssk_main, "ssk_ui", "cell_new")
+    assert(not player.gui.screen.ssk_main and player.cursor_stack.valid_for_read
+      and player.cursor_stack.name == Selection.tool, "New must hand over the selection tool")
+    player.cursor_stack.clear()
+    UI.open(player)
+    cells_tab(player)
     storage.cell_test_phase = "prompt-delete"
   elseif stage == "prompt-delete" then
     local main = player.gui.screen.ssk_main
@@ -376,6 +437,45 @@ function T.tick(UI)
     assert(Flow.build(nil, CAPACITY).nodes["recipe/cell-" .. clone.id].context == "cells-clone-test",
       "The All view must place a moved cell on its new surface")
     log("CELL CLONE PASS: engine clone to another surface moved the cell with both members")
+    storage.cell_test_phase = "show-moved"
+  elseif stage == "show-moved" then
+    -- Show switches the header to the cell's surface, as choosing it from the picker would.
+    if player.gui.screen.ssk_main then UI.close(player) end
+    if not player.gui.screen.ssk_cells then Cells.open(player) end
+    click(player, window(), "ssk_cell", "show")
+    local clone = storage.cell_test_clone
+    local us = storage.ui[player.index]
+    local picker = player.gui.screen.ssk_main.ssk_window_bar.ssk_surface_picker
+    assert(us.surface == "cells-clone-test" and picker.selected_index > 1
+      and us.surface_names[picker.selected_index] == "cells-clone-test", "Show must select the cell's surface")
+    assert(cells_tab(player).ssk_cell_sidebar.ssk_cell_list.selected_index == 2)
+    assert(Flow.ids(clone.surface)[1] == clone.id and #Flow.ids(player.surface.index) == 0)
+    storage.cell_test_phase = "capture-moved"
+  elseif stage == "capture-moved" then
+    screenshot(player, "moved")
+    storage.cell_test_phase = "empty-surface"
+  elseif stage == "empty-surface" then
+    local main = player.gui.screen.ssk_main
+    local picker = main.ssk_window_bar.ssk_surface_picker
+    picker.selected_index = 1
+    script.get_event_handler(defines.events.on_gui_selection_state_changed){player_index = player.index, element = picker}
+    local split = cells_tab(player)
+    assert(#split.ssk_cell_sidebar.ssk_cell_list.items == 1, "Only All is listed on a surface without cells")
+    assert(has_caption(split.ssk_cell_chart, "production-flow.cells-empty-surface"), "Empty surfaces need their own message")
+    assert(serpent.line(split.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_scope.caption):find("duration-minutes", 1, true),
+      "An empty surface's caption must name the selected period")
+    storage.cell_test_phase = "capture-empty"
+  elseif stage == "capture-empty" then
+    screenshot(player, "empty-surface")
+    storage.cell_test_phase = "help"
+  elseif stage == "help" then
+    click(player, player.gui.screen.ssk_main, "ssk_ui", "help")
+    local tabs = player.gui.screen.ssk_help.ssk_help_inner.ssk_help_tabs
+    assert(tabs.tabs[4].tab.caption[1] == "production-flow.cells-tab", "Help needs a Cells topic")
+    tabs.selected_tab_index = 4
+    storage.cell_test_phase = "capture-help"
+  elseif stage == "capture-help" then
+    screenshot(player, "help-cells")
     storage.cell_test_phase = "done"
     log("PRODUCTION CELLS NATIVE PASS")
   end

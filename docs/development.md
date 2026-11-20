@@ -93,6 +93,21 @@ engine's `products_finished`, and captures the Capacity view. The offline
 `cells_measured_test.lua` covers attribution, ring roll-up, creation clipping,
 shared exclusion, membership changes, utilisation and purge on delete.
 
+The create and edit forms list the cell's boundary items, suggested from the
+members' recipes (net consumption as inputs, net production as outputs). The
+player removes items that do not really cross the boundary; saving locks the
+rest, and the All view shows only locked items. Cells saved before the lock show
+every net flow until they are edited. Like the other tabs, the Cells tab lists
+and charts only the cells on the surface chosen in the window header. Surface
+labels use the header picker's localised name and icon, and cell nodes do not
+repeat the surface. The saved-cells list's Production Flow button opens the
+Cells tab on that cell and switches the header to the cell's surface when it
+differs. The Cells tab's list header has New, Edit and Delete buttons, and cells
+with missing members carry a warning icon. In-game help has a Cells topic.
+`cells_ports_test.lua` covers suggestions, removal and restore, locking, the
+edit form, the All view filter and the surface scope; `cells_native.lua` checks
+the Show button, the tab buttons, the empty-surface message and the help topic.
+
 A cell follows machines that are cloned to another surface (Space Exploration
 spaceship launches and landings) only when every live member has an eligible
 copy on the same new surface and the originals are gone. Copies that leave the
