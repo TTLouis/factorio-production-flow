@@ -493,6 +493,21 @@ local function show_cell(player, id)
   UI.open(player)
 end
 
+-- Closes the window and centres remote view on the cell's machines.
+local function jump_to_cell(player, id)
+  local cells = storage.production_cells
+  local record = cells and cells.records[id]
+  local center = record and CellsUI.area(record)
+  if not center or player.force ~= game.forces.player then return end
+  UI.close(player)
+  local ok = pcall(player.set_controller, { type = defines.controllers.remote,
+    surface = record.surface_index, position = center })
+  if ok then return end
+  for _, entity in pairs(record.members) do
+    if entity.valid then player.centered_on = entity; return end
+  end
+end
+
 function UI.on_click(e)
   local el = e.element
   local player = game.get_player(e.player_index)
@@ -570,6 +585,8 @@ function UI.on_click(e)
   elseif a == "cell_edit" and us.tab_id == "cells" and us.cells.selected then
     UI.close(player)
     Cells.on_click(player, { tags = { ssk_cell = "edit", cell_id = us.cells.selected } })
+  elseif a == "cell_jump" and us.tab_id == "cells" and us.cells.selected then
+    jump_to_cell(player, us.cells.selected)
   elseif a == "cell_delete" and us.tab_id == "cells" and us.cells.selected then
     Cells.prompt_delete(player, us.cells.selected, true, UI.close)
   elseif a == "help" then close_inspectors(player); Help.open(player)

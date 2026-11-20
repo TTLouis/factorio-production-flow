@@ -4,6 +4,7 @@ local Selection = require("shared.cell_selection")
 local Flow = require("scripts.cell_flow")
 local Cells = require("scripts.cells")
 local Sampler = require("scripts.sampler")
+local CellsUI = require("scripts.cells_ui")
 -- The construction checks assert full-speed rates; measured rates are checked
 -- separately once the machines have run on real ingredients.
 local CAPACITY = {mode = "capacity"}
@@ -306,6 +307,7 @@ function T.tick(UI)
       or serpent.line(split.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_scope.caption):find("cells-flow-newest", 1, true),
       "The All caption must say the newest cell has less data than the period")
     assert(find(split.ssk_cell_chart, "key", "recipe/cell-2"), "Overview must render a single cell node")
+    assert(not split.ssk_cell_sidebar.ssk_cell_preview.visible, "All has no single area to preview")
     assert(find(split.ssk_cell_chart, "side", "inputs") and find(split.ssk_cell_chart, "side", "outputs"),
       "The cell renderer must draw both bar halves")
     storage.cell_test_phase = "capture-overview"
@@ -320,9 +322,48 @@ function T.tick(UI)
     local split = tabs.content_cells.ssk_cell_split
     assert(find(split.ssk_cell_chart, "key", "recipe/electronic-circuit"), "Individual cell must render its recipe")
     assert(not find(split.ssk_cell_chart, "key", "recipe/copper-cable"), "Another cell's recipe leaked into the view")
+    local preview = split.ssk_cell_sidebar.ssk_cell_preview
+    local camera = preview.ssk_cell_camera
+    local chosen = storage.ui[player.index].cells.selected
+    local center = CellsUI.area(storage.production_cells.records[chosen])
+    assert(preview.visible and camera.surface_index == player.surface.index
+      and math.abs(camera.position.x - center.x) < 0.01 and math.abs(camera.position.y - center.y) < 0.01,
+      "A selected cell must preview its area")
+    assert(preview.ssk_cell_preview_bar.ssk_cell_jump_button.sprite == "utility/go_to_arrow")
     storage.cell_test_phase = "capture-inside"
   elseif stage == "capture-inside" then
     screenshot(player, "inside")
+    storage.cell_test_phase = "wide"
+  elseif stage == "wide" then
+    -- A chart wider than its tab must scroll inside the frame, not push it out of the window.
+    local content = player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_cells
+    CellsUI.fill(player, content, storage.ui[player.index].cells, 600, 520, true)
+    local chart = content.ssk_cell_split.ssk_cell_chart
+    local sp = chart.ssk_cell_plot.ssk_sp
+    log("CELL WIDE: canvas " .. tostring(sp.ssk_canvas.style.minimal_width) .. " viewport max " .. tostring(sp.style.maximal_width))
+    assert(sp.horizontal_scroll_policy == "auto", "A wide cell chart must scroll horizontally")
+    assert(sp.style.maximal_width == 600 - math.min(236, math.floor(600 * 0.32)) - 16, "The chart viewport must stay inside its frame")
+    storage.cell_test_phase = "capture-wide"
+  elseif stage == "capture-wide" then
+    screenshot(player, "inside-wide")
+    storage.cell_test_phase = "jump"
+  elseif stage == "jump" then
+    UI.open(player)
+    cells_tab(player)
+    click(player, player.gui.screen.ssk_main, "ssk_ui", "cell_jump")
+    assert(not player.gui.screen.ssk_main, "Jump must close the window")
+    assert(player.controller_type == defines.controllers.remote and player.surface.index == storage.production_cells.records[storage.ui[player.index].cells.selected].surface_index,
+      "Jump must open remote view on the cell's surface")
+    storage.cell_test_phase = "capture-jump"
+  elseif stage == "capture-jump" then
+    -- Screenshots render at the end of the tick, so return to the character next tick.
+    screenshot(player, "jump")
+    storage.cell_test_phase = "return"
+  elseif stage == "return" then
+    player.exit_remote_view()
+    assert(player.controller_type == defines.controllers.character, "Leaving remote view returns to the character")
+    UI.open(player)
+    assert(cells_tab(player).ssk_cell_sidebar.ssk_cell_list.selected_index == 2, "Reopening keeps the selected cell")
     storage.cell_test_phase = "capacity"
   elseif stage == "capacity" then
     local main = player.gui.screen.ssk_main

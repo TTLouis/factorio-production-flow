@@ -103,10 +103,15 @@ labels use the header picker's localised name and icon, and cell nodes do not
 repeat the surface. The saved-cells list's Production Flow button opens the
 Cells tab on that cell and switches the header to the cell's surface when it
 differs. The Cells tab's list header has New, Edit and Delete buttons, and cells
-with missing members carry a warning icon. In-game help has a Cells topic.
+with missing members carry a warning icon. Selecting a cell shows a camera
+preview of its machines under the list, with a button that jumps to the cell in
+remote view. The chart frame has a fixed width, so a cell with many tiers
+scrolls horizontally instead of running past the window. In-game help has a
+Cells topic.
 `cells_ports_test.lua` covers suggestions, removal and restore, locking, the
 edit form, the All view filter and the surface scope; `cells_native.lua` checks
-the Show button, the tab buttons, the empty-surface message and the help topic.
+the Show button, the tab buttons, the preview and jump, horizontal scrolling of
+a wide chart, the empty-surface message and the help topic.
 
 A cell follows machines that are cloned to another surface (Space Exploration
 spaceship launches and landings) only when every live member has an eligible

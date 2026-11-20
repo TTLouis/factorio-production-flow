@@ -6,6 +6,20 @@ local Sampler = require("scripts.sampler")
 local Su = require("scripts.surfaces")
 
 local UI = {}
+local PREVIEW_H = 150
+
+-- Centre and size (tiles) of the area the cell's machines cover.
+function UI.area(record)
+  local x1, y1, x2, y2
+  for unit, p in pairs(record and record.positions or {}) do
+    local entity = record.members[unit]
+    if entity and entity.valid then p = entity.position end
+    x1, y1 = math.min(x1 or p.x, p.x), math.min(y1 or p.y, p.y)
+    x2, y2 = math.max(x2 or p.x, p.x), math.max(y2 or p.y, p.y)
+  end
+  if not x1 then return end
+  return { x = (x1 + x2) / 2, y = (y1 + y2) / 2 }, x2 - x1 + 6, y2 - y1 + 6
+end
 
 -- Measured (default) shows what the cell's machines actually crafted over the
 -- selected period; Capacity shows every member running at full speed.
@@ -58,8 +72,23 @@ function UI.fill(player, container, state, width, height, full, only_auto)
     list.add { type = "list-box", name = "ssk_cell_list", tags = { ssk_ui = "cell_list" } }
     list.ssk_cell_list.style.horizontally_stretchable = true
     list.ssk_cell_list.style.height = height - 40
+    -- The selected cell's area on the map, with a jump to it in remote view.
+    local preview = list.add { type = "frame", name = "ssk_cell_preview", style = "inside_deep_frame", direction = "vertical" }
+    preview.style.horizontally_stretchable = true
+    local head = preview.add { type = "frame", name = "ssk_cell_preview_bar", style = "subheader_frame" }
+    head.style.horizontally_stretchable = true
+    head.add { type = "label", style = "subheader_caption_label", caption = Loc("cells-preview") }
+    head.add { type = "empty-widget" }.style.horizontally_stretchable = true
+    head.add { type = "sprite-button", name = "ssk_cell_jump_button", style = "tool_button",
+      sprite = "utility/go_to_arrow", tooltip = Loc("cells-jump"), tags = { ssk_ui = "cell_jump" } }
+    local camera = preview.add { type = "camera", name = "ssk_cell_camera", surface_index = player.surface.index,
+      position = player.position, zoom = 0.5 }
+    camera.style.horizontally_stretchable = true
+    camera.style.height = PREVIEW_H
     local right = split.add { type = "frame", name = "ssk_cell_chart", style = "inside_deep_frame", direction = "vertical" }
     right.style.height = height
+    -- A fixed width keeps wide cells inside the window; the chart scrolls instead.
+    right.style.width = width - side - 8
     local toolbar = right.add { type = "frame", name = "ssk_cell_toolbar", style = "subheader_frame", direction = "vertical" }
     toolbar.style.horizontally_stretchable = true
     -- subheader_frame is one line tall; let it grow for the wrapped scope text so
@@ -94,6 +123,16 @@ function UI.fill(player, container, state, width, height, full, only_auto)
   list_bar.ssk_cell_edit_button.enabled = state.selected ~= nil
   list_bar.ssk_cell_delete_button.enabled = state.selected ~= nil
   local rows = sidebar.ssk_cell_list
+  local center, area_w, area_h = UI.area(state.selected and records[state.selected])
+  local preview = sidebar.ssk_cell_preview
+  preview.visible = center ~= nil
+  rows.style.height = height - 40 - (center and PREVIEW_H + 48 or 0)
+  if center then
+    local camera = preview.ssk_cell_camera
+    camera.surface_index = records[state.selected].surface_index
+    camera.position = center
+    camera.zoom = math.max(0.05, math.min(1, (side - 8) / (area_w * 32), PREVIEW_H / (area_h * 32)))
+  end
   local listed = table.concat(signature, ",")
   if full or state.listed ~= listed then rows.items = items end
   state.listed = listed
@@ -113,8 +152,11 @@ function UI.fill(player, container, state, width, height, full, only_auto)
   chart.show_labels, chart.split_raw = true, false
   local changed = state.rendered_selection ~= state.selected
   state.rendered_selection = state.selected
-  SK.fill(player, right.ssk_cell_plot, chart, width - side - 16, math.max(100, height - (width >= 780 and 58 or 88)),
+  local plot = right.ssk_cell_plot
+  SK.fill(player, plot, chart, width - side - 28, math.max(100, height - (width >= 780 and 58 or 88)),
     full or changed, only_auto, graph)
+  -- Cap the viewport to the frame so content wider than the chart scrolls.
+  if plot.ssk_sp then plot.ssk_sp.style.maximal_width = width - side - 16 end
 end
 
 return UI
