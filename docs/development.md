@@ -93,32 +93,60 @@ engine's `products_finished`, and captures the Capacity view. The offline
 `cells_measured_test.lua` covers attribution, ring roll-up, creation clipping,
 shared exclusion, membership changes, utilisation and purge on delete.
 
-The create and edit forms list the cell's boundary items, suggested from the
-members' recipes (net consumption as inputs, net production as outputs). The
-player removes items that do not really cross the boundary; saving locks the
-rest, and the All view shows only locked items. Cells saved before the lock show
-every net flow until they are edited. The All view orders cells into stages from their
+The display item can be any item or fluid; until the player picks one it
+follows the cell's main product, and a picked one is kept through membership
+changes. The main product is the members' item product furthest along the
+production chain (`depth` in `scripts/graph.lua`: the shortest chain from raw
+materials, so nutrients made from bioflux are no deeper than nutrients made from
+mash). Among equally deep items, one the cell uses itself as an ingredient or
+as fuel ranks lower, then the one drawing on more raw materials ranks higher,
+then the larger rate at full speed. Items mined from resources, plants, trees
+and fish count as raw even when a later recipe also makes them (Space Age's
+asteroid-crushed ores), so the chains built on them keep their depth and era.
+The create and edit forms list the cell's boundary as two rows, Cell inputs and
+Cell outputs, holding only items and fluids the player added: + opens the
+material picker, a click removes an item, and adding an item to one side takes
+it off the other. Nothing is suggested. Saving stores the lists; the All view
+charts a chosen output when the cell makes more of it than it uses, and a chosen
+input when it uses more than it makes. Cells saved before boundaries were chosen
+by hand show every net flow, and editing one starts from those flows. The All view orders cells into stages from their
 boundaries (`Flow.stages`): a cell whose input another cell makes comes one
 stage later, the shared item becomes one node between them, and the tab's list
 follows the same order. Loops are ordered by creation. Like the other tabs, the Cells tab lists
 and charts only the cells on the surface chosen in the window header. Surface
 labels use the header picker's localised name and icon, and cell nodes do not
-repeat the surface. The saved-cells list's Production Flow button opens the
+repeat the surface. The Production cells window (editor and saved list) opens
+docked at the left and reopens where the player last left it, so changing
+items or saving does not move it. Its saved list shows one surface: Where I am
+by default, or another surface with cells from its drop-down. The saved-cells
+list's Production Flow button opens the
 Cells tab on that cell and switches the header to the cell's surface when it
-differs. The Cells tab's list header has New, Edit and Delete buttons, and cells
+differs. The Cells tab's list header has New; Edit and Delete sit at the right
+of the Flow and Map sub-tab headings. Cells
 with missing members carry a warning icon. Flow and Map sub-tabs share the
 area beside the list. Map shows the selected cell, or every listed cell for All,
-fitted to the members' current positions (never zoomed past 1x); its subheader
-has a zoom slider, move buttons, Fit, a remote-view jump and Edit. A player's
-zoom and moves are kept per cell until Fit or a surface change. The Flow frame
+fitted to the members' current positions at 80% of the fitting zoom (never past
+0.8x); its subheader
+has a zoom slider, move buttons (an eighth of the view per click), Fit, a
+remote-view jump, Edit and Delete. A player's
+zoom and moves are kept per cell until Fit or a surface change. The Map tab
+outlines each shown cell's machines for the viewing player only
+(`scripts/cell_outlines.lua`): the cell's colour and a name label, red for
+missing members. The outlines are redrawn only when the cells, names or
+missing members change, stay visible after a jump until the player leaves
+remote view, and are cleared on another tab or when the window closes. The
+machines of a cell being created or edited are outlined the same way until it
+is saved or cancelled. The Flow frame
 has a fixed width, so a cell with many tiers scrolls horizontally instead of
 running past the window. Guidance lives in the in-game help's Cells topic, not
 in chat: picking a selection tool prints nothing, and chat messages are kept
 for errors such as a wrong surface or an empty selection.
-`cells_ports_test.lua` covers suggestions, removal and restore, locking, the
-edit form, the All view filter and the surface scope; `cells_native.lua` checks
-the Show button, the tab buttons, the Map tab (centring, zoom, moves, Fit and
-the jump), horizontal scrolling of
+`cells_ports_test.lua` covers adding, removing and moving boundary items, saving
+and editing them, older cells, display-item ranking (a bioflux cell), mined raw
+depth, the kept window place, the saved list's surface choice, the All view
+filter and the surface scope; `cells_native.lua`
+checks the Show button, the tab and heading buttons, the Map tab (centring,
+zoom, moves, Fit, outlines and the jump), draft outlines, horizontal scrolling of
 a wide chart, the empty-surface message and the help topic.
 
 A cell follows machines that are cloned to another surface (Space Exploration

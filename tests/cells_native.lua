@@ -22,6 +22,27 @@ local function click(player, parent, key, value)
   script.get_event_handler(defines.events.on_gui_click){player_index = player.index, element = element}
 end
 
+-- Adds a boundary item through the editor's + button and the material picker.
+local function add_port(player, side, key)
+  local grid = player.gui.screen.ssk_cells.ssk_cell_panel.ssk_cell_ports.ssk_cell_port_table
+  click(player, assert(grid["ssk_cell_" .. side .. "_add"]), "side", side)
+  local popup = assert(player.gui.screen.ssk_material_picker, "+ opens the material picker")
+  local kind, name = key:match("^(%a+)/(.+)$")
+  local group = prototypes[kind][name].group.name
+  local function group_tab(element)
+    if element.tags.ssk_picker == "group" and element.tags.group == group then return element end
+    for _, child in ipairs(element.children) do
+      local found = group_tab(child)
+      if found then return found end
+    end
+  end
+  local tab = group_tab(popup)
+  if tab then script.get_event_handler(defines.events.on_gui_click){player_index = player.index, element = tab} end
+  click(player, player.gui.screen.ssk_material_picker, "key", key)
+  assert(not player.gui.screen.ssk_material_picker and find(player.gui.screen.ssk_cells, "key", key),
+    "The picked item joins the boundary")
+end
+
 local function select_area(player, entities)
   script.get_event_handler(defines.events.on_player_selected_area){
     player_index = player.index, item = Selection.tool, surface = player.surface, entities = entities,
@@ -31,6 +52,11 @@ end
 local function screenshot(player, name)
   game.take_screenshot{player = player, path = "cells/" .. name .. ".png",
     resolution = {1920, 1080}, show_gui = true, force_render = true}
+end
+
+local function outlines(player, slot)
+  local mine = storage.cell_outlines and storage.cell_outlines[player.index]
+  return mine and mine[slot or "map"]
 end
 
 local function cells_tab(player)
@@ -106,9 +132,21 @@ function T.tick(UI)
       and not player.gui.screen.ssk_cells, "tool not equipped or window still open")
     select_area(player, {e[1], e[2], e[3], e[4], e[1]})
     assert(not player.cursor_stack.valid_for_read)
+    local drafted = assert(outlines(player, "draft"), "The draft's machines must be outlined")
+    local boxes = 0
+    for _, object in ipairs(drafted.objects) do
+      if object.type == "rectangle" and not object.filled then boxes = boxes + 1 end
+    end
+    assert(boxes == table_size(storage.production_cells.drafts[player.index].members),
+      "Every selected machine gets one outline")
+    log("CELL DRAFT OUTLINES: " .. #drafted.objects .. " objects")
     assert(not next(storage.production_cells.records))
     assert(window().ssk_cell_panel.ssk_cell_form.ssk_cell_name_column.ssk_cell_name.text == "Electronic circuit",
       "Faster copper cable output is consumed inside the cell")
+    assert(not find(window(), "ssk_cell", "port"), "A new cell's boundary starts empty")
+    add_port(player, "inputs", "item/copper-plate")
+    add_port(player, "inputs", "item/iron-plate")
+    add_port(player, "outputs", "item/electronic-circuit")
     storage.cell_test_phase = "capture-draft"
   elseif stage == "capture-draft" then
     screenshot(player, "draft")
@@ -122,6 +160,7 @@ function T.tick(UI)
     assert(record.display_item == "electronic-circuit")
     assert(record.members[e[1].unit_number] == e[1] and record.members[e[2].unit_number] == e[2])
     assert(table_size(record.members) == 2)
+    assert(not outlines(player, "draft"), "Saving clears the draft's outlines")
     storage.cell_test_phase = "capture-list"
   elseif stage == "capture-list" then
     screenshot(player, "saved")
@@ -149,7 +188,9 @@ function T.tick(UI)
     click(player, window(), "ssk_cell", "select")
     select_area(player, {machines[5]})
     assert(table_size(cells.drafts[player.index].members) == 1, "Replace must still reset the whole draft")
+    assert(outlines(player, "draft"), "Editing outlines the cell's machines")
     click(player, window(), "ssk_cell", "list")
+    assert(not outlines(player, "draft"), "Cancelling an edit clears its outlines")
     assert(storage.production_cells.records[1].name == "Circuit assembly")
     click(player, window(), "ssk_cell", "edit")
     window().ssk_cell_panel.ssk_cell_form.ssk_cell_name_column.ssk_cell_name.text = "Circuit assembler"
@@ -162,7 +203,9 @@ function T.tick(UI)
     assert(table_size(cells.records[1].members) == 2 and machines[1].valid and machines[5].valid,
       "Removal must only update draft membership and leave factory entities intact")
     assert(window().ssk_cell_panel.ssk_cell_form.ssk_cell_name_column.ssk_cell_name.text == "Circuit assembler")
+    add_port(player, "inputs", "item/copper-cable")
     click(player, window(), "ssk_cell", "save")
+    assert(cells.records[1].ports.inputs["item/copper-cable"] and cells.records[1].ports.outputs["item/electronic-circuit"])
     assert(table_size(cells.records) == 1 and cells.records[1].name == "Circuit assembler")
     assert(table_size(cells.records[1].members) == 1 and cells.records[1].members[storage.cell_test_machines[2].unit_number])
     assert(not next(cells.drafts))
@@ -174,12 +217,15 @@ function T.tick(UI)
     assert(picker.type == "sprite-button" and picker.sprite == "item/copper-cable")
     click(player, window(), "target", "cell")
     local popup = assert(player.gui.screen.ssk_material_picker)
-    assert(popup.tags.allowed["item/iron-gear-wheel"] and popup.tags.allowed["item/copper-cable"])
-    assert(not popup.tags.allowed["item/electronic-circuit"] and not popup.tags.allowed["fluid/water"])
+    assert(not popup.tags.allowed and find(popup, "key", "item/electronic-circuit"),
+      "Any item or fluid can represent a cell")
     local item = assert(find(popup, "key", "item/iron-gear-wheel"))
     script.get_event_handler(defines.events.on_gui_click){player_index = player.index, element = item}
     assert(picker.sprite == "item/iron-gear-wheel")
     assert(not player.gui.screen.ssk_material_picker)
+    add_port(player, "outputs", "item/copper-cable")
+    add_port(player, "outputs", "item/iron-gear-wheel")
+    add_port(player, "inputs", "item/copper-plate")
     click(player, window(), "ssk_cell", "save")
     click(player, window(), "ssk_cell", "close")
 
@@ -366,7 +412,17 @@ function T.tick(UI)
     assert(camera.surface_index == player.surface.index and math.abs(camera.position.x - center.x) < 0.01
       and math.abs(camera.position.y - center.y) < 0.01, "The map must centre on the cell")
     local bar = map.ssk_cell_map_bar
-    assert(bar.ssk_cell_jump_button.sprite == "utility/go_to_arrow" and bar.ssk_cell_map_edit.enabled)
+    assert(bar.ssk_cell_jump_button.sprite == "utility/go_to_arrow" and bar.ssk_cell_map_edit.enabled
+      and bar.ssk_cell_map_delete.enabled, "The Map heading carries Edit and Delete")
+    local last = bar.children[#bar.children]
+    assert(last.name == "ssk_cell_map_delete", "Delete sits at the right of the Map heading")
+    local record, members = storage.production_cells.records[state.selected], 0
+    for _ in pairs(record.positions) do members = members + 1 end
+    local shown = assert(outlines(player), "The map must outline the cell's machines")
+    assert(#shown.objects >= members + 1 and shown.objects[1].valid, "Every member needs an outline and the cell a label")
+    local filter = shown.objects[2].players
+    assert(#filter == 1 and filter[1].index == player.index, "Only the viewing player sees the outlines")
+    log("CELL OUTLINES: " .. #shown.objects .. " objects for " .. members .. " members")
     local slider = bar.ssk_cell_map_zoom
     slider.slider_value = 1
     script.get_event_handler(defines.events.on_gui_value_changed){player_index = player.index, element = slider}
@@ -390,11 +446,31 @@ function T.tick(UI)
     storage.cell_test_phase = "capture-fit"
   elseif stage == "capture-fit" then
     screenshot(player, "map-fit")
+    storage.cell_test_phase = "map-all"
+  elseif stage == "map-all" then
+    local rows = cells_tab(player).ssk_cell_sidebar.ssk_cell_list
+    rows.selected_index = 1
+    script.get_event_handler(defines.events.on_gui_selection_state_changed){player_index = player.index, element = rows}
+    local state = storage.ui[player.index].cells
+    assert(not state.selected and state.view == "map", "All keeps the Map tab")
+    local labels = 0
+    for _, object in ipairs(outlines(player).objects) do
+      if object.type == "text" then labels = labels + 1 end
+    end
+    assert(labels == #state.ids, "All labels every listed cell on the map")
+    storage.cell_test_phase = "capture-map-all"
+  elseif stage == "capture-map-all" then
+    screenshot(player, "map-all")
+    local rows = cells_tab(player).ssk_cell_sidebar.ssk_cell_list
+    rows.selected_index = row_of(player, 1)
+    script.get_event_handler(defines.events.on_gui_selection_state_changed){player_index = player.index, element = rows}
     storage.cell_test_phase = "jump"
   elseif stage == "jump" then
     cells_tab(player)
     click(player, player.gui.screen.ssk_main, "ssk_ui", "cell_jump")
     assert(not player.gui.screen.ssk_main, "Jump must close the window")
+    assert(outlines(player) and outlines(player).remote and outlines(player).objects[1].valid,
+      "Outlines stay visible in remote view after a jump")
     assert(player.controller_type == defines.controllers.remote and player.surface.index == storage.production_cells.records[storage.ui[player.index].cells.selected].surface_index,
       "Jump must open remote view on the cell's surface")
     storage.cell_test_phase = "capture-jump"
@@ -405,7 +481,12 @@ function T.tick(UI)
   elseif stage == "return" then
     player.exit_remote_view()
     assert(player.controller_type == defines.controllers.character, "Leaving remote view returns to the character")
+    storage.cell_test_phase = "returned"
+  elseif stage == "returned" then
+    -- The controller-changed event arrives after exit_remote_view returns.
+    assert(not outlines(player), "Leaving remote view clears the jump's outlines")
     UI.open(player)
+    assert(outlines(player) and not outlines(player).remote, "Reopening on the Map tab outlines the cell again")
     local split = cells_tab(player)
     assert(split.ssk_cell_sidebar.ssk_cell_list.selected_index == row_of(player, 1), "Reopening keeps the selected cell")
     assert(split.ssk_cell_views.selected_tab_index == 2, "Reopening keeps the Map tab")
@@ -413,6 +494,7 @@ function T.tick(UI)
     script.get_event_handler(defines.events.on_gui_selected_tab_changed){player_index = player.index, element = split.ssk_cell_views}
     assert(not storage.ui[player.index].cells.view and find(cells_tab(player).ssk_cell_views.ssk_cell_chart, "key", "recipe/electronic-circuit"),
       "Flow must chart the cell again")
+    assert(not outlines(player), "Leaving the Map tab clears the outlines")
     storage.cell_test_phase = "capacity"
   elseif stage == "capacity" then
     local main = player.gui.screen.ssk_main
@@ -435,8 +517,11 @@ function T.tick(UI)
     switch.switch_state = "left"
     script.get_event_handler(defines.events.on_gui_switch_state_changed){player_index = player.index, element = switch}
     assert(player.gui.screen.ssk_main.ssk_window_bar.ssk_period_picker.visible)
-    local bar = cells_tab(player).ssk_cell_sidebar.ssk_cell_list_bar
+    local split = cells_tab(player)
+    local bar = split.ssk_cell_views.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_title
     assert(bar.ssk_cell_edit_button.enabled and bar.ssk_cell_delete_button.enabled)
+    assert(bar.children[#bar.children].name == "ssk_cell_delete_button", "Delete sits at the right of the Flow heading")
+    assert(not split.ssk_cell_sidebar.ssk_cell_list_bar.ssk_cell_edit_button, "The cell list keeps only New")
     click(player, player.gui.screen.ssk_main, "ssk_ui", "cell_edit")
     local draft = storage.production_cells.drafts[player.index]
     assert(not player.gui.screen.ssk_main and draft and draft.id == 1 and window(), "Edit must open the cell's editor")
@@ -474,7 +559,8 @@ function T.tick(UI)
     assert(not cells.records[1] and cells.records[2] and machines[2].valid)
     local side = sidebar()
     assert(side.ssk_cell_list.selected_index == 1 and #side.ssk_cell_list.items == 2)
-    assert(not side.ssk_cell_list_bar.ssk_cell_delete_button.enabled, "All cannot be deleted")
+    local title = player.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_cells.ssk_cell_split.ssk_cell_views.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_title
+    assert(not title.ssk_cell_delete_button.enabled, "All cannot be deleted")
     local main_after = player.gui.screen.ssk_main
     click(player, main_after, "ssk_ui", "cells")
     click(player, window(), "ssk_cell_delete_request", 2)

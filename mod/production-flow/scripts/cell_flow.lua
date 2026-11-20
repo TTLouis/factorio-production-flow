@@ -15,17 +15,6 @@ function Flow.records()
   return storage.production_cells and storage.production_cells.records or {}
 end
 
--- A cell's boundary: its locked items, or for cells saved before the lock,
--- what its machines' recipes suggest.
-local function boundary(record)
-  if record.ports then return record.ports end
-  local suggested, ports = Cells.suggest_ports(Cells.members(record)), { inputs = {}, outputs = {} }
-  for side, keys in pairs(suggested) do
-    for _, key in ipairs(keys) do ports[side][key] = true end
-  end
-  return ports
-end
-
 -- Production order. A cell is in stage 1 unless another cell on its surface
 -- makes one of its inputs; then it comes one stage after the latest such cell.
 -- Smelting therefore precedes casting, which precedes the cells using the
@@ -35,7 +24,7 @@ function Flow.stages(ids, records)
   local makers, ports = {}, {}
   for _, id in ipairs(ids) do
     local record = records[id]
-    ports[id] = boundary(record)
+    ports[id] = Cells.boundary(record)
     for key in pairs(ports[id].outputs) do
       local where = record.surface_index .. "|" .. key
       makers[where] = makers[where] or {}
@@ -259,8 +248,7 @@ function Flow.build(selected, opts)
       local cell = "recipe/cell-" .. id
       local n = node(graph, cell)
       n.caption = Loc("cells-node-name", record.name)
-      local display_item = Cells.display_item(record, memberships[id])
-      n.sprite = display_item and "item/" .. display_item or "entity/assembling-machine-1"
+      n.sprite = Cells.display_item(record, memberships[id]) or "entity/assembling-machine-1"
       n.context = surface.name
       n.tier, n.is_cell = 2 * stage[id], true
       if measured_mode then
@@ -271,7 +259,7 @@ function Flow.build(selected, opts)
           n.note = Loc("cells-node-measured-since", Sampler.duration(seconds))
         end
       end
-      -- Saved cells lock their boundary; cells from before the lock show every net flow.
+      -- Saved cells chart only their chosen boundary; cells from before it show every net flow.
       local ports, flows = record.ports, {}
       for _, key in ipairs(sorted_keys(net)) do
         local amount = net[key]

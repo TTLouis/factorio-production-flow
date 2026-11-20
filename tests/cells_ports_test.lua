@@ -1,5 +1,5 @@
--- Locked cell boundary: suggested from recipes, removable in the create and edit
--- forms, locked on save, applied by the All view; the Cells tab follows the surface.
+-- Cell boundary: chosen by hand in the create and edit forms, saved with the cell,
+-- applied by the All view; display-item ranking; the Cells tab follows the surface.
 local Cells = TREQ("scripts.cells")
 local Flow = TREQ("scripts.cell_flow")
 local Selection = TREQ("shared.cell_selection")
@@ -25,82 +25,132 @@ local function click(tags)
   assert(Cells.on_click(player, { valid = true, tags = tags }))
 end
 local function name_field() return window().ssk_cell_panel.ssk_cell_form.ssk_cell_name_column.ssk_cell_name end
-local function shown(side)
-  local out, row = {}, window().ssk_cell_panel.ssk_cell_ports["ssk_cell_" .. side]
+local function ports_of(side)
+  local out = {}
   local function walk(element)
     if element.tags and element.tags.ssk_cell == "port" then out[element.tags.key] = element end
     for _, child in ipairs(element.children) do walk(child) end
   end
-  walk(row)
-  return out, row
+  walk(window().ssk_cell_panel.ssk_cell_ports.ssk_cell_port_table["ssk_cell_" .. side .. "_ports"])
+  return out
 end
-local function has_reset(side)
-  for _, child in ipairs(select(2, shown(side)).children) do
-    if child.tags and child.tags.ssk_cell == "ports_reset" then return true end
-  end
-  return false
-end
+local function add_button(side) return window().ssk_cell_panel.ssk_cell_ports.ssk_cell_port_table["ssk_cell_" .. side .. "_add"] end
+local function press(button) assert(Cells.on_click(player, button)) end
 
 local cable, circuit = machine(0.5, "copper-cable"), machine(4.5, "electronic-circuit")
-local suggested = Cells.suggest_ports({ [cable.unit_number] = cable, [circuit.unit_number] = circuit })
-local function contains(list, key) for _, v in ipairs(list) do if v == key then return true end end return false end
-assert(contains(suggested.inputs, "item/copper-plate") and contains(suggested.inputs, "item/iron-plate"),
-  "Raw materials must be suggested as inputs")
-assert(contains(suggested.outputs, "item/electronic-circuit") and not contains(suggested.inputs, "item/electronic-circuit"),
-  "The final product must be suggested as an output")
+assert(Cells.suggest_ports == nil, "Boundaries are chosen by hand, not suggested")
 
--- Create: the form lists the suggestions; removing one keeps the typed name.
+-- Create: the boundary starts empty; + adds items and fluids, a click removes them.
 Cells.on_selected { item = Selection.tool, player_index = player.index, surface = nauvis, entities = { cable, circuit } }
-local inputs = shown("inputs")
-assert(inputs["item/copper-plate"] and inputs["item/iron-plate"], "The create form must list suggested inputs")
-assert(shown("outputs")["item/electronic-circuit"], "The create form must list suggested outputs")
-assert(not has_reset("inputs"), "Nothing to restore before a removal")
+assert(window().location.x < 50, "The editor opens at the left of the screen")
+assert(not next(ports_of("inputs")) and not next(ports_of("outputs")), "A new cell's boundary starts empty")
+assert(add_button("inputs") and add_button("outputs"), "Both sides offer +")
 name_field().text = "Circuits"
-click { ssk_cell = "port", side = "inputs", key = "item/copper-plate" }
-assert(not shown("inputs")["item/copper-plate"] and shown("inputs")["item/iron-plate"], "A removed input must leave the form")
-assert(has_reset("inputs") and name_field().text == "Circuits", "Removal must offer restore and keep the name")
+window().location = { x = 300, y = 200 }
+press(add_button("outputs"))
+local popup = assert(player.gui.screen.ssk_material_picker, "+ opens the material picker")
+assert(popup.tags.target == "cell-outputs" and not popup.tags.allowed, "Any item or fluid can be added")
+TREQ("scripts.material_picker").close(player)
+for _, key in ipairs({ "item/electronic-circuit", "item/iron-gear-wheel" }) do Cells.pick_port(player, "outputs", key) end
+for _, key in ipairs({ "item/iron-plate", "item/copper-plate", "item/copper-cable" }) do Cells.pick_port(player, "inputs", key) end
+assert(ports_of("outputs")["item/electronic-circuit"] and ports_of("inputs")["item/copper-cable"], "Picked items are listed")
+assert(name_field().text == "Circuits", "Adding items keeps the typed name")
+assert(window().location.x == 300 and window().location.y == 200, "Editing items keeps the window where it was")
+press(ports_of("inputs")["item/copper-cable"])
+assert(not ports_of("inputs")["item/copper-cable"], "Clicking an item removes it")
+Cells.pick_port(player, "inputs", "item/iron-gear-wheel")
+assert(ports_of("inputs")["item/iron-gear-wheel"] and not ports_of("outputs")["item/iron-gear-wheel"],
+  "An item added to the other side moves there")
+Cells.pick_port(player, "outputs", "item/iron-gear-wheel")
+assert(ports_of("outputs")["item/iron-gear-wheel"] and not ports_of("inputs")["item/iron-gear-wheel"])
 click { ssk_cell = "port", side = "bogus", key = "item/iron-plate" }
-assert(shown("inputs")["item/iron-plate"], "Unknown sides are ignored")
+Cells.pick_port(player, "bogus", "item/stone")
+assert(ports_of("inputs")["item/iron-plate"] and not ports_of("inputs")["item/stone"], "Unknown sides are ignored")
+local display = window().ssk_cell_panel.ssk_cell_form.ssk_cell_item_column.ssk_cell_display_item
+assert(display.sprite == "item/electronic-circuit", "A new cell starts with its main product")
+Cells.open_display_picker(player)
+assert(player.gui.screen.ssk_material_picker and not player.gui.screen.ssk_material_picker.tags.allowed,
+  "The display picker offers every item and fluid")
+TREQ("scripts.material_picker").close(player)
+Cells.pick_display_item(player, "fluid/water")
+assert(display.sprite == "fluid/water", "A fluid can represent the cell")
 click { ssk_cell = "save" }
 local id, record = next(storage.production_cells.records)
-assert(record.ports.inputs["item/iron-plate"] and not record.ports.inputs["item/copper-plate"],
-  "Saving must lock the kept inputs only")
-assert(record.ports.outputs["item/electronic-circuit"] and record.excluded.inputs["item/copper-plate"])
+assert(record.display_item == "fluid/water"
+  and Flow.build(nil, { mode = "capacity" }).nodes["recipe/cell-" .. id].sprite == "fluid/water",
+  "The chosen display fluid is saved and charted")
+assert(record.ports.inputs["item/iron-plate"] and record.ports.inputs["item/copper-plate"]
+  and not record.ports.inputs["item/copper-cable"], "Saving keeps exactly the chosen inputs")
+assert(record.ports.outputs["item/electronic-circuit"] and record.ports.outputs["item/iron-gear-wheel"]
+  and record.excluded == nil and record.added == nil)
+assert(window().location.x == 300, "The saved-cells list opens where the editor was")
 
--- The All view shows only the locked boundary.
+-- The All view shows only the chosen boundary.
 local function all_keys(opts)
   local keys = {}
   for key in pairs(Flow.build(nil, opts or { mode = "capacity" }).nodes) do keys[key:match("^[^#]+")] = true end
   return keys
 end
 local keys = all_keys()
-assert(keys["item/iron-plate"] and keys["item/electronic-circuit"] and not keys["item/copper-plate"],
-  "The All view must leave out removed boundary items")
+assert(keys["item/iron-plate"] and keys["item/electronic-circuit"] and not keys["item/copper-cable"],
+  "The All view must chart only the chosen items")
 
--- Edit: the same section, starting from the saved choice; cancelling keeps the record.
+-- Edit: starts from the saved boundary; nothing changes until Save.
 click { ssk_cell = "edit", cell_id = id }
-assert(not shown("inputs")["item/copper-plate"] and has_reset("inputs"), "Editing must start from the saved boundary")
-click { ssk_cell = "port", side = "outputs", key = "item/electronic-circuit" }
-assert(not shown("outputs")["item/electronic-circuit"])
-assert(not record.excluded.outputs["item/electronic-circuit"], "Editing must not change the saved cell before saving")
-click { ssk_cell = "ports_reset", side = "inputs" }
-assert(shown("inputs")["item/copper-plate"] and not has_reset("inputs"), "Restore must bring back removed inputs")
+assert(ports_of("outputs")["item/iron-gear-wheel"] and ports_of("inputs")["item/copper-plate"],
+  "Editing must start from the saved boundary")
+press(ports_of("outputs")["item/electronic-circuit"])
+press(ports_of("inputs")["item/copper-plate"])
+assert(not ports_of("outputs")["item/electronic-circuit"])
+assert(record.ports.outputs["item/electronic-circuit"], "Editing must not change the saved cell before saving")
 click { ssk_cell = "save" }
 record = storage.production_cells.records[id]
-assert(record.ports.inputs["item/copper-plate"] and not record.ports.outputs["item/electronic-circuit"],
-  "Edits to the boundary must be saved")
+assert(record.ports.inputs["item/iron-plate"] and not record.ports.inputs["item/copper-plate"]
+  and not record.ports.outputs["item/electronic-circuit"], "Edits to the boundary must be saved")
 keys = all_keys()
-assert(keys["item/copper-plate"] and not keys["item/electronic-circuit"])
+assert(keys["item/iron-plate"] and not keys["item/electronic-circuit"] and not keys["item/copper-plate"])
 
--- Cells saved before the lock show every net flow.
-record.ports, record.excluded = nil, nil
-assert(all_keys()["item/electronic-circuit"], "Unlocked cells keep every net flow")
+-- Cells saved before boundaries were chosen by hand show every net flow, and
+-- editing one starts from those flows.
+local chosen = record.ports
+record.ports = nil
+assert(all_keys()["item/electronic-circuit"], "Older cells keep every net flow")
+click { ssk_cell = "edit", cell_id = id }
+assert(ports_of("outputs")["item/electronic-circuit"] and ports_of("inputs")["item/copper-plate"],
+  "Editing an older cell starts from its net flows")
+click { ssk_cell = "list" }
+record.ports = chosen
 
 -- Surface scope: cells on other surfaces stay out of the list and the All view.
 storage.production_cells.records[99] = { id = 99, name = "Elsewhere", surface_index = 72, members = {},
   positions = {}, display_item = false }
 local ids = Flow.ids(nauvis.index)
 assert(#ids == 1 and ids[1] == id and #Flow.ids() == 2, "The list must follow the selected surface")
+local elsewhere = { index = 72, name = "elsewhere", valid = true }
+rawset(game.surfaces, 72, elsewhere)
+Cells.open(player)
+local function listed()
+  local names = {}
+  local function walk(element)
+    if element.tags and element.tags.ssk_cell == "show" then names[element.tags.cell_id] = true end
+    for _, child in ipairs(element.children) do walk(child) end
+  end
+  walk(window())
+  return names
+end
+local picker = window().ssk_cell_panel.children[1].ssk_cell_list_surface
+assert(picker and #picker.items == 3 and picker.selected_index == 1, "The list offers Where I am and each surface with cells")
+assert(listed()[id] and not listed()[99], "The list starts on the player's surface")
+picker.selected_index = 3
+Cells.on_list_surface(player, picker)
+assert(listed()[99] and not listed()[id], "Choosing a surface lists its cells")
+assert(window().ssk_cell_panel.children[1].ssk_cell_list_surface.selected_index == 3, "The choice is kept")
+picker = window().ssk_cell_panel.children[1].ssk_cell_list_surface
+picker.selected_index = 1
+Cells.on_list_surface(player, picker)
+assert(listed()[id] and not listed()[99])
+Cells.close(player)
+rawset(game.surfaces, 72, nil)
 local nodes = Flow.build(nil, { mode = "capacity", surface = nauvis.index }).nodes
 assert(nodes["recipe/cell-" .. id] and not nodes["recipe/cell-99"], "The All view must follow the selected surface")
 local measured = Flow.build(nil, { mode = "measured", period = 600, surface = nauvis.index })
@@ -110,6 +160,7 @@ assert(not line or (line[1] == "production-flow.cells-node-utilisation" and #lin
 
 -- After saving, the saved-cells list docks at the left and closes on a click outside it.
 storage.production_cells.records[99] = nil
+storage.production_cells.places = nil
 click { ssk_cell = "edit", cell_id = id }
 Cells.on_click_anywhere { player_index = player.index }
 assert(window(), "A click outside must not close the editor")
@@ -135,16 +186,21 @@ Cells.cancel(player)
 Cells.close(player)
 storage.production_cells = nil
 local made = {}
-local function save_cell(name, entities)
+local function save_cell(name, entities, ports)
   Cells.on_selected { item = Selection.tool, player_index = player.index, surface = nauvis, entities = entities }
+  for side, list in pairs(ports) do
+    for _, key in ipairs(list) do Cells.pick_port(player, side, key) end
+  end
   name_field().text = name
   click { ssk_cell = "save" }
   Cells.close(player)
   for cell_id, saved in pairs(storage.production_cells.records) do if saved.name == name then made[name] = cell_id end end
 end
-save_cell("Inserters", { machine(20.5, "inserter") })
-save_cell("Circuits", { machine(24.5, "electronic-circuit") })
-save_cell("Cable", { machine(28.5, "copper-cable") })
+save_cell("Inserters", { machine(20.5, "inserter") }, { inputs = { "item/electronic-circuit", "item/iron-gear-wheel",
+  "item/iron-plate" }, outputs = { "item/inserter" } })
+save_cell("Circuits", { machine(24.5, "electronic-circuit") }, { inputs = { "item/iron-plate", "item/copper-cable" },
+  outputs = { "item/electronic-circuit" } })
+save_cell("Cable", { machine(28.5, "copper-cable") }, { inputs = { "item/copper-plate" }, outputs = { "item/copper-cable" } })
 local ordered, stage = Flow.ids(nauvis.index)
 assert(ordered[1] == made.Cable and ordered[2] == made.Circuits and ordered[3] == made.Inserters,
   "Cells must be listed in production order")
@@ -168,6 +224,73 @@ local loop = Flow.stages({ 1, 2 }, {
 })
 assert(loop[1] == 1 and loop[2] == 2, "Loops are ordered by creation")
 
+-- Display item: depth first. Bioflux and nutrients are both two steps from raw
+-- fruit, even when nutrients are made from bioflux. Among equals, an item the cell
+-- uses itself (as an ingredient or as fuel) ranks lower, then the item drawing on
+-- more raw materials ranks higher; the much larger nutrient rate does not decide.
+local saved_graph, saved_items = storage.graph, prototypes.item
+local function node(key, depth, producers) return { key = key, depth = depth, era = 0, producers = producers or {} } end
+local function recipe(ingredients, products, energy)
+  local r = { era = 0, energy = energy, ingredients = {}, products = {} }
+  for key, amount in pairs(ingredients) do r.ingredients[#r.ingredients + 1] = { key = key, amount = amount } end
+  for key, amount in pairs(products) do r.products[#r.products + 1] = { key = key, amount = amount, prod = amount } end
+  return r
+end
+storage.graph = {
+  nodes = {
+    ["item/yumako"] = node("item/yumako", 0), ["item/jellynut"] = node("item/jellynut", 0),
+    ["item/yumako-mash"] = node("item/yumako-mash", 1, { "yumako-processing" }),
+    ["item/jelly"] = node("item/jelly", 1, { "jellynut-processing" }),
+    ["item/bioflux"] = node("item/bioflux", 2, { "bioflux" }),
+    ["item/nutrients"] = node("item/nutrients", 2, { "nutrients-from-yumako-mash", "nutrients-from-bioflux" }),
+  },
+  recipes = {
+    ["yumako-processing"] = recipe({ ["item/yumako"] = 1 }, { ["item/yumako-mash"] = 2 }, 1),
+    ["jellynut-processing"] = recipe({ ["item/jellynut"] = 1 }, { ["item/jelly"] = 4 }, 1),
+    ["bioflux"] = recipe({ ["item/yumako-mash"] = 15, ["item/jelly"] = 12 }, { ["item/bioflux"] = 4 }, 6),
+    ["nutrients-from-yumako-mash"] = recipe({ ["item/yumako-mash"] = 4 }, { ["item/nutrients"] = 6 }, 2),
+    ["nutrients-from-bioflux"] = recipe({ ["item/bioflux"] = 5 }, { ["item/nutrients"] = 40 }, 2),
+  },
+}
+prototypes.item = setmetatable({ nutrients = { name = "nutrients", fuel_categories = { "nutrients" } } },
+  { __index = saved_items })
+local function biochamber(x, name, burner)
+  local e = machine(x, name)
+  e.crafting_speed = 2
+  e.prototype = { burner_prototype = burner and { fuel_categories = { nutrients = true } } or nil }
+  return e
+end
+local function main_item(...)
+  local members = {}
+  for _, e in ipairs({ ... }) do members[e.unit_number] = e end
+  return Cells.display_item({}, members)
+end
+assert(main_item(biochamber(40.5, "bioflux", true), biochamber(44.5, "nutrients-from-bioflux", true)) == "item/bioflux",
+  "Bioflux, not the nutrients feeding the biochambers, represents a bioflux cell")
+assert(main_item(biochamber(48.5, "bioflux"), biochamber(52.5, "nutrients-from-bioflux")) == "item/nutrients",
+  "An item the cell uses itself ranks below an equally deep item it does not use")
+assert(main_item(biochamber(56.5, "yumako-processing", true), biochamber(60.5, "nutrients-from-yumako-mash", true))
+  == "item/nutrients", "A deeper item outranks a shallower one")
+storage.graph, prototypes.item = saved_graph, saved_items
+
+-- Mined resources stay raw even when a later recipe also makes them, so the
+-- chains built on them keep their depth.
+local G = TREQ("scripts.graph")
+local function ore_graph(mined)
+  return { mined = mined, recipes = {
+      crushing = { era = 5, ingredients = { { key = "item/chunk" } } },
+      smelting = { era = 0, ingredients = { { key = "item/ore" } } },
+    }, nodes = {
+      ["item/chunk"] = { era = 5, producers = {} },
+      ["item/ore"] = { era = 0, producers = { "crushing" } },
+      ["item/plate"] = { era = 0, producers = { "smelting" } },
+    } }
+end
+local fixed, old = ore_graph({ ["item/ore"] = true }), ore_graph(nil)
+G.compute_depth(fixed); G.compute_depth(old)
+assert(fixed.nodes["item/ore"].depth == 0 and fixed.nodes["item/plate"].depth == 1, "Mined ore is raw")
+assert(old.nodes["item/plate"].depth == 0, "Without the mined list the chain collapses (the old behaviour)")
+
 Cells.cancel(player)
 storage.production_cells, player.cursor_stack, player.request_translation = saved_storage, saved_cursor, saved_translate
-print("CELL PORTS PASS: suggestions, remove/restore, lock on save, edit section, All view filter, surface scope, show button, list docks left and closes on outside click, production-order stages")
+print("CELL PORTS PASS: manual boundary add/remove/move, kept window place, surface list, saved boundary, edit section, older cells, display-item ranking, mined raw depth, All view filter, surface scope, show button, list docks left and closes on outside click, production-order stages")

@@ -1,4 +1,5 @@
 local Cells = require("scripts.cells")
+local Outlines = require("scripts.cell_outlines")
 local Flow = require("scripts.cell_flow")
 local Loc = require("scripts.locale")
 local SK = require("scripts.sankey_ui")
@@ -28,6 +29,10 @@ end
 
 -- Fitting never zooms in past normal map scale; the slider goes further.
 UI.FIT_MAX = 1
+-- The fitted view leaves some room around the machines.
+UI.FIT_MARGIN = 0.8
+-- Each move button shifts the view by this share of the visible map.
+UI.PAN_STEP = 1 / 8
 
 local function clamp_zoom(zoom) return math.max(UI.ZOOM_MIN, math.min(UI.ZOOM_MAX, zoom)) end
 
@@ -43,7 +48,7 @@ function UI.map_view(state, records, ids)
   if not center then state.fitted = nil; return end
   local cam_w, cam_h = state.map_w or 600, state.map_h or 400
   local fitted = { key = key, x = center.x, y = center.y, surface = chosen[1].surface_index,
-    zoom = clamp_zoom(math.min(UI.FIT_MAX, cam_w / (w * 32), cam_h / (h * 32))) }
+    zoom = clamp_zoom(UI.FIT_MARGIN * math.min(UI.FIT_MAX, cam_w / (w * 32), cam_h / (h * 32))) }
   state.fitted = fitted
   local own = state.maps and state.maps[key]
   if own and own.surface == fitted.surface then return own end
@@ -69,12 +74,12 @@ function UI.current_view(state)
   return state.maps and state.maps[key] or (fitted and fitted.key == key and fitted or nil)
 end
 
--- Moves the view a quarter of the visible map in a direction.
+-- Moves the view a small step of the visible map in a direction.
 function UI.pan(state, dx, dy)
   local view = UI.own_view(state)
   if not view then return end
-  view.x = view.x + dx * (state.map_w or 600) / (32 * view.zoom) / 4
-  view.y = view.y + dy * (state.map_h or 400) / (32 * view.zoom) / 4
+  view.x = view.x + dx * (state.map_w or 600) / (32 * view.zoom) * UI.PAN_STEP
+  view.y = view.y + dy * (state.map_h or 400) / (32 * view.zoom) * UI.PAN_STEP
 end
 
 function UI.zoom(state, zoom)
@@ -91,6 +96,14 @@ local function map_button(bar, sprite, tooltip, tags)
   return bar.add { type = "sprite-button", style = "tool_button", sprite = sprite, tooltip = tooltip, tags = tags }
 end
 
+-- The selected cell's Edit and Delete, kept at the right of both sub-tab headings.
+local function cell_actions(bar, edit_name, delete_name)
+  bar.add { type = "sprite-button", name = edit_name, style = "tool_button",
+    sprite = "utility/rename_icon", tooltip = Loc("cells-edit"), tags = { ssk_ui = "cell_edit" } }
+  bar.add { type = "sprite-button", name = delete_name, style = "tool_button_red",
+    sprite = "utility/trash", tooltip = Loc("cells-delete"), tags = { ssk_ui = "cell_delete" } }
+end
+
 local function build_map(map, width, height)
   local bar = map.add { type = "frame", name = "ssk_cell_map_bar", style = "subheader_frame", direction = "horizontal" }
   bar.style.horizontally_stretchable, bar.style.vertical_align = true, "center"
@@ -99,14 +112,14 @@ local function build_map(map, width, height)
   bar.add { type = "label", caption = Loc("machine-status-zoom") }
   local slider = bar.add { type = "slider", name = "ssk_cell_map_zoom", minimum_value = UI.ZOOM_MIN,
     maximum_value = UI.ZOOM_MAX, value = 0.5, value_step = 0.05, tags = { ssk_ui = "cell_map_zoom" } }
-  slider.style.width = math.max(80, math.min(160, width - 420))
+  slider.style.width = math.max(80, math.min(160, width - 460))
   for _, move in ipairs({ { "left", -1, 0 }, { "up", 0, -1 }, { "down", 0, 1 }, { "right", 1, 0 } }) do
     map_button(bar, "utility/hint_arrow_" .. move[1], Loc("cells-map-move"),
       { ssk_ui = "cell_map_pan", dx = move[2], dy = move[3] })
   end
   map_button(bar, "utility/center", Loc("cells-map-fit"), { ssk_ui = "cell_map_fit" })
   map_button(bar, "utility/go_to_arrow", Loc("cells-jump"), { ssk_ui = "cell_jump" }).name = "ssk_cell_jump_button"
-  map_button(bar, "utility/rename_icon", Loc("cells-edit"), { ssk_ui = "cell_edit" }).name = "ssk_cell_map_edit"
+  cell_actions(bar, "ssk_cell_map_edit", "ssk_cell_map_delete")
   local camera = map.add { type = "camera", name = "ssk_cell_camera", position = { 0, 0 }, surface_index = 1, zoom = 0.5 }
   camera.style.width, camera.style.height = width, height - MAP_BAR
 end
@@ -155,10 +168,6 @@ function UI.fill(player, container, state, width, height, full, only_auto)
     gap.style.horizontally_stretchable = true
     bar.add { type = "sprite-button", name = "ssk_cell_new_button", style = "tool_button",
       sprite = "utility/add", tooltip = Loc("cells-new"), tags = { ssk_ui = "cell_new" } }
-    bar.add { type = "sprite-button", name = "ssk_cell_edit_button", style = "tool_button",
-      sprite = "utility/rename_icon", tooltip = Loc("cells-edit"), tags = { ssk_ui = "cell_edit" } }
-    bar.add { type = "sprite-button", name = "ssk_cell_delete_button", style = "tool_button_red",
-      sprite = "utility/trash", tooltip = Loc("cells-delete"), tags = { ssk_ui = "cell_delete" } }
     list.add { type = "list-box", name = "ssk_cell_list", tags = { ssk_ui = "cell_list" } }
     list.ssk_cell_list.style.horizontally_stretchable = true
     list.ssk_cell_list.style.height = height - 40
@@ -196,6 +205,7 @@ function UI.fill(player, container, state, width, height, full, only_auto)
       left_label_tooltip = Loc("cells-mode-measured-tip"), right_label_tooltip = Loc("cells-mode-capacity-tip"),
       tags = { ssk_ui = "cell_mode" } }
     title.add { type = "empty-widget" }.style.width = 8
+    cell_actions(title, "ssk_cell_edit_button", "ssk_cell_delete_button")
     local hint = toolbar.add { type = "label", name = "ssk_cell_scope", style = "grey_label" }
     hint.style.single_line = false
     hint.style.maximal_width = math.max(160, width - side - 28)
@@ -210,9 +220,9 @@ function UI.fill(player, container, state, width, height, full, only_auto)
     if state.selected == id then selected_index = i + 1 end
   end
   local sidebar = split.ssk_cell_sidebar
-  local list_bar = sidebar.ssk_cell_list_bar
-  list_bar.ssk_cell_edit_button.enabled = state.selected ~= nil
-  list_bar.ssk_cell_delete_button.enabled = state.selected ~= nil
+  local actions = split.ssk_cell_views.ssk_cell_chart.ssk_cell_toolbar.ssk_cell_title
+  actions.ssk_cell_edit_button.enabled = state.selected ~= nil
+  actions.ssk_cell_delete_button.enabled = state.selected ~= nil
   local rows = sidebar.ssk_cell_list
   local listed = table.concat(signature, ",")
   if full or state.listed ~= listed then rows.items = items end
@@ -223,6 +233,11 @@ function UI.fill(player, container, state, width, height, full, only_auto)
   local view = UI.map_view(state, records, ids)
   views.ssk_cell_map_tab.enabled = view ~= nil
   if not view then state.view = nil end
+  if view and state.view == "map" then
+    Outlines.show(player, records, state.selected and { state.selected } or ids)
+  else
+    Outlines.clear(player.index, "map")
+  end
   views.selected_tab_index = state.view == "map" and 2 or 1
   if view then
     local map = views.ssk_cell_map
@@ -230,6 +245,7 @@ function UI.fill(player, container, state, width, height, full, only_auto)
     bar.ssk_cell_map_heading.caption = state.selected and records[state.selected].name or Loc("cells-all")
     bar.ssk_cell_map_zoom.slider_value = view.zoom
     bar.ssk_cell_map_edit.enabled = state.selected ~= nil
+    bar.ssk_cell_map_delete.enabled = state.selected ~= nil
     local camera = map.ssk_cell_camera
     camera.surface_index, camera.position, camera.zoom = view.surface, { view.x, view.y }, view.zoom
   end

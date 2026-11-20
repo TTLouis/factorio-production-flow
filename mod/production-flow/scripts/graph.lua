@@ -46,8 +46,22 @@ local function is_reversing(rp, categories)
   return sg == "empty-barrel"
 end
 
+-- Items mined from resources, plants, trees and fish. They stay raw when a later
+-- recipe also makes them, such as Space Age's ores from asteroid crushing.
+local function mined_keys()
+  local keys = {}
+  local filter = { { filter = "type", type = { "resource", "plant", "tree", "fish" } } }
+  for _, entity in pairs(prototypes.get_entity_filtered(filter)) do
+    local mineable = entity.mineable_properties
+    for _, product in pairs(mineable and mineable.products or {}) do
+      if product.type == "item" or product.type == "fluid" then keys[G.key(product.type, product.name)] = true end
+    end
+  end
+  return keys
+end
+
 function G.build()
-  local g = { nodes = {}, recipes = {}, n_nodes = 0, n_recipes = 0, n_reversing = 0 }
+  local g = { nodes = {}, recipes = {}, n_nodes = 0, n_recipes = 0, n_reversing = 0, mined = mined_keys() }
   local version = script and script.active_mods and script.active_mods.base or "2.0"
   local major, minor = version:match("^(%d+)%.(%d+)")
   local multiple_categories = tonumber(major) > 2 or (tonumber(major) == 2 and tonumber(minor) >= 1)
@@ -132,6 +146,7 @@ function G.compute_eras(g)
   for tn in pairs(techs) do tera[tn] = INF end
 
   local function item_era(key)
+    if g.mined and g.mined[key] then return 0 end
     local nd = g.nodes[key]
     local e, any = INF, false
     for _, rn in ipairs(nd and nd.producers or {}) do
@@ -198,6 +213,7 @@ function G.compute_depth(g)
   for key, nd in pairs(g.nodes) do
     local raw = true
     for _, rn in ipairs(nd.producers) do if not g.recipes[rn].reversing then raw = false end end
+    if g.mined and g.mined[key] then raw = true end
     depth[key] = raw and 0 or nil
   end
   for _ = 1, 60 do

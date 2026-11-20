@@ -1,6 +1,7 @@
 local Loc = require("scripts.locale")
 local Cells = require("scripts.cells")
 local CellsUI = require("scripts.cells_ui")
+local CellOutlines = require("scripts.cell_outlines")
 -- Top-left toolbar button + main window.
 -- Tabs: Balance · Focus · Cells · Full Sankey · Transfers.
 
@@ -281,6 +282,7 @@ end
 function UI.refresh(player, only_auto, full, keep_balance_rows)
   local us = ustate(player.index)
   local id = us.tab_id
+  if id ~= "cells" then CellOutlines.clear(player.index, "map") end
   local c = content(player, id)
   if not c then return end
   local surface = sidx_for(player, us)
@@ -322,6 +324,7 @@ local function close_chart_settings(us)
 end
 
 function UI.close(player)
+  CellOutlines.on_window_closed(player.index)
   close_inspectors(player)
   MaterialPicker.close(player)
   Help.close(player)
@@ -344,6 +347,7 @@ function UI.sanitize_saved_states()
 end
 
 function UI.on_player_removed(index)
+  CellOutlines.clear(index)
   HistoryUI.clear_hover(index)
   SK.clear_hover(index)
   if storage.canvas and storage.canvas[index] then Canvas.clear(index) end
@@ -497,10 +501,13 @@ end
 local function jump_to_map(player, state)
   local view = CellsUI.current_view(state)
   if not view or player.force ~= game.forces.player then return end
+  -- The map's outlines stay visible in remote view until the player leaves it.
+  CellOutlines.hold(player.index)
   UI.close(player)
   local ok = pcall(player.set_controller, { type = defines.controllers.remote,
     surface = view.surface, position = { view.x, view.y } })
   if ok then return end
+  CellOutlines.clear(player.index, "map")
   local record = state.selected and storage.production_cells.records[state.selected]
   for _, entity in pairs(record and record.members or {}) do
     if entity.valid then player.centered_on = entity; return end
@@ -647,6 +654,11 @@ function UI.on_click(e)
 end
 
 function UI.on_selection(e)
+  local tags = e.element and e.element.valid and e.element.tags
+  if tags and tags.ssk_cell_list_surface then
+    Cells.on_list_surface(game.get_player(e.player_index), e.element)
+    return
+  end
   local handled, key, target = MaterialPicker.selection(e)
   if handled then
     if key then
@@ -654,6 +666,8 @@ function UI.on_selection(e)
       local us = ustate(e.player_index)
       if target == "cell" then
         Cells.pick_display_item(player, key)
+      elseif target == "cell-inputs" or target == "cell-outputs" then
+        Cells.pick_port(player, target:sub(6), key)
       elseif target == us.tab_id and (target == "focus" or target == "balance") then
         local chart = chart_state(us)
         local previous = chart.focus

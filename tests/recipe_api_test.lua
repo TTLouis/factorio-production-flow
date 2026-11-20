@@ -10,7 +10,7 @@ local function recipe(fields, forbidden)
     assert(key ~= forbidden, "accessed unavailable recipe API: "..key)
   end})
 end
-prototypes = {technology={}, recipe={
+prototypes = {technology={}, get_entity_filtered=function() return {} end, recipe={
   smelting=recipe({categories={"smelting", "metallurgy"}}, "category"),
   recycling=recipe({categories={"crafting", "recycling"}}, "category"),
 }}

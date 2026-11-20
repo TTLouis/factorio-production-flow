@@ -4,6 +4,7 @@ local Loc = require("scripts.locale")
 local Graph = require("scripts.graph")
 local Sampler = require("scripts.sampler")
 local UI = require("scripts.ui")
+local CellOutlines = require("scripts.cell_outlines")
 local Canvas = require("scripts.canvas")
 local Transfers = require("scripts.transfers")
 local SERockets = require("scripts.se_rockets")
@@ -46,6 +47,10 @@ script.on_configuration_changed(function()
   for _, player in pairs(game.connected_players) do
     if UI.is_open(player) then UI.open(player) end
   end
+end)
+
+script.on_event(defines.events.on_player_controller_changed, function(e)
+  CellOutlines.on_controller_changed(e)
 end)
 
 script.on_event(defines.events.on_player_removed, function(e)

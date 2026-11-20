@@ -1,5 +1,6 @@
 local Loc = require("scripts.locale")
 local Selection = require("shared.cell_selection")
+local Outlines = require("scripts.cell_outlines")
 local Sampler = require("scripts.sampler")
 local Picker = require("scripts.material_picker")
 local Su = require("scripts.surfaces")
@@ -38,10 +39,14 @@ local function position_key(position)
   return math.floor(position.x * 2 + 0.5) .. ":" .. math.floor(position.y * 2 + 0.5)
 end
 
+local function spot(entity)
+  return { x = entity.position.x, y = entity.position.y, w = entity.tile_width, h = entity.tile_height }
+end
+
 local function positions_of(members)
   local positions = {}
   for unit, entity in pairs(members) do
-    if entity.valid then positions[unit] = { x = entity.position.x, y = entity.position.y } end
+    if entity.valid then positions[unit] = spot(entity) end
   end
   return positions
 end
@@ -113,7 +118,7 @@ function Cells.on_built(entity)
     if record and old ~= unit and not (previous and previous.valid) and not record.members[unit] then
       record.members[old], record.positions[old] = nil, nil
       record.members[unit] = entity
-      record.positions[unit] = { x = entity.position.x, y = entity.position.y }
+      record.positions[unit] = spot(entity)
       changed = true
     end
   end
@@ -182,7 +187,7 @@ function Cells.resolve_clones(final)
         for unit in pairs(move.live) do
           local copy = move.map[unit]
           members[copy.unit_number] = copy
-          positions[copy.unit_number] = { x = copy.position.x, y = copy.position.y }
+          positions[copy.unit_number] = spot(copy)
         end
         record.members, record.positions, record.surface_index = members, positions, surface
         changed = true
@@ -194,16 +199,51 @@ function Cells.resolve_clones(final)
   if changed then Cells.reindex() end
 end
 
--- Rank by configured production capacity; activity or idle time does not rename a cell.
+-- The raw materials an item's shortest production chain starts from.
+local function raw_roots(graph, key, memo)
+  if memo[key] then return memo[key] end
+  local roots, node = {}, graph.nodes[key]
+  memo[key] = roots
+  if node and (node.depth or 0) > 0 then
+    for _, name in ipairs(node.producers) do
+      local recipe = graph.recipes[name]
+      if recipe and not recipe.reversing and recipe.era == node.era then
+        local depth = 0
+        for _, ingredient in ipairs(recipe.ingredients) do
+          local below = graph.nodes[ingredient.key]
+          depth = math.max(depth, (below and below.depth or 0) + 1)
+        end
+        if depth == node.depth then
+          for _, ingredient in ipairs(recipe.ingredients) do
+            for root in pairs(raw_roots(graph, ingredient.key, memo)) do roots[root] = true end
+          end
+          return roots
+        end
+      end
+    end
+  end
+  roots[key] = true
+  return roots
+end
+
+-- The members' item products, the cell's main product first. Items further along
+-- the production chain rank first; an item's depth is its shortest chain from raw
+-- materials, so nutrients made from bioflux are no deeper than nutrients made from
+-- mash. Among equals, items the cell does not use itself (as an ingredient or as
+-- fuel) come first, then items drawing on more raw materials, then the larger
+-- configured rate. Activity or idle time does not rename a cell.
 local function final_items(members)
-  local recipes = storage.graph and storage.graph.recipes
+  local graph = storage.graph
+  local recipes = graph and graph.recipes
   if not recipes then return {} end
-  local consumed, output = {}, {}
+  local consumed, output, burned = {}, {}, {}
   local ids = {}
   for id in pairs(members) do ids[#ids + 1] = id end
   table.sort(ids)
   for _, id in ipairs(ids) do
     local machine = members[id]
+    local burner = machine.prototype and machine.prototype.burner_prototype
+    for category in pairs(burner and burner.fuel_categories or {}) do burned[category] = true end
     local recipe_name, force_recipe = Sampler.current_recipe(machine)
     local recipe = recipes[recipe_name]
     if recipe and recipe.energy > 0 then
@@ -219,68 +259,67 @@ local function final_items(members)
       end
     end
   end
-  local names = {}
+  local keys, rank, memo = {}, {}, {}
   for key, rate in pairs(output) do
-    if not consumed[key] and rate > 0 and prototypes.item[key:sub(6)] then
-      names[#names + 1] = key
+    local item = rate > 0 and prototypes.item[key:sub(6)]
+    if item then
+      local used = consumed[key] or false
+      for _, category in ipairs(item.fuel_categories or {}) do
+        if burned[category] then used = true end
+      end
+      local node, breadth = graph.nodes[key], 0
+      for _ in pairs(raw_roots(graph, key, memo)) do breadth = breadth + 1 end
+      keys[#keys + 1] = key
+      rank[key] = { depth = node and node.depth or 0, used = used, breadth = breadth, rate = rate }
     end
   end
-  table.sort(names, function(a, b)
-    if output[a] ~= output[b] then return output[a] > output[b] end
+  table.sort(keys, function(a, b)
+    local x, y = rank[a], rank[b]
+    if x.depth ~= y.depth then return x.depth > y.depth end
+    if x.used ~= y.used then return y.used end
+    if x.breadth ~= y.breadth then return x.breadth > y.breadth end
+    if x.rate ~= y.rate then return x.rate > y.rate end
     return a < b
   end)
-  for i, key in ipairs(names) do names[i] = key:sub(6) end
-  return names
+  for i, key in ipairs(keys) do keys[i] = key:sub(6) end
+  return keys
 end
 
--- Boundary suggestions at configured full speed: net consumption is an input,
--- net production an output. Players remove the ones that do not really cross
--- the cell boundary; the rest are locked into the saved cell.
+-- A cell's boundary: the items and fluids the player chose as its inputs and
+-- outputs. Nothing is suggested; the All view charts only these.
 local SIDES = { "inputs", "outputs" }
 Cells.SIDES = SIDES
 
-function Cells.suggest_ports(members)
+-- Every net flow of the members' recipes at full speed. Only cells saved before
+-- boundaries were chosen by hand use it.
+local function net_flows(members)
   local recipes = storage.graph and storage.graph.recipes
-  local net = {}
-  if recipes then
-    local ids = {}
-    for id in pairs(members) do ids[#ids + 1] = id end
-    table.sort(ids)
-    for _, id in ipairs(ids) do
-      local machine = members[id]
-      local recipe_name, force_recipe = Sampler.current_recipe(machine)
-      local recipe = recipes[recipe_name]
-      if recipe and recipe.energy > 0 then
-        local crafts = machine.crafting_speed / recipe.energy
-        local bonus = Sampler.craft_productivity(machine, recipe_name, force_recipe, recipe)
-        for _, ingredient in ipairs(recipe.ingredients) do
-          net[ingredient.key] = (net[ingredient.key] or 0) - crafts * ingredient.amount
-        end
-        for _, product in ipairs(recipe.products) do
-          net[product.key] = (net[product.key] or 0) + crafts * (product.amount + bonus * product.prod)
-        end
+  local net, ports = {}, { inputs = {}, outputs = {} }
+  if not recipes then return ports end
+  for _, machine in pairs(members) do
+    local recipe_name, force_recipe = Sampler.current_recipe(machine)
+    local recipe = recipes[recipe_name]
+    if recipe and recipe.energy > 0 then
+      local crafts = machine.crafting_speed / recipe.energy
+      local bonus = Sampler.craft_productivity(machine, recipe_name, force_recipe, recipe)
+      for _, ingredient in ipairs(recipe.ingredients) do
+        net[ingredient.key] = (net[ingredient.key] or 0) - crafts * ingredient.amount
+      end
+      for _, product in ipairs(recipe.products) do
+        net[product.key] = (net[product.key] or 0) + crafts * (product.amount + bonus * product.prod)
       end
     end
   end
-  local ports = { inputs = {}, outputs = {} }
   for key, amount in pairs(net) do
-    if amount < -1e-9 then ports.inputs[#ports.inputs + 1] = key
-    elseif amount > 1e-9 then ports.outputs[#ports.outputs + 1] = key end
-  end
-  for _, side in ipairs(SIDES) do
-    table.sort(ports[side], function(a, b)
-      local x, y = math.abs(net[a]), math.abs(net[b])
-      if x ~= y then return x > y end
-      return a < b
-    end)
+    if amount < -1e-9 then ports.inputs[key] = true elseif amount > 1e-9 then ports.outputs[key] = true end
   end
   return ports
 end
 
-local function copy_excluded(excluded)
+local function copy_ports(ports)
   local out = { inputs = {}, outputs = {} }
   for _, side in ipairs(SIDES) do
-    for key in pairs(excluded and excluded[side] or {}) do out[side][key] = true end
+    for key in pairs(ports and ports[side] or {}) do out[side][key] = true end
   end
   return out
 end
@@ -296,23 +335,46 @@ local function remember_name(player, draft)
   if form then draft.name = form.ssk_cell_name_column.ssk_cell_name.text end
 end
 
+-- A saved cell's boundary. Cells saved before boundaries were chosen by hand
+-- keep every net flow of their machines.
+function Cells.boundary(record)
+  return record.ports or net_flows(Cells.members(record))
+end
+
 function Cells.members(record)
   return live_members(record.members, record.surface_index)
 end
 
+-- Display items are stored as an item name (older cells and items) or a typed
+-- key such as fluid/petroleum-gas; this returns the typed key if it still exists.
+local function display_key(value)
+  if not value then return nil end
+  local key = value:find("/", 1, true) and value or "item/" .. value
+  return port_prototype(key) and key or nil
+end
+
+-- The typed key of the cell's display item or fluid.
 function Cells.display_item(record, members)
-  if record.display_item ~= nil then
-    return record.display_item and prototypes.item[record.display_item] and record.display_item or nil
-  end
+  if record.display_item ~= nil then return display_key(record.display_item) end
+  local first = final_items(members)[1]
+  if first then return "item/" .. first end
   -- Cells saved before the picker was added use the first eligible item.
   return final_items(members)[1]
 end
 
 function Cells.close(player)
   local picker = player.gui.screen.ssk_material_picker
-  if picker and picker.tags.target == "cell" then Picker.close(player) end
+  if picker and (picker.tags.target or ""):sub(1, 4) == "cell" then Picker.close(player) end
   local window = player.gui.screen[Cells.NAME]
-  if window then window.destroy() end
+  if window then
+    -- The window reopens where the player left it while they edit.
+    local cells = storage.production_cells
+    if cells then
+      cells.places = cells.places or {}
+      cells.places[player.index] = { x = window.location.x, y = window.location.y }
+    end
+    window.destroy()
+  end
 end
 
 local function clear_confirmation(player)
@@ -325,6 +387,7 @@ end
 function Cells.cancel(player)
   clear_confirmation(player)
   if storage.production_cells then state().drafts[player.index] = nil end
+  Outlines.clear(player.index, "draft")
   local cursor = player.cursor_stack
   if cursor and cursor.valid_for_read and cursor.name == Selection.tool then cursor.clear() end
   Cells.close(player)
@@ -340,6 +403,8 @@ function Cells.open(player)
   if player.force ~= game.forces.player then return end
   local cells = state()
   local draft = cells.drafts[player.index]
+  -- The machines being selected stay outlined until the draft is saved or cancelled.
+  if draft then Outlines.show_draft(player, draft, cells.next_id) else Outlines.clear(player.index, "draft") end
   local frame = player.gui.screen.add { type = "frame", name = Cells.NAME, direction = "vertical" }
   local title = frame.add { type = "flow", style = "frame_header_flow" }
   title.drag_target = frame
@@ -379,52 +444,47 @@ function Cells.open(player)
     field.style.horizontally_stretchable = true
     field.focus()
 
-    local options = final_items(members)
-    local allowed = {}
-    for _, name in ipairs(options) do allowed["item/" .. name] = true end
-    if not draft.display_item or not allowed["item/" .. draft.display_item] then draft.display_item = options[1] end
-    draft.display_options = allowed
+    -- Any item or fluid can represent the cell. Until the player picks one, it
+    -- follows the cell's main final product.
+    if not (draft.display_chosen and display_key(draft.display_item)) then
+      draft.display_item, draft.display_chosen = final_items(members)[1], nil
+    end
     local item_column = form.add { type = "flow", name = "ssk_cell_item_column", direction = "vertical" }
     item_column.add { type = "label", caption = Loc("cells-display-item") }
-    local key = draft.display_item and "item/" .. draft.display_item
-    local picker = Picker.button(item_column, key, "cell", "ssk_cell_display_item")
-    picker.enabled = key ~= nil
-    if not key then picker.tooltip = Loc("cells-no-display-item") end
+    Picker.button(item_column, display_key(draft.display_item), "cell", "ssk_cell_display_item")
 
-    -- Locked boundary: suggested from the recipes; clicking an item removes it.
-    draft.excluded = draft.excluded or copy_excluded()
-    local suggested = Cells.suggest_ports(members)
+    -- Boundary: only the items and fluids the player added; + adds one and a
+    -- click removes it.
+    draft.ports = draft.ports or copy_ports()
     local ports = panel.add { type = "flow", name = "ssk_cell_ports", direction = "vertical" }
     ports.style.left_padding, ports.style.right_padding, ports.style.bottom_padding = 8, 8, 8
     ports.style.vertical_spacing = 4
     ports.add { type = "label", style = "caption_label", caption = Loc("cells-ports"), tooltip = Loc("cells-ports-tip") }
+    local grid = ports.add { type = "table", name = "ssk_cell_port_table", column_count = 3 }
+    grid.style.horizontal_spacing, grid.style.vertical_spacing = 8, 4
     for _, side in ipairs(SIDES) do
-      local row = ports.add { type = "flow", name = "ssk_cell_" .. side, direction = "horizontal" }
-      row.style.vertical_align = "center"
-      row.style.horizontally_stretchable = true
-      local label = row.add { type = "label", caption = Loc(side == "inputs" and "cells-inputs" or "cells-outputs") }
+      local label = grid.add { type = "label", caption = Loc(side == "inputs" and "cells-inputs" or "cells-outputs") }
       label.style.width = 96
-      local kept, hidden = {}, 0
-      for _, port in ipairs(suggested[side]) do
-        if draft.excluded[side][port] then hidden = hidden + 1 else kept[#kept + 1] = port end
+      grid.add { type = "sprite-button", name = "ssk_cell_" .. side .. "_add", style = "tool_button", sprite = "utility/add",
+        tooltip = Loc(side == "inputs" and "cells-ports-add-inputs" or "cells-ports-add-outputs"),
+        tags = { ssk_cell = "port_add", side = side } }
+      local listed = {}
+      for key in pairs(draft.ports[side]) do
+        if port_prototype(key) then listed[#listed + 1] = key end
       end
-      if #kept > 0 then
-        local slots = row.add { type = "frame", style = "slot_button_deep_frame" }
-        local grid = slots.add { type = "table", name = "ssk_cell_port_grid", style = "filter_slot_table", column_count = 6 }
-        for _, port in ipairs(kept) do
-          local proto = port_prototype(port)
-          grid.add { type = "sprite-button", style = "slot_button", sprite = port,
-            tooltip = { "", proto and proto.localised_name or port, "\n", Loc("cells-port-remove") },
-            tags = { ssk_cell = "port", side = side, key = port } }
+      table.sort(listed)
+      local cell = grid.add { type = "flow", name = "ssk_cell_" .. side .. "_ports", direction = "horizontal" }
+      cell.style.vertical_align = "center"
+      if #listed > 0 then
+        local slots = cell.add { type = "frame", style = "slot_button_deep_frame" }
+        local buttons = slots.add { type = "table", style = "filter_slot_table", column_count = 8 }
+        for _, key in ipairs(listed) do
+          buttons.add { type = "sprite-button", style = "slot_button", sprite = key,
+            tooltip = { "", port_prototype(key).localised_name, "\n", Loc("cells-port-remove") },
+            tags = { ssk_cell = "port", side = side, key = key } }
         end
       else
-        row.add { type = "label", style = "grey_label", caption = Loc("cells-ports-none") }
-      end
-      local gap = row.add { type = "empty-widget" }
-      gap.style.horizontally_stretchable = true
-      if hidden > 0 then
-        row.add { type = "sprite-button", style = "tool_button", sprite = "utility/reset",
-          tooltip = Loc("cells-ports-restore", hidden), tags = { ssk_cell = "ports_reset", side = side } }
+        cell.add { type = "label", style = "grey_label", caption = Loc("cells-ports-none") }
       end
     end
 
@@ -437,15 +497,44 @@ function Cells.open(player)
     bar.add { type = "label", style = "subheader_caption_label", caption = Loc("cells-saved") }
     local gap = bar.add { type = "empty-widget" }
     gap.style.horizontally_stretchable = true
+    -- Like the Production Flow window, the list shows one surface: where the
+    -- player is, or another surface that has cells.
+    local counts, listed = {}, {}
+    for _, record in pairs(cells.records) do
+      counts[record.surface_index] = (counts[record.surface_index] or 0) + 1
+    end
+    for index in pairs(counts) do
+      if game.surfaces[index] then listed[#listed + 1] = index end
+    end
+    table.sort(listed)
+    local chosen = cells.list_surfaces and cells.list_surfaces[player.index]
+    if chosen and not counts[chosen] then chosen = nil end
+    local items, selected = { Loc("ui-where-i-am", Su.rich(player.surface)) }, 1
+    for i, index in ipairs(listed) do
+      items[i + 1] = Loc.join(Su.rich(game.surfaces[index]), " (", tostring(counts[index]), ")")
+      if index == chosen then selected = i + 1 end
+    end
+    local surfaces = bar.add { type = "drop-down", name = "ssk_cell_list_surface", items = items,
+      selected_index = selected, tooltip = Loc("cells-list-surface-tip"),
+      tags = { ssk_cell_list_surface = true, surfaces = listed } }
+    surfaces.style.width = 180
     action(bar, "select", "utility/add", Loc("cells-new"))
     local rows = panel.add { type = "scroll-pane", style = "naked_scroll_pane", direction = "vertical", horizontal_scroll_policy = "never" }
     rows.style.maximal_height = 350
     rows.style.padding = 8
     rows.style.horizontally_stretchable = true
+    local shown_surface = chosen and game.surfaces[chosen] or player.surface
     local ids = {}
-    for id in pairs(cells.records) do ids[#ids + 1] = id end
+    for id, record in pairs(cells.records) do
+      if record.surface_index == shown_surface.index then ids[#ids + 1] = id end
+    end
     table.sort(ids)
-    if #ids == 0 then rows.add { type = "label", style = "grey_label", caption = Loc("cells-empty") } end
+    if #ids == 0 then
+      local empty = rows.add { type = "label", style = "grey_label",
+        caption = next(cells.records) and Loc("cells-empty-surface", Su.rich(shown_surface)) or Loc("cells-empty") }
+      empty.style.single_line = false
+      empty.style.maximal_width = 340
+    end
     for _, id in ipairs(ids) do
       local record = cells.records[id]
       local _, count = live_members(record.members, record.surface_index)
@@ -469,11 +558,13 @@ function Cells.open(player)
         tooltip = Loc("cells-delete"), tags = { ssk_cell_delete_request = id } }
     end
   end
-  if draft then
-    frame.auto_center = true
+  -- The editor and the saved-cells list dock at the left edge, below the top-left
+  -- buttons, so the cells stay in view. A window the player moved stays there.
+  local scale, screen = player.display_scale, player.display_resolution
+  local at = cells.places and cells.places[player.index]
+  if at and at.x >= 0 and at.y >= 0 and at.x < screen.width - 64 * scale and at.y < screen.height - 64 * scale then
+    frame.location = at
   else
-    -- The saved-cells list docks at the left edge, below the top-left buttons.
-    local scale = player.display_scale
     frame.location = { x = math.floor(8 * scale), y = math.floor(64 * scale) }
   end
   player.opened = frame
@@ -565,24 +656,24 @@ function Cells.on_click(player, element)
     if record then
       cells.drafts[player.index] = { id = record.id, name = record.name,
         surface_index = record.surface_index, members = record.members, original = record,
-        display_item = record.display_item, vacant = vacant_slots(record),
-        excluded = copy_excluded(record.excluded) }
+        display_item = record.display_item, display_chosen = record.display_item and true or nil,
+        vacant = vacant_slots(record), ports = copy_ports(Cells.boundary(record)) }
       Cells.open(player)
     end
   elseif tag == "forget" and draft then
     remember_name(player, draft)
     draft.vacant = nil
     Cells.open(player)
-  elseif (tag == "port" or tag == "ports_reset") and draft then
+  elseif (tag == "port" or tag == "port_add") and draft then
     local side = element.tags.side
     if side ~= "inputs" and side ~= "outputs" then return true end
     remember_name(player, draft)
-    draft.excluded = draft.excluded or copy_excluded()
-    if tag == "port" then
-      draft.excluded[side][element.tags.key] = true
-    else
-      draft.excluded[side] = {}
+    draft.ports = draft.ports or copy_ports()
+    if tag == "port_add" then
+      Picker.open(player, "cell-" .. side)
+      return true
     end
+    draft.ports[side][element.tags.key] = nil
     Cells.open(player)
   elseif selection_modes[tag] then
     if draft and draft.surface_index ~= player.surface.index then
@@ -620,11 +711,7 @@ function Cells.on_click(player, element)
     local id = draft.id or cells.next_id
     if not draft.id then cells.next_id = id + 1 end
     local display_item = draft.display_item
-    local options = final_items(members)
-    local still_available = false
-    for _, option in ipairs(options) do
-      if option == display_item then still_available = true; break end
-    end
+    if not (draft.display_chosen and display_key(display_item)) then display_item = final_items(members)[1] end
     local positions = positions_of(members)
     local occupied = {}
     for _, position in pairs(positions) do occupied[position_key(position)] = true end
@@ -637,20 +724,17 @@ function Cells.on_click(player, element)
         members[unit], positions[unit], occupied[key] = previous[unit], position, true
       end
     end
-    -- Lock the boundary the player kept; exclusions are remembered for later edits.
-    local excluded = copy_excluded(draft.excluded)
-    local suggested = Cells.suggest_ports(members)
+    -- Save the boundary the player chose.
     local locked = { inputs = {}, outputs = {} }
     for _, side in ipairs(SIDES) do
-      for _, port in ipairs(suggested[side]) do
-        if not excluded[side][port] then locked[side][port] = true end
+      for port in pairs(draft.ports and draft.ports[side] or {}) do
+        if port_prototype(port) then locked[side][port] = true end
       end
     end
     -- Measured history continues across edits; a new cell starts measuring now.
     cells.records[id] = { id = id, name = name, surface_index = draft.surface_index, members = members,
       positions = positions, since = draft.original and draft.original.since or game.tick,
-      display_item = (still_available and display_item) or options[1] or false,
-      ports = locked, excluded = excluded }
+      display_item = display_item or false, ports = locked }
     cells.drafts[player.index] = nil
     Cells.reindex()
     Cells.open(player)
@@ -721,18 +805,33 @@ end
 function Cells.open_display_picker(player)
   local cells = storage.production_cells
   local draft = cells and cells.drafts[player.index]
-  if not (draft and draft.display_item and player.gui.screen[Cells.NAME]) then return end
-  Picker.open(player, "cell", "item/" .. draft.display_item, draft.display_options)
+  if not (draft and player.gui.screen[Cells.NAME]) then return end
+  Picker.open(player, "cell", display_key(draft.display_item))
 end
 
 function Cells.pick_display_item(player, key)
   local cells = storage.production_cells
   local draft = cells and cells.drafts[player.index]
   local window = player.gui.screen[Cells.NAME]
-  if not (window and draft and draft.display_options[key]) then return end
-  draft.display_item = key:sub(6)
+  if not (window and draft and port_prototype(key)) then return end
+  -- Items keep the plain name older cells use; fluids keep their typed key.
+  draft.display_item = key:sub(1, 5) == "item/" and key:sub(6) or key
+  draft.display_chosen = true
   local button = window.ssk_cell_panel.ssk_cell_form.ssk_cell_item_column.ssk_cell_display_item
   Picker.update_button(button, key, "cell")
+end
+
+-- Adds an item or fluid the player chose to a boundary side.
+function Cells.pick_port(player, side, key)
+  local cells = storage.production_cells
+  local draft = cells and cells.drafts[player.index]
+  if not (draft and (side == "inputs" or side == "outputs") and port_prototype(key)) then return end
+  remember_name(player, draft)
+  draft.ports = draft.ports or copy_ports()
+  draft.ports[side][key] = true
+  -- An item is either an input or an output of the cell.
+  draft.ports[side == "inputs" and "outputs" or "inputs"][key] = nil
+  Cells.open(player)
 end
 
 function Cells.on_cursor_changed(player)
@@ -747,11 +846,22 @@ function Cells.on_cursor_changed(player)
   end
 end
 
+-- The saved-cells list's surface drop-down.
+function Cells.on_list_surface(player, element)
+  local cells = state()
+  local index = element.selected_index
+  cells.list_surfaces = cells.list_surfaces or {}
+  cells.list_surfaces[player.index] = index > 1 and element.tags.surfaces[index - 1] or nil
+  Cells.open(player)
+end
+
 function Cells.on_player_removed(index)
   local cells = storage.production_cells
   if not cells then return end
   cells.drafts[index] = nil
   if cells.deletions then cells.deletions[index] = nil end
+  if cells.places then cells.places[index] = nil end
+  if cells.list_surfaces then cells.list_surfaces[index] = nil end
 end
 
 function Cells.on_surface_deleted(index)
