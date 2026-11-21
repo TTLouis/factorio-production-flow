@@ -48,10 +48,26 @@ return function(handlers, nth)
       string.format("%s: expected %.3f, got %.3f", what, expected, value or 0))
   end
   local function cps(rates, recipe) return rates[recipe] and rates[recipe].cps or 0 end
+  local function sample(machine)
+    for index, unit in ipairs(storage.mlist) do
+      if unit == machine.unit_number then storage.mcursor = index; break end
+    end
+    Sampler.on_tick(game.tick)
+    assert(storage.machines[machine.unit_number].pf == machine.products_finished)
+  end
 
   -- Let the sampler seed the new machines before the cells exist.
   run(2)
+  a.running = false
+  sample(a)
   local created = game.tick
+  local bin = storage.bins[math.floor(created / 60) % storage.nbins + 1]
+  local function surface_cable()
+    local rates = bin.rec[1] or {}
+    return rates["copper-cable"] and rates["copper-cable"].c or 0
+  end
+  local before_cell = surface_cable()
+  a.products_finished = a.products_finished + 1
   local function cell(id, name, members)
     local m = {}
     for _, e in ipairs(members) do m[e.unit_number] = e end
@@ -62,6 +78,11 @@ return function(handlers, nth)
   Cells.reindex()
   assert(storage.cell_units[b.unit_number][1] == 1 and storage.cell_units[b.unit_number][2] == 2,
     "A machine in two cells must be indexed for both, in id order")
+  run(3)
+  assert(cps(Sampler.cell_rates(1, 1, 60, created), "copper-cable") == 0,
+    "A craft completed before creation must not count toward the new cell")
+  assert(surface_cable() == before_cell + 1, "The pre-creation craft must count once in the surface total")
+  a.running = true
 
   -- Phase 1: everything running.
   run(150)
@@ -77,7 +98,7 @@ return function(handlers, nth)
   -- A window longer than the cell's life is measured only since creation.
   local long, secs, requested = Sampler.cell_rates(1, 1, 600, created)
   assert(requested == 600, "Requested window must be the selected period")
-  near(secs, 150, 2, "measured seconds since creation")
+  near(secs, 153, 2, "measured seconds since creation")
   near(cps(long, "copper-cable"), 1, 0.05, "rate over the clipped window")
   local young = Flow.build(1, { mode = "measured", period = 600 })
   assert(young.partial and young.mode == "measured", "A cell younger than the period must be marked partial")
@@ -115,10 +136,21 @@ return function(handlers, nth)
     "Cell nodes need a utilisation line in measured mode")
 
   -- Membership change: crafts count for a cell only while the machine is a member.
+  sample(b)
+  local boundary_bin = storage.bins[math.floor(game.tick / 60) % storage.nbins + 1]
+  local function circuit_crafts(group)
+    local cells = boundary_bin[group] or {}
+    local recipes = cells[1] or {}
+    return recipes["electronic-circuit"] and recipes["electronic-circuit"].c or 0
+  end
+  local total_before, shared_before = circuit_crafts("cell"), circuit_crafts("cell_shared")
+  b.products_finished = b.products_finished + 1
   storage.production_cells.records[1].members[b.unit_number] = nil
   storage.production_cells.records[1].positions[b.unit_number] = nil
   Cells.reindex()
   assert(#storage.cell_units[b.unit_number] == 1, "Removed member must leave the cell index")
+  assert(circuit_crafts("cell") == total_before + 1 and circuit_crafts("cell_shared") == shared_before + 1,
+    "The pending craft belongs to the old cell and was shared when it completed")
   run(60)
   local after = Sampler.cell_rates(1, 1, 60, created)
   assert(cps(after, "electronic-circuit") < 0.05, "A removed member's later crafts must not be attributed")
@@ -126,7 +158,10 @@ return function(handlers, nth)
     "A machine no longer shared counts in the exclusive view")
 
   -- Deleting a cell purges its history from every resolution.
-  Sampler.purge_cell(2)
+  sample(c)
+  c.products_finished = c.products_finished + 1
+  storage.production_cells.deletions[1] = { id = 2, record = storage.production_cells.records[2] }
+  Cells.finish_delete(game.players[1], true)
   assert(not next((Sampler.cell_rates(2, 1, 600, created))), "Purged cell still has measured crafts")
   local function check(bin) assert(not (bin.cell and bin.cell[2]) and not (bin.cell_shared and bin.cell_shared[2]), "Purged cell left a bin") end
   for _, bin in pairs(storage.bins or {}) do check(bin) end

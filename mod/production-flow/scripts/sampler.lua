@@ -507,6 +507,96 @@ local function normal_crafts_between(rec, total, productivity, crafting, bonus, 
   return total / (1 + productivity)
 end
 
+local function sample_machine(rec, e, tick, bin, recipes, cell_units)
+  local r, force_recipe = Sm.current_recipe(e)
+  local recipe = recipes and recipes[r]
+  local pf = e.products_finished
+  local speed = e.crafting_speed
+  local productivity = craft_productivity(e, r, force_recipe, recipe)
+  local crafting, bonus
+  if productivity > 0 then crafting, bonus = e.crafting_progress, e.bonus_progress end
+  local rp
+  if rec.silo then rp = e.rocket_parts end
+  if r and r == rec.r then
+    local d = pf - rec.pf
+    -- rocket silo: products_finished counts rockets, so count parts instead
+    if rec.silo then d = d * rec.req + (rp - (rec.rp or rp)) end
+    if d > 0 then
+      local bs = bin.rec[rec.s]
+      if not bs then bs = {}; bin.rec[rec.s] = bs end
+      local normal = normal_crafts_between(rec, d, productivity, crafting, bonus, speed, recipe)
+      add_crafts(bs, r, d, normal)
+      local cell_ids = cell_units and cell_units[rec.u]
+      if cell_ids then
+        local all = bin.cell
+        if not all then all = {}; bin.cell = all end
+        local shared = storage.cell_shared_units and storage.cell_shared_units[rec.u]
+        for i = 1, #cell_ids do
+          local id = cell_ids[i]
+          local cr = all[id]
+          if not cr then cr = {}; all[id] = cr end
+          add_crafts(cr, r, d, normal)
+          if shared and shared[id] then
+            local sh = bin.cell_shared
+            if not sh then sh = {}; bin.cell_shared = sh end
+            local sr = sh[id]
+            if not sr then sr = {}; sh[id] = sr end
+            add_crafts(sr, r, d, normal)
+          end
+        end
+      end
+    end
+  end
+  if entity_status and (r ~= rec.r or not rec.status_due or tick >= rec.status_due) then
+    observe_status(rec, e, r, tick)
+  end
+  rec.r, rec.pf = r, pf
+  rec.pb, rec.cp, rec.bp = productivity, crafting, bonus
+  rec.spd = speed
+  if rec.silo then rec.rp = rp end
+end
+
+local function same_membership(previous, current, old_shared, new_shared)
+  if not current or #previous ~= #current then return false end
+  for i, id in ipairs(previous) do
+    if id ~= current[i] or (old_shared and old_shared[id]) ~= (new_shared and new_shared[id]) then return false end
+  end
+  return true
+end
+
+-- Close changed machines' sample intervals against their old membership before
+-- installing the new one. Use the same counters for surface and cell totals so
+-- neither loses or repeats crafts when a cell changes between sampler visits.
+function Sm.set_cell_membership(units, shared)
+  local old_units, old_shared = storage.cell_units or {}, storage.cell_shared_units or {}
+  if storage.nbins and storage.machines then
+    local tick = game.tick
+    local recipes = storage.graph and storage.graph.recipes
+    local bin
+    local function flush(unit)
+      local rec = storage.machines[unit]
+      if not (rec and player_machine(rec.e)) then return end
+      if rec.eligible ~= true then
+        remove_observation(rec)
+        seed_machine(rec, rec.e)
+        return
+      end
+      if not bin then
+        init_machine_status()
+        bin = cur_bin(tick)
+      end
+      sample_machine(rec, rec.e, tick, bin, recipes, old_units)
+    end
+    for unit, ids in pairs(old_units) do
+      if not same_membership(ids, units and units[unit], old_shared[unit], shared and shared[unit]) then flush(unit) end
+    end
+    for unit in pairs(units or {}) do
+      if not old_units[unit] then flush(unit) end
+    end
+  end
+  storage.cell_units, storage.cell_shared_units = units, shared
+end
+
 function Sm.on_tick(tick)
   ChestStock.tick(tick)
   local list = storage.mlist
@@ -550,52 +640,7 @@ function Sm.on_tick(tick)
       seed_machine(rec,e)
       cur=cur+1
     else
-      local r, force_recipe = Sm.current_recipe(e)
-      local recipe = recipes and recipes[r]
-      local pf = e.products_finished
-      local speed = e.crafting_speed
-      local productivity = craft_productivity(e, r, force_recipe, recipe)
-      local crafting, bonus
-      if productivity > 0 then crafting, bonus = e.crafting_progress, e.bonus_progress end
-      local rp
-      if rec.silo then rp = e.rocket_parts end
-      if r and r == rec.r then
-        local d = pf - rec.pf
-        -- rocket silo: products_finished counts rockets, so count parts instead
-        if rec.silo then d = d * rec.req + (rp - (rec.rp or rp)) end
-        if d > 0 then
-          local bs = bin.rec[rec.s]
-          if not bs then bs = {}; bin.rec[rec.s] = bs end
-          local normal = normal_crafts_between(rec, d, productivity, crafting, bonus, speed, recipe)
-          add_crafts(bs, r, d, normal)
-          local cell_ids = cell_units and cell_units[u]
-          if cell_ids then
-            local all = bin.cell
-            if not all then all = {}; bin.cell = all end
-            local shared = storage.cell_shared_units and storage.cell_shared_units[u]
-            for i = 1, #cell_ids do
-              local id = cell_ids[i]
-              local cr = all[id]
-              if not cr then cr = {}; all[id] = cr end
-              add_crafts(cr, r, d, normal)
-              if shared and shared[id] then
-                local sh = bin.cell_shared
-                if not sh then sh = {}; bin.cell_shared = sh end
-                local sr = sh[id]
-                if not sr then sr = {}; sh[id] = sr end
-                add_crafts(sr, r, d, normal)
-              end
-            end
-          end
-        end
-      end
-      if entity_status and (r ~= rec.r or not rec.status_due or tick >= rec.status_due) then
-        observe_status(rec, e, r, tick)
-      end
-      rec.r, rec.pf = r, pf
-      rec.pb, rec.cp, rec.bp = productivity, crafting, bonus
-      rec.spd = speed
-      if rec.silo then rec.rp = rp end
+      sample_machine(rec, e, tick, bin, recipes, cell_units)
       cur = cur + 1
     end
   end

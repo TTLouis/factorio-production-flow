@@ -482,24 +482,31 @@ function T.tick(UI)
     assert(Cells.missing(record) == 0)
     machines[5] = upgraded
 
+    UI.open(player)
+    click(player, assert(player.gui.screen.ssk_main), "ssk_ui", "cells")
+    local function edit_cell()
+      local edit
+      local function find_edit(element)
+        if element.tags.ssk_cell == "edit" and element.tags.cell_id == 2 then edit = element end
+        for _, child in ipairs(element.children) do find_edit(child) end
+      end
+      find_edit(window())
+      script.get_event_handler(defines.events.on_gui_click){player_index = player.index, element = assert(edit)}
+    end
+    edit_cell()
+    assert(not window().ssk_cell_panel.children[1].ssk_cell_missing)
     assert(cable.die())
     local ghost = surface.find_entity("entity-ghost", cable_position)
     storage.cell_test_death_ghost = ghost ~= nil
     ghost = ghost or assert(surface.create_entity{name = "entity-ghost", inner_name = "assembling-machine-1",
       position = cable_position, force = "player"})
     storage.cell_test_ghost = ghost
-    assert(Cells.missing(record) == 1 and record.members[cable_unit], "A destroyed member must be kept as missing")
+    click(player, window(), "ssk_cell", "save")
+    record = cells.records[2]
+    assert(Cells.missing(record) == 1 and record.members[cable_unit], "Save must keep a slot that became vacant in the editor")
     assert(Flow.build(2, CAPACITY).links["recipe/copper-cable>item/copper-cable"] == nil, "A missing member must not be charted")
 
-    UI.open(player)
-    click(player, assert(player.gui.screen.ssk_main), "ssk_ui", "cells")
-    local edit
-    local function find_edit(element)
-      if element.tags.ssk_cell == "edit" and element.tags.cell_id == 2 then edit = element end
-      for _, child in ipairs(element.children) do find_edit(child) end
-    end
-    find_edit(window())
-    script.get_event_handler(defines.events.on_gui_click){player_index = player.index, element = assert(edit)}
+    edit_cell()
     assert(window().ssk_cell_panel.children[1].ssk_cell_missing, "The editor must report the missing machine")
     assert(find(window(), "ssk_cell", "forget"), "The editor must offer to forget missing machines")
     storage.cell_test_phase = "capture-missing"
@@ -797,11 +804,13 @@ function T.tick(UI)
     -- Engine cloning to another surface, as Space Exploration moves a spaceship.
     local machines = storage.cell_test_machines
     player.cursor_stack.set_stack{name = Selection.tool}
-    select_area(player, {machines[1], machines[2]})
+    select_area(player, {machines[1], machines[2], machines[5]})
     window().ssk_cell_panel.ssk_cell_form.ssk_cell_name_column.ssk_cell_name.text = "Ship"
     click(player, window(), "ssk_cell", "save")
     local id, record = next(storage.production_cells.records)
-    assert(record and record.name == "Ship" and table_size(record.members) == 2)
+    assert(record and record.name == "Ship" and table_size(record.members) == 3)
+    local vacant = { unit = machines[5].unit_number, position = machines[5].position, name = machines[5].name }
+    machines[5].destroy()
     local ship = game.create_surface("cells-clone-test")
     ship.request_to_generate_chunks({0, 0}, 2)
     ship.force_generate_chunk_requests()
@@ -809,15 +818,17 @@ function T.tick(UI)
     for x = -12, 16 do for y = 0, 16 do tiles[#tiles + 1] = {name = "lab-dark-1", position = {x, y}} end end
     ship.set_tiles(tiles)
     -- clone_entities returns nothing; the copies are found on the destination.
+    local dy = 5
     player.surface.clone_entities{entities = {machines[1], machines[2]},
-      destination_offset = {0, 0}, destination_surface = ship}
+      destination_offset = {0, dy}, destination_surface = ship}
     local copies = {}
     for i = 1, 2 do
-      copies[i] = ship.find_entity(machines[i].name, machines[i].position)
+      local position = machines[i].position
+      copies[i] = ship.find_entity(machines[i].name, {position.x, position.y + dy})
     end
     assert(copies[1] and copies[2] and copies[1] ~= copies[2], "Engine clone failed")
     assert(storage.production_cells.clones and storage.production_cells.clones[id], "Clone events must be recorded")
-    storage.cell_test_clone = {id = id, surface = ship.index, copies = copies}
+    storage.cell_test_clone = {id = id, surface = ship.index, copies = copies, vacant = vacant, dy = dy}
     storage.cell_test_clone_tick = game.tick
     machines[1].destroy()
     machines[2].destroy()
@@ -829,12 +840,23 @@ function T.tick(UI)
     local record = storage.production_cells.records[clone.id]
     local a, b = clone.copies[1], clone.copies[2]
     assert(record.surface_index == clone.surface and record.members[a.unit_number] == a
-      and record.members[b.unit_number] == b and Cells.missing(record) == 0,
+      and record.members[b.unit_number] == b and Cells.missing(record) == 1,
       "A cell must follow machines moved to another surface")
+    local vacant = clone.vacant
+    local position = assert(record.positions[vacant.unit])
+    assert(position.x == vacant.position.x and position.y == vacant.position.y + clone.dy,
+      "The vacant slot must follow the live machines' translation")
+    local ship = game.surfaces[clone.surface]
+    local unrelated = assert(ship.create_entity{name = vacant.name, position = vacant.position, force = "player", raise_built = true})
+    assert(not record.members[unrelated.unit_number], "A machine at the old position must stay outside the cell")
+    local rebuilt = assert(ship.create_entity{name = vacant.name, position = {position.x, position.y}, force = "player", raise_built = true})
+    assert(record.members[rebuilt.unit_number] == rebuilt and Cells.missing(record) == 0,
+      "A machine built at the translated position must fill the slot")
+    rebuilt.set_recipe("iron-gear-wheel")
     assert(not storage.production_cells.clones, "Resolved clones must be cleared")
     assert(Flow.build(nil, CAPACITY).nodes["recipe/cell-" .. clone.id].context == "cells-clone-test",
       "The All view must place a moved cell on its new surface")
-    log("CELL CLONE PASS: engine clone to another surface moved the cell with both members")
+    log("CELL CLONE PASS: engine clone preserved the translated slot and reattached the correct replacement")
     storage.cell_test_phase = "show-moved"
   elseif stage == "show-moved" then
     -- Show switches the header to the cell's surface, as choosing it from the picker would.

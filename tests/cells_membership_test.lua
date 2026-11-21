@@ -152,6 +152,17 @@ Cells.on_built(b2)
 assert(record(id).members[b2.unit_number] == b2 and Cells.missing(record(id)) == 0,
   "A slot kept through an edit must still re-attach")
 
+-- A slot can become vacant after the editor takes its initial snapshot.
+click("edit", id)
+assert(not window().ssk_cell_panel.children[1].ssk_cell_missing)
+b2.valid = false
+save("Circuits")
+assert(Cells.missing(record(id)) == 1 and record(id).positions[b2.unit_number],
+  "Saving an open editor must retain a machine slot that became vacant")
+local b3 = machine(4.5, 0.5, "electronic-circuit")
+Cells.on_built(b3)
+assert(record(id).members[b3.unit_number] == b3, "A replacement must rejoin after the edit")
+
 -- Forgetting drops vacant slots; a rebuild there no longer joins.
 a2.valid = false
 click("edit", id)
@@ -212,11 +223,16 @@ assert(record(99).positions[legacy2.unit_number], "Reindex must backfill positio
 local original = record(second)
 local before_id, before_since = storage.production_cells.next_id, original.since
 local staged = { name = "Division", surface_index = 1, members = { [d2.unit_number] = d2 }, parent_draft = 0 }
+local missing = machine(19.5, 0.5, "iron-gear-wheel")
+original.members[missing.unit_number] = missing
+original.positions[missing.unit_number] = { x = 19.5, y = 0.5 }
 local edit = { id = second, original = original, name = original.name, surface_index = 1,
   members = original.members, ports = original.ports, stops = original.stops, staged = { staged } }
+missing.valid = false
 assert(Cells.apply_composite(player, edit), "Valid composite edit should succeed")
 assert(record(second).since == before_since and record(before_id).parent_id == second,
   "Composite edit must preserve parent history and link its new child")
+assert(Cells.missing(record(second)) == 1, "Composite save must also retain newly vacant slots")
 assert(storage.production_cells.children[second][1] == before_id)
 local snapshot, next_id = record(second), storage.production_cells.next_id
 edit.original = snapshot

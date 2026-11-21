@@ -182,14 +182,14 @@ function O.show_surface(player, records, surface_index, exclude_id)
 end
 
 -- Outlines the machines, stops and buffers of a cell being created or edited.
-function O.show_draft(player, draft, next_id)
+function O.show_draft(player, draft, next_id, vacant)
   local positions = {}
   for unit, entity in pairs(draft.members or {}) do
     if entity.valid then
       positions[unit] = { x = entity.position.x, y = entity.position.y, w = entity.tile_width, h = entity.tile_height }
     end
   end
-  for unit, spot in pairs(draft.vacant or {}) do positions[unit] = spot end
+  for unit, spot in pairs(vacant or draft.vacant or {}) do positions[unit] = spot end
   return show(player, "draft", { { id = draft.id or next_id, record = { surface_index = draft.surface_index,
     name = draft.name, members = draft.members or {}, positions = positions, stops = draft.stops } } })
 end

@@ -8,15 +8,34 @@ Spot production shortages with interactive Sankey charts, item and fluid history
 
 ## Mod page description
 
-**Where did all your green circuits go?** Follow the recipes using them, see whether production is keeping up, and check how long your chest stock will last. In Space Age, follow cargo from the surface that loaded it to the one where it landed.
+**Where did all your green circuits go?** Follow the recipes using them, see whether production is keeping up, and check how long your chest stock will last. Group your machines into production cells to see how each part of the factory supplies the next.
 
-**Supported game setups** include base Factorio, Space Age, and Space Exploration. Balance, Focus, and Full Sankey are available in all three. The optional Space Age and Space Exploration integrations add their own **Transfers** views.
+**Supported game setups** include base Factorio, Space Age, and Space Exploration. Balance, Focus, Cells, and Full Sankey are available in all three. The optional Space Age and Space Exploration integrations add their own **Transfers** views.
 
 Available in English, Simplified Chinese (简体中文), and Traditional Chinese (繁體中文). All views, mod settings, help, tooltips, and alerts follow your Factorio language setting.
 
 **支持简体中文和繁體中文。** 界面会跟随 Factorio 的语言设置，无需另装汉化模组。
 
 **Feedback needed:** Try Production Flow in your factory and share what works, what is confusing, or what you would like improved. Feedback on Balance, chart readability, mod compatibility and performance is especially helpful. Leave a message in the [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion) or [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues). For bugs, include your Factorio/mod versions, what you expected, what happened and a screenshot if possible.
+
+### Group your factory into production cells
+
+Open **Cells**, click **+**, and drag over a production area. The editor suggests a name, an icon, inputs and outputs, and can link train stops and storage in the selection. Adjust the suggestions to match your setup, and divide larger builds into smaller cells when you want to inspect their stages separately.
+
+- **Flow** shows what a cell takes in and makes. Switch between **Measured** and **Capacity** to compare recorded production with what the machines could make at full speed. Choose **All** to compare net inputs and outputs across production stages.
+- **Map** shows where the cell's machines, train stops and buffers are. See their outlines in the world and on the map, then jump to the area in remote view.
+- **Train stops** shows stock in linked chests and tanks, which trains are scheduled, approaching or stopped, and how many trains the stop can accept. Select a train to preview it or jump to it.
+- **Train History** shows when trains loaded or unloaded and how much cargo changed during recorded automatic visits. Switch between elapsed time and individual exchanges, then expand a visit to see amounts by item quality and fluid.
+
+Machines upgraded or rebuilt in the same spot can rejoin their cell. In Space Exploration, cells can follow a spaceship during launch or landing when their machines move together.
+
+![All Cells Flow shows measured production across a K2SE factory, including battery and rocket control unit production](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/43-cells-all.png)
+
+![The Iron ingot cell shows enrichment, smelting, casting and the returns from filtering dirty water](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/40-cells-flow.png)
+
+![The Oil Processing cell shows crude oil refining and cracking into heavy oil, light oil and petroleum gas](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/44-cells-oil-processing.png)
+
+![Train stops for the Oil Processing cell show import and export stations, buffer stock, and a preview of a stopped petroleum gas train](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/41-train-stops.png)
 
 ### Balance production and stock
 
@@ -38,11 +57,7 @@ Pick a space platform in **Transfers → Flow** to see where it loads and unload
 
 ![Transfers Flow shows a platform loading at four planets, unloading at five and processing ore aboard](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/32-transfers-export.png)
 
-![Transfers Flow shows a science-pack route from Vulcanus to Nauvis](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/33-transfers-science.png)
-
 Open **History** to see when cargo moved. Switch to **Time** to see the gaps between deliveries, or **Events** to put recorded cargo exchanges side by side. Expand a delivery in the log to see what was in the pod.
-
-![Transfers History shows the delivery timeline and an expanded cargo manifest](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/34-transfers-history.png)
 
 ### Track shipments in Space Exploration
 
@@ -51,8 +66,6 @@ Open **History** to see when cargo moved. Switch to **Time** to see the gaps bet
 - **History** shows shipments by elapsed **Time** or as a compact sequence of **Events**. Expand a shipment to see its contents and any measured losses. Jump to the sender or receiver when its location is available.
 
 ![Space Exploration Transfers Flow shows cargo rocket and delivery cannon routes into and out of Nauvis, with zone details](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/38-se-transfers-flow.png)
-
-![Space Exploration Transfers Items shows shipment materials alongside production and stock history](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/39-se-transfers-items.png)
 
 Received quantities are measured when a rocket lands on a pad with enough room or a delivery chest catches a cannon package. Receipts stay unknown for full-pad landings, off-pad landings, and spilled packages. Delivery cannon tracking requires Space Exploration 0.7.64.
 
@@ -64,11 +77,11 @@ Use **Back**, **Forward** or **Last visits** to revisit materials in Focus. Zoom
 
 ![Focus traces the recipes connected to electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/35-focus-circuit.png)
 
-![Machine status lists sampled machines that make or use electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/36-machine-status.png)
+**Full Sankey** shows recipe flows across one surface. Click a material in the chart overview to jump to it. Zoom in for detail or use **Fit** to bring the chart into view. In **Selected material**, the **Breakdown** lists recipes that make or use the material, including active recipes hidden from the chart. Open **Focus**, **Balance**, or **Machine status** from there to investigate further.
 
-**Full Sankey** gives you a broader view of recipe flows on one surface. Dense charts and optional grouping are still being refined.
+Hover a recipe bar to see recipe amounts, rates and the machines running it. Thin return arrows show flows that loop back, such as recycling or circulating catalysts.
 
-![Full Sankey shows recipe flows across Nauvis](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/37-full-sankey.png)
+![Full Sankey shows the chart overview and the selected-material Breakdown for iron gear wheels](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/42-full-sankey-breakdown.png)
 
 ### How the calculations work
 

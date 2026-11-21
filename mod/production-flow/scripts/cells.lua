@@ -66,6 +66,33 @@ local function vacant_slots(record)
   return vacant
 end
 
+local function draft_vacancies(draft)
+  local vacant, original = {}, draft.original
+  if not original or original.surface_index ~= draft.surface_index then return vacant end
+  local positions = original.positions or {}
+  for unit in pairs(draft.vacant or {}) do
+    local entity = original.members[unit]
+    if entity and not entity.valid then vacant[unit] = positions[unit] end
+  end
+  for unit, entity in pairs(draft.members or {}) do
+    if not entity.valid then vacant[unit] = positions[unit] end
+  end
+  return vacant
+end
+
+local function keep_vacancies(draft, members, positions)
+  local vacant = draft_vacancies(draft)
+  if not next(vacant) then return end
+  local occupied = {}
+  for _, position in pairs(positions) do occupied[position_key(position)] = true end
+  for unit, position in pairs(vacant) do
+    local key = position_key(position)
+    if not occupied[key] then
+      members[unit], positions[unit], occupied[key] = draft.original.members[unit], position, true
+    end
+  end
+end
+
 local function count_keys(map)
   local count = 0
   for _ in pairs(map) do count = count + 1 end
@@ -117,8 +144,7 @@ function Cells.reindex()
       end
     end
   end
-  storage.cell_shared_units = next(shared) and shared or nil
-  storage.cell_units = next(units) and units or nil
+  Sampler.set_cell_membership(next(units) and units or nil, next(shared) and shared or nil)
   Rail.reindex(cells.records)
 end
 
@@ -190,6 +216,7 @@ function Cells.on_cloned(source, destination)
   if not (ids and destination and destination.valid and destination.unit_number) then return end
   local cells = state()
   local pending = cells.clones or {}
+  local origin = source.position
   cells.clones = pending
   for _, id in ipairs(ids) do
     local record = cells.records[id]
@@ -204,8 +231,14 @@ function Cells.on_cloned(source, destination)
         pending[id] = move
       end
       move.map[source.unit_number] = destination
+      move.origins = move.origins or {}
+      move.origins[source.unit_number] = origin
     end
   end
+end
+
+local function translated_slot(position, dx, dy)
+  return { x = position.x + dx, y = position.y + dy, w = position.w, h = position.h }
 end
 
 ---@param final boolean? Decide now (the source surface is being deleted).
@@ -236,14 +269,28 @@ function Cells.resolve_clones(final)
         waiting = true
       elseif complete and surface then
         local members, positions = {}, {}
+        local dx, dy, uniform = nil, nil, true
         for unit in pairs(move.live) do
           local copy = move.map[unit]
+          local position = spot(copy)
           members[copy.unit_number] = copy
-          positions[copy.unit_number] = spot(copy)
+          positions[copy.unit_number] = position
+          local origin = (move.origins and move.origins[unit]) or record.positions[unit]
+          if origin then
+            local x, y = position.x - origin.x, position.y - origin.y
+            if dx and (dx ~= x or dy ~= y) then uniform = false end
+            dx, dy = x, y
+          else
+            uniform = false
+          end
         end
-        for unit, entity in pairs(record.members) do
-          if not entity.valid and not move.live[unit] and record.positions[unit] then
-            members[unit], positions[unit] = entity, record.positions[unit]
+        -- Vacant slots have no clone. A common offset locates them on the new
+        -- surface. With inconsistent offsets there is no safe replacement slot.
+        if uniform then
+          for unit, entity in pairs(record.members) do
+            if not entity.valid and not move.live[unit] and record.positions[unit] then
+              members[unit], positions[unit] = entity, translated_slot(record.positions[unit], dx, dy)
+            end
           end
         end
         record.members, record.positions, record.surface_index = members, positions, surface
@@ -257,8 +304,9 @@ function Cells.resolve_clones(final)
               local copy = move.map[unit]
               if copy and copy.valid then
                 child_members[copy.unit_number], child_positions[copy.unit_number] = copy, spot(copy)
-              elseif not move.live[unit] and child.positions[unit] then
-                child_members[unit], child_positions[unit] = child.members[unit], child.positions[unit]
+              elseif uniform and not move.live[unit] and child.positions[unit] then
+                child_members[unit] = child.members[unit]
+                child_positions[unit] = translated_slot(child.positions[unit], dx, dy)
               end
             end
             child.members, child.positions, child.surface_index = child_members, child_positions, surface
@@ -576,8 +624,9 @@ function Cells.open(player, focus_side, focus_key)
   if player.force ~= game.forces.player then return end
   local cells = state()
   local draft = cells.drafts[player.index]
+  local vacant = draft and draft_vacancies(draft)
   -- The machines being selected stay outlined until the draft is saved or cancelled.
-  if draft then Outlines.show_draft(player, draft, cells.next_id) else Outlines.clear(player.index, "draft") end
+  if draft then Outlines.show_draft(player, draft, cells.next_id, vacant) else Outlines.clear(player.index, "draft") end
   local frame = player.gui.screen.add { type = "frame", name = Cells.NAME, direction = "vertical" }
   local title = frame.add { type = "flow", style = "frame_header_flow" }
   title.drag_target = frame
@@ -595,7 +644,7 @@ function Cells.open(player, focus_side, focus_key)
   if draft then
     local members, count = live_members(draft.members, draft.surface_index)
     bar.add { type = "label", style = "subheader_caption_label", caption = Loc("cells-machine-count", count) }
-    local missing = draft.vacant and count_keys(draft.vacant) or 0
+    local missing = count_keys(vacant)
     if missing > 0 then
       bar.add { type = "label", name = "ssk_cell_missing", style = "subheader_caption_label",
         caption = Loc("cells-missing-count", missing), tooltip = Loc("cells-missing-tip") }
@@ -856,15 +905,7 @@ function Cells.apply_composite(player, root)
       or suggested_item(members, locked.inputs)
     local positions = positions_of(members)
     if index == 1 and root.id then
-      local occupied = {}
-      for _, position in pairs(positions) do occupied[position_key(position)] = true end
-      for unit, position in pairs(root.vacant or {}) do
-        local previous = root.original.members[unit]
-        local key = position_key(position)
-        if previous and not previous.valid and not occupied[key] then
-          members[unit], positions[unit], occupied[key] = previous, position, true
-        end
-      end
+      keep_vacancies(root, members, positions)
       local valid, reason = Cells.valid_hierarchy(cells.records, {
         id = root.id, parent_id = root.parent_id, surface_index = root.surface_index, members = members })
       if not valid then
@@ -935,8 +976,8 @@ function Cells.finish_delete(player, confirm)
         player.print(Loc("cells-has-children")); return pending
       end
       cells.records[pending.id] = nil
-      Sampler.purge_cell(pending.id)
       Cells.reindex()
+      Sampler.purge_cell(pending.id)
     else
       player.print(Loc("cells-changed"))
     end
@@ -962,7 +1003,7 @@ function Cells.on_click(player, element)
         surface_index = record.surface_index, members = record.members, original = record,
         parent_id = record.parent_id, parent_original = record.parent_id and cells.records[record.parent_id],
         display_item = record.display_item, display_chosen = record.display_item and true or nil,
-        vacant = vacant_slots(record), ports = copy_ports(Cells.boundary(record)), stops = Rail.copy(record.stops), suggested_stops = {} }
+        ports = copy_ports(Cells.boundary(record)), stops = Rail.copy(record.stops), suggested_stops = {} }
       for unit in pairs(record.stops or {}) do cells.drafts[player.index].suggested_stops[unit] = true end
       Cells.open(player)
     end
@@ -986,6 +1027,7 @@ function Cells.on_click(player, element)
     Cells.on_click(player, { tags = { ssk_cell = "select" } })
   elseif tag == "forget" and draft then
     remember_name(player, draft)
+    draft.members = live_members(draft.members, draft.surface_index)
     draft.vacant = nil
     Cells.open(player)
   elseif (tag == "port" or tag == "port_suggestion" or tag == "port_add") and draft then
@@ -1061,17 +1103,7 @@ function Cells.on_click(player, element)
       display_item = suggested_item(members, draft.ports and draft.ports.inputs)
     end
     local positions = positions_of(members)
-    local occupied = {}
-    for _, position in pairs(positions) do occupied[position_key(position)] = true end
-    -- Keep removed members' slots so a replacement built there rejoins the cell,
-    -- unless the player chose to forget them or a member already stands there.
-    local previous = draft.original and draft.original.members or {}
-    for unit, position in pairs(draft.vacant or {}) do
-      local key = position_key(position)
-      if previous[unit] and not previous[unit].valid and not members[unit] and not occupied[key] then
-        members[unit], positions[unit], occupied[key] = previous[unit], position, true
-      end
-    end
+    keep_vacancies(draft, members, positions)
     local parent = draft.parent_id and cells.records[draft.parent_id]
     if draft.parent_id and (not parent or (draft.parent_original and parent ~= draft.parent_original)) then
       player.print(Loc("cells-parent-changed")); return true
@@ -1295,8 +1327,6 @@ function Cells.on_selected(e)
     local merged = live_members(draft.members, surface_index)
     for id, entity in pairs(members) do merged[id] = entity end
     members = merged
-  else
-    draft.vacant = nil -- replacing the selection starts from the dragged machines only
   end
   if draft.session and draft ~= draft.session.root then
     local parent_index = draft.parent_draft
@@ -1322,6 +1352,8 @@ function Cells.on_selected(e)
   elseif mode ~= "remove" then
     draft.selection_area = e.area
   end
+  -- Add and Remove keep vacancies. Replace starts from the dragged machines.
+  draft.vacant = (mode == "add" or mode == "remove") and draft_vacancies(draft) or nil
   draft.members, draft.selection_mode = members, nil
   if first_selection then
     draft.initial_selection_completed = true
