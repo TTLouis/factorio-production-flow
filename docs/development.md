@@ -21,6 +21,28 @@ Optional native checks (Windows, a local licensed Factorio installation required
 Keep test and review sessions muted. Automated clients use `--disable-audio`;
 interactive isolated profiles set `[sound]` `master-volume=0` and `master-muted=true`.
 
+### Interactive manual playtest
+
+When launching Factorio for the user to playtest a change manually:
+
+- Always stage an **isolated directory** under `tests/out/` (never modify the
+  live `%APPDATA%\Factorio` profile, mods, or original saves).
+- Put the **clean, unhooked** `production-flow_<version>.zip` archive (not the
+  hooked test copy) alongside the synced mods and a copy of a **clean save**
+  (never reuse an automated `_autosave-rail-playtest.zip` containing synthetic
+  test cells).
+- Always launch **windowed and muted**: set `[graphics] full-screen=false`,
+  `[sound] master-volume=0`, `master-muted=true`, and `[other] autosave-interval=0`
+  in the isolated `config.ini`, and pass `--window-size 1920x1080 --disable-audio --disable-migration-window`.
+- Launch `Factorio.exe` directly via Python `subprocess.run(...)` with
+  `SteamAppId=427520` and `SteamGameId=427520` in the environment so Steam does
+  not restart the process or strip `--mod-directory`, and so the command stays
+  attached until the user closes the window:
+
+```powershell
+python -c "import os, subprocess; subprocess.run(['D:/SteamLibrary/steamapps/common/Factorio/bin/x64/Factorio.exe', '--config', 'tests/out/<playtest>/config.ini', '--mod-directory', 'tests/out/<playtest>/mods', '--load-game', 'tests/out/<playtest>/playtest.zip', '--window-size', '1920x1080', '--disable-audio', '--disable-migration-window'], env=dict(os.environ, SteamAppId='427520', SteamGameId='427520'))"
+```
+
 ```powershell
 python tests/engine_smoke.py "C:/path/to/Factorio/bin/x64/Factorio.exe"
 python tests/save_test.py --exe "C:/path/to/Factorio/bin/x64/Factorio.exe" --save "C:/path/to/your-space-age-save.zip"
@@ -82,6 +104,8 @@ fast-replace upgrade (raised as `script_raised_built`) and a ghost revival
 (`script_raised_revive`) must rejoin the cell, and the editor must report the
 missing machine in between. The offline `cells_membership_test.lua` covers the
 slot index, edit keep/forget, replacement drags, shared slots and deletion.
+Use `python tests/cells_native.py --space-age` to also check the Bioflux
+production loop with real biochambers and capture its Capacity chart.
 
 The Cells tab shows measured throughput by default: the sampler attributes each
 member's crafts to its cells from the moment a cell is created, and the chart
@@ -107,23 +131,61 @@ counts are cached for one tick only, so every client builds identical cards.
 `hover_labels_test.lua` checks the card layout and both kinds of details, and
 `cells_native.lua` builds them from real entities.
 
-The display item can be any item or fluid; until the player picks one it
-follows the cell's main product, and a picked one is kept through membership
-changes. The main product is the members' item product furthest along the
-production chain (`depth` in `scripts/graph.lua`: the shortest chain from raw
-materials, so nutrients made from bioflux are no deeper than nutrients made from
-mash). Among equally deep items, one the cell uses itself as an ingredient or
-as fuel ranks lower, then the one drawing on more raw materials ranks higher,
-then the larger rate at full speed. Items mined from resources, plants, trees
-and fish count as raw even when a later recipe also makes them (Space Age's
-asteroid-crushed ores), so the chains built on them keep their depth and era.
-The create and edit forms list the cell's boundary as two rows, Cell inputs and
-Cell outputs, holding only items and fluids the player added: + opens the
-material picker, a click removes an item, and adding an item to one side takes
-it off the other. Nothing is suggested. Saving stores the lists; the All view
+The create and edit forms have one material grid for Cell inputs and one for
+Cell outputs. A new cell preselects recommended net inputs and outputs based
+on full-speed recipes and estimated burner demand. Fuel produced for the
+cell starts excluded as an output. Clicking a slot toggles the selection. The
+**+** in the next free slot opens the material picker for any item or fluid. Picking a
+material on one side transfers it from the other. Edits preserve existing selections and
+saving records the selected slots.
+
+Input slots start with burner fuels and rank other materials from upstream
+ingredients to intermediates, with higher net demand first within a level.
+Output slots run from final products to progressively earlier ingredients.
+Higher full-speed production rates come first within each level. Burner fuels
+go at the end, and recipes making fuel do not add a production level. The
+highest-ranked item is the automatic display item, and the player can choose
+any item or fluid to represent the cell. The surface graph still treats
+items mined from resources, plants, trees and fish as raw when other recipes
+also make them.
+
+The single-cell Flow chart traces the recipes feeding the chosen outputs,
+displays their net surplus in the final column and shows external supply
+for the selected inputs. In-cell production can be supplemented by a chosen
+input when the cell consumes more than it makes. Legacy cells without saved
+boundaries keep the full recipe graph until a boundary is saved.
+
+Capacity includes burner fuel at full speed, adjusted for the machine's
+consumption effects and the burner's efficiency. The burner prototype index
+is built during setup and rebuilt on configuration changes. The estimate uses
+the burning item or a unique compatible fuel among the cell's products and
+selected inputs. Fuel the cell can supply from its own production returns to
+the consuming recipes on a separate line. A shortfall appears as external
+running fuel when that fuel is a selected input. Cold-start fuel is called
+out separately. Measured displays recorded crafts and does not estimate the
+historical fuel burn.
+
+Sankey charts use the same thin arrows for recipe cycles, reversing recipes
+such as unbarreling and recycling, and circulating catalysts. A return appears
+when its endpoints are in view. Arrow tooltips give the return rates, while
+forward ribbons continue to use the regular production tiers and widths.
+The per-player **Show direction arrows along return lines** setting adds
+markers to long horizontal stretches with one direction. The native fixture
+captures the same charts with the setting off and on.
+
+The All view
 charts a chosen output when the cell makes more of it than it uses, and a chosen
 input when it uses more than it makes. Cells saved before boundaries were chosen
-by hand show every net flow, and editing one starts from those flows. The All view orders cells into stages from their
+by hand show every net flow, and editing one starts from those flows. Each named
+cell bar has contiguous input bands on the left and output bands on the right.
+Each band uses the full material colour and centres the icon at the join
+with its shaded ribbon. Bands follow the net rates with a 28 px minimum
+to fit the 22 px icon.
+Ribbon thickness still follows the chart's rate scale. The native refinery
+fixture checks simultaneous selection and net rates for heavy oil, light oil
+and petroleum gas alongside in-cell heavy-oil cracking.
+
+The All view orders cells into stages from their
 boundaries (`Flow.stages`): a cell whose input another cell makes comes one
 stage later, the shared item becomes one node between them, and the tab's list
 follows the same order. Loops are ordered by creation. Like the other tabs, the Cells tab lists
@@ -135,14 +197,14 @@ items or saving does not move it. Its saved list shows one surface: Where I am
 by default, or another surface with cells from its drop-down. The saved-cells
 list's Production Flow button opens the
 Cells tab on that cell and switches the header to the cell's surface when it
-differs. The Cells tab's list header has New; Edit and Delete sit at the right
-of the Flow and Map sub-tab headings. Cells
+differs. The Cells tab's list header has New; a shared Edit sits at the right of the
+sub-tab strip, and subdivision and Delete remain in the Flow and Map toolbars. Cells
 with missing members carry a warning icon. Flow and Map sub-tabs share the
 area beside the list. Map shows the selected cell, or every listed cell for All,
 fitted to the members' current positions at 80% of the fitting zoom (never past
 0.8x); its subheader
 has a zoom slider, move buttons (an eighth of the view per click), Fit, a
-remote-view jump, Edit and Delete. A player's
+remote-view jump, subdivision and Delete. A player's
 zoom and moves are kept per cell until Fit or a surface change. The Map tab
 outlines each shown cell's machines for the viewing player only
 (`scripts/cell_outlines.lua`): the cell's colour and a name label, red for
@@ -155,7 +217,7 @@ has a fixed width, so a cell with many tiers scrolls horizontally instead of
 running past the window. Guidance lives in the in-game help's Cells topic, not
 in chat: picking a selection tool prints nothing, and chat messages are kept
 for errors such as a wrong surface or an empty selection.
-`cells_ports_test.lua` covers adding, removing and moving boundary items, saving
+`cells_ports_test.lua` covers accepting suggestions, adding, removing and moving boundary items, saving
 and editing them, older cells, display-item ranking (a bioflux cell), mined raw
 depth, the kept window place, the saved list's surface choice, the All view
 filter and the surface scope; `cells_native.lua`
@@ -170,6 +232,38 @@ originals in place, partial moves and splits across surfaces keep the cell where
 it was. The native fixture clones a cell's machines to a new surface;
 `cells_clone_test.lua` covers the wait, copy grace period, partial and split
 moves and a source surface deleted in the same tick.
+
+### Cell train stops
+
+The editor has separate map selection tools for train stops and each stop's
+buffer chests or tanks. A physical stop belongs to one cell and a buffer to one
+stop. Confirming the cell saves the selected entities and roles. The Train
+stops and Train History tabs appear when the selected scope has a linked stop.
+In **All**, clicking an import or export stop opens that exact stop in its cell.
+
+Inside a cell, the Import and Export tables show current buffer quantities
+with inline item or fluid icons and aligned columns for scheduled, approaching,
+and stopped train counts. The details column gives equal height to buffer
+contents, trains stopped at or headed to the physical stop, and **Train with
+this station**, the engine's station-name matches. Each section scrolls separately.
+Selecting a train in either list moves the preview camera to that train's middle
+carriage. Net cargo measurements appear in Train History.
+
+The collector records arrivals at linked stops and confirms the end of an
+automatic visit only after departure movement or arrival at a different
+physical stop. Losing the station reference can still leave a visit pending.
+Manual changes and train splits or merges invalidate incomplete measurements.
+Visits observed from arrival contribute net item quantities by quality and net
+fluid quantities. The collector retains up to 2,048 visits per stop. Train
+History **Time** preserves elapsed gaps, and **Events** uses consecutive slots
+for completed cargo exchanges. A timeline selection filters the expandable
+station visit log.
+
+Run `python tests/modded_gui.py --cells-rail --save PATH --mods PATH --width 1920 --height 1080 --scale 1 --warm-seconds 180`
+with a user-authorized Space Exploration save and matching private mod profile.
+The fixture links existing entities through the native editor, takes both
+History captures and real train camera screenshots, and saves the resulting
+private playtest map. The original save and live profile hashes are checked.
 
 For the sampler cost, run `python tests/cells_benchmark.py --save PATH` on an
 authorized save. It snapshots the source, benchmarks a private copy without

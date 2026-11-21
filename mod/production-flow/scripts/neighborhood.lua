@@ -181,12 +181,7 @@ function N.layout(L, us, W, viewH, V)
       n.stub_out_y = n.y + off
     end
   end
-  V.route(L, us); V.assign_colors(L, us)
-  if #L.cols > 3 then
-    for _, l in ipairs(L.links) do
-      l.route, l.curve_x0, l.cx0, l.cx1, l.ortho = "late", l.a.x + V.HEADER_W, l.a.x + V.HEADER_W, l.b.x, nil
-    end
-  end
+  V.route(L, us, #L.cols > 3); V.assign_colors(L, us)
   us.auto_rank = {}
   for _, n in pairs(L.nodes) do us.auto_rank[n.key] = n.top end
   L.order, L.lane_order, L.sub_order, L.lane_list = {}, {}, {}, {}

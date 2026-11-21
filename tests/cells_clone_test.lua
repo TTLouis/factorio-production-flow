@@ -33,6 +33,8 @@ cell(1, m[1], m[2]) -- moves
 cell(2, m[3])       -- copied: original kept
 cell(3, m[4], m[5]) -- partial: only one member cloned
 cell(4, m[6], m[7]) -- split across two surfaces
+cell(6, m[1]); records[6].parent_id = 1
+cell(7, m[4]); records[7].parent_id = 3
 storage.production_cells = { next_id = 6, records = records, drafts = {}, deletions = {} }
 Cells.reindex()
 local cells = storage.production_cells
@@ -54,6 +56,10 @@ assert(moved.surface_index == ship.index and moved.members[made[1].unit_number] 
   and moved.members[made[2].unit_number] == made[2] and not moved.members[m[1].unit_number],
   "A cell whose live members all moved to one surface must follow them")
 assert(moved.positions[made[1].unit_number] and Cells.missing(moved) == 0, "Moved members need positions")
+assert(cells.records[6].surface_index == ship.index and cells.records[6].members[made[1].unit_number],
+  "A child must follow the qualifying root move")
+assert(cells.records[7].surface_index == 1 and Cells.missing(cells.records[7]) == 1,
+  "A child must not move independently when its parent moved only partially")
 assert(storage.cell_units[made[1].unit_number][1] == 1 and not storage.cell_units[m[1].unit_number],
   "The sampler index must follow the moved members")
 assert(cells.records[2].surface_index == 1 and cells.clones[2], "A copy keeps waiting while the original exists")

@@ -1,6 +1,7 @@
 local Loc = require("scripts.locale")
 local Cells = require("scripts.cells")
 local CellsUI = require("scripts.cells_ui")
+local RailUI = require("scripts.cell_rail_ui")
 local CellOutlines = require("scripts.cell_outlines")
 -- Top-left toolbar button + main window.
 -- Tabs: Balance · Focus · Cells · Full Sankey · Transfers.
@@ -152,7 +153,7 @@ local BALANCE_TAB_HEADER_HEIGHT = 48 -- Vanilla tab strip and its top content pa
 local TAB_PAD_Y = 12
 local function tab_pane_height(us) return us.canvas_h + 100 end
 
-function fill.balance(player, c, us, only_auto, keep_balance_rows)
+function fill.balance(player, c, us, only_auto, keep_balance_rows, refresh_graph)
   local pane_height = tab_pane_height(us)
   local inspector_height = pane_height - BALANCE_TAB_HEADER_HEIGHT
   local split = c.ssk_balance_split
@@ -187,7 +188,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
     end
     modes.selected_tab_index = us.bal_mode == "history" and 2 or 1
   end
-  local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto or keep_balance_rows)
+  local first = BalanceUI.fill(player, split.ssk_balance_table, us, scope_caption(player, us), only_auto or keep_balance_rows or refresh_graph)
   local fx = SK.balance_state(us)
   if not fx.focus then fx.focus = first end
   fx.sel = fx.focus
@@ -198,7 +199,7 @@ function fill.balance(player, c, us, only_auto, keep_balance_rows)
   local flow = modes.ssk_balance_flow_panel
   fx.canvas_w, fx.canvas_h = us.bal_chart_w, inspector_height - SK.toolbar_height(fx)
   if not only_auto or fx.live ~= false then
-    SK.fill(player, flow, fx, fx.canvas_w, fx.canvas_h, false, only_auto)
+    SK.fill(player, flow, fx, fx.canvas_w, fx.canvas_h, false, only_auto, nil, refresh_graph)
   end
   SK.update_balance_actions(flow, us, fx.focus, player.index)
 end
@@ -253,14 +254,15 @@ local function update_header(player,us)
   local bar=frame and frame.ssk_window_bar
   if not bar then return end
   local scoped = us.tab_id ~= "transfers" or us.transport_history~=nil or (SERockets.available() and not Transfers.available())
-  local periodic = us.tab_id ~= "cells" or CellsUI.mode(us.cells or {}) == "measured"
-  bar.ssk_period_label.visible = periodic
-  bar.ssk_period_picker.visible = periodic
+  local rail_view = us.tab_id == "cells" and CellsUI.rail_view(us.cells)
+  local periodic = us.tab_id ~= "cells" or rail_view or CellsUI.mode(us.cells or {}) == "measured"
+  bar.ssk_period_label.visible = true
+  bar.ssk_period_picker.visible = true
   bar.ssk_surface_label.visible = scoped
   bar.ssk_surface_picker.visible = scoped
   local label=bar.ssk_history
   if not scoped then label.visible = false; return end
-  if us.tab_id=="transfers" or not periodic then label.visible=false;return end
+  if us.tab_id=="transfers" or rail_view or not periodic then label.visible=false;return end
   local seconds=Sampler.coverage(us.sidx,us.period)
   local target=us.period
   label.visible=seconds<target
@@ -279,7 +281,7 @@ local function close_inspectors(player)
 end
 
 -- full = rebuild the Sankey tab from scratch (otherwise its scroll position is kept)
-function UI.refresh(player, only_auto, full, keep_balance_rows)
+function UI.refresh(player, only_auto, full, keep_balance_rows, refresh_graph)
   local us = ustate(player.index)
   local id = us.tab_id
   if id ~= "cells" then CellOutlines.clear(player.index, "map") end
@@ -291,7 +293,7 @@ function UI.refresh(player, only_auto, full, keep_balance_rows)
   update_header(player,us)
   if id == "cells" then
     us.cells = us.cells or {}
-    if only_auto and CellsUI.mode(us.cells) ~= "measured" then return end
+    if only_auto and not CellsUI.rail_view(us.cells) and CellsUI.mode(us.cells) ~= "measured" then return end
     us.cells.chart = us.cells.chart or {}
     us.cells.period, us.cells.sidx = us.period, us.sidx
     CellsUI.fill(player, c, us.cells, us.canvas_w, tab_pane_height(us), full, only_auto)
@@ -302,16 +304,16 @@ function UI.refresh(player, only_auto, full, keep_balance_rows)
     fx.sidx = us.sidx
     SK.defaults(fx)
     if only_auto and not fx.live then return end
-    SK.fill(player, chart_panel(c), fx, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(fx)), full, only_auto)
+    SK.fill(player, chart_panel(c), fx, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(fx)), full, only_auto, nil, refresh_graph)
     return
   end
   if id == "sankey" then
     SK.defaults(us)
     if only_auto and not us.live then return end
-    SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(us)), full, only_auto)
+    SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(us)), full, only_auto, nil, refresh_graph)
     return
   end
-  fill[id](player, c, us, only_auto, keep_balance_rows)
+  fill[id](player, c, us, only_auto, keep_balance_rows, refresh_graph)
 end
 
 -- Chart settings float over the chart; Esc, tab changes and reopening close them.
@@ -459,9 +461,9 @@ local function chart_state(us)
   return us.tab_id == "focus" and SK.focus_state(us) or us
 end
 
-local function refresh_material(player, state, previous, full)
+local function refresh_material(player, state, previous, full, refresh_graph)
   if state.view == "focus" and state.focus ~= previous then close_inspectors(player) end
-  UI.refresh(player, false, full, true)
+  UI.refresh(player, false, full, true, refresh_graph)
 end
 
 function UI.toggle(player)
@@ -499,8 +501,9 @@ end
 
 -- Closes the window and opens remote view where the Map tab is looking.
 local function jump_to_map(player, state)
-  local view = CellsUI.current_view(state)
-  if not view or player.force ~= game.forces.player then return end
+  if player.force ~= game.forces.player then return end
+  local view = CellsUI.jump_target(player, state)
+  if not view then return end
   -- The map's outlines stay visible in remote view until the player leaves it.
   CellOutlines.hold(player.index)
   UI.close(player)
@@ -548,6 +551,10 @@ function UI.on_click(e)
   if Cells.on_click(player, el) then return true end
   if MachineStatus.on_click(player, el, UI.close) then return true end
   local us = ustate(e.player_index)
+  if us.tab_id == "cells" and CellsUI.rail_view(us.cells) and RailUI.on_click(el.tags, us.cells) then
+    UI.refresh(player)
+    return true
+  end
   if el.tags and el.tags.ssk_ui=="transport_history" then
     if TransportHistoryUI.open(player,us,el.tags) then UI.open(player) end
     return true
@@ -568,6 +575,12 @@ function UI.on_click(e)
     UI.refresh(player)
     return true
   end
+  if us.tab_id == "cells" and (el.tags.ssk_sk == "zoom_in" or el.tags.ssk_sk == "zoom_out"
+      or el.tags.ssk_sk == "zoom_fit") then
+    SK.on_click(e, us.cells.chart)
+    UI.refresh(player)
+    return true
+  end
   if us.tab_id == "cells" and el.tags.ssk_sk == "node" then
     local chart = us.cells.chart
     chart.sel = chart.sel ~= el.tags.key and el.tags.key or nil
@@ -578,7 +591,12 @@ function UI.on_click(e)
   local previous = chart.focus
   local r = SK.on_click(e, chart)
   if r then
-    if r ~= "none" then refresh_material(player, chart, previous, false) end
+    if r ~= "none" then
+      local action = el.tags.ssk_sk
+      local graph_only = action == "zoom_in" or action == "zoom_out" or action == "zoom_fit"
+        or action == "center_selection" or action == "reflow"
+      refresh_material(player, chart, previous, false, graph_only)
+    end
     return true
   end
   local a = el.tags and el.tags.ssk_ui
@@ -588,11 +606,42 @@ function UI.on_click(e)
   elseif a == "cell_new" and us.tab_id == "cells" then
     UI.close(player)
     Cells.on_click(player, { tags = { ssk_cell = "select" } })
-  elseif a == "cell_edit" and us.tab_id == "cells" and us.cells.selected then
+  elseif a == "cell_select" and us.tab_id == "cells" then
+    local state = us.cells
+    local id = el.tags.cell_id ~= 0 and el.tags.cell_id or nil
+    if el.tags.ancestor then
+      while #state.path > el.tags.depth do table.remove(state.path) end
+      state.scope = state.path[#state.path]
+    end
+    state.selected, state.chart = id, {}
+    state.rail = { axis = state.rail and state.rail.axis }
+    UI.refresh(player)
+  elseif a == "cell_drill" and us.tab_id == "cells" then
+    local state = us.cells
+    state.path = state.path or {}
+    state.path[#state.path + 1] = el.tags.cell_id
+    state.scope, state.selected, state.chart = el.tags.cell_id, nil, {}
+    state.rail = { axis = state.rail and state.rail.axis }
+    UI.refresh(player)
+  elseif a == "cell_subdivide" and us.tab_id == "cells" and us.cells.selected then
+    local id = us.cells.selected
     UI.close(player)
-    Cells.on_click(player, { tags = { ssk_cell = "edit", cell_id = us.cells.selected } })
+    Cells.start_child(player, id)
+  elseif a == "cell_edit" and us.tab_id == "cells" and (el.tags.cell_id or us.cells.selected) then
+    local id = el.tags.cell_id or us.cells.selected
+    UI.close(player)
+    Cells.on_click(player, { tags = { ssk_cell = "edit", cell_id = id } })
   elseif a == "cell_jump" and us.tab_id == "cells" then
     jump_to_map(player, us.cells)
+  elseif a == "rail_train_jump" and us.tab_id == "cells" then
+    local train = el.tags.train_id and game.train_manager and game.train_manager.get_train_by_id(el.tags.train_id)
+    local carriages = train and train.valid and train.carriages
+    local anchor = carriages and carriages[math.ceil(#carriages / 2)]
+    if anchor and anchor.valid and anchor.surface then
+      UI.close(player)
+      player.set_controller { type = defines.controllers.remote, position = anchor.position, surface = anchor.surface }
+      player.centered_on = anchor
+    end
   elseif a == "cell_map_pan" and us.tab_id == "cells" then
     CellsUI.pan(us.cells, el.tags.dx, el.tags.dy)
     UI.refresh(player)
@@ -604,17 +653,22 @@ function UI.on_click(e)
   elseif a == "help" then close_inspectors(player); Help.open(player)
   elseif a == "help_close" then Help.close(player);player.opened=player.gui.screen[WIN]
   elseif a == "watch" or a == "machine_status" then
-    local focus_inspection = us.tab_id == "focus" and a == "machine_status"
-    if (us.tab_id ~= "balance" and not focus_inspection) or not chart.focus then return true end
+    local material = chart.focus
+    if a == "machine_status" and us.tab_id == "sankey" then
+      material = el.tags.key
+    elseif us.tab_id ~= "balance" and not (us.tab_id == "focus" and a == "machine_status") then
+      return true
+    end
+    if not material then return true end
     local surface = sidx_for(player, us)
     MaterialPicker.close(player)
     Help.close(player)
     if a == "watch" then
       MachineStatus.close(player)
-      if not Watch.close(player) then Watch.open(player, us, surface, chart.focus) end
+      if not Watch.close(player) then Watch.open(player, us, surface, material) end
     else
       Watch.close(player)
-      MachineStatus.open(player, surface, chart.focus)
+      MachineStatus.open(player, surface, material)
     end
   elseif a == "watch_close" then Watch.close(player)
   elseif a == "watch_apply" or a == "watch_remove" then
@@ -628,7 +682,7 @@ function UI.on_click(e)
     UI.refresh(player)
   elseif a == "refresh" then
     if us.tab_id=="transfers" and us.se_logistics then us.se_logistics.rescan_endpoints=true end
-    UI.refresh(player)
+    UI.refresh(player, false, false, false, true)
   elseif a == "bal_more" then
     us.bal_limit = (us.bal_limit or 200) + 200
     UI.refresh(player)
@@ -641,6 +695,17 @@ function UI.on_click(e)
       if chart.focus and not Watch.available(player.index, us, chart.focus) then Watch.close(player) end
     end
     UI.refresh(player)
+  elseif a == "sankey_material_tab" and us.tab_id == "sankey" then
+    local key, target = el.tags.key, el.tags.target
+    if type(key) ~= "string" then return true end
+    local kind, name = key:match("^(%a+)/(.+)$")
+    if (kind ~= "item" and kind ~= "fluid") or not prototypes[kind][name] then return true end
+    if target ~= "focus" and target ~= "balance" then return true end
+    local fx = target == "balance" and SK.balance_state(us) or SK.focus_state(us)
+    if SK.select_focus(fx, key) then fx.pinned = nil end
+    if target == "balance" then us.bal_mode = "flow" end
+    us.tab_id = target
+    UI.open(player)
   elseif a == "focus_item" or a == "bal_material" then
     local fx = us.tab_id == "balance" and SK.balance_state(us) or SK.focus_state(us)
     local previous = fx.focus
@@ -658,6 +723,10 @@ function UI.on_selection(e)
   if tags and tags.ssk_cell_list_surface then
     Cells.on_list_surface(game.get_player(e.player_index), e.element)
     return
+  end
+  if tags and tags.ssk_rail_role then
+    Cells.on_rail_role(game.get_player(e.player_index), e.element)
+    return true
   end
   local handled, key, target = MaterialPicker.selection(e)
   if handled then
@@ -701,14 +770,30 @@ function UI.on_selection(e)
     return true
   end
   if tags and tags.ssk_ui == "cell_list" and us.tab_id == "cells" then
-    us.cells.selected = us.cells.ids[e.element.selected_index - 1]
+    local state = us.cells
+    local entry = state.nav_rows and state.nav_rows[e.element.selected_index]
+    if not entry then return true end
+    if entry.ancestor then
+      while #state.path > entry.depth do table.remove(state.path) end
+      state.scope = state.path[#state.path]
+    end
+    state.selected = entry.id
     us.cells.chart = {}
+    us.cells.rail = { axis = us.cells.rail and us.cells.rail.axis }
+    UI.refresh(game.get_player(e.player_index))
+    return true
+  end
+  if tags and tags.ssk_rail_select and us.tab_id == "cells" and CellsUI.rail_view(us.cells)
+    and RailUI.on_selection(e.element, us.cells) then
     UI.refresh(game.get_player(e.player_index))
     return true
   end
   if tags and tags.ssk_ui == "period" then
     local period = Sampler.PERIODS[e.element.selected_index] or Sampler.DEFAULT_PERIOD
-    if us.period ~= period then Watch.reset_pending(us) end
+    if us.period ~= period then
+      Watch.reset_pending(us)
+      if us.cells and us.cells.rail then RailUI.reset_history(us.cells.rail) end
+    end
     us.period = period
     UI.refresh(game.get_player(e.player_index), false, true)
     return true
@@ -743,7 +828,7 @@ function UI.on_selection(e)
 end
 
 function UI.on_hover(e, entering)
-  return HistoryUI.on_hover(e, entering) or SK.on_hover(e, entering)
+  return RailUI.on_hover(e.element, entering) or HistoryUI.on_hover(e, entering) or SK.on_hover(e, entering)
 end
 
 function UI.on_checked(e)
@@ -781,6 +866,10 @@ end
 function UI.on_switch(e)
   local us=ustate(e.player_index)
   local el=e.element
+  if us.tab_id == "cells" and el and el.valid and CellsUI.rail_view(us.cells) and RailUI.on_switch(el, us.cells) then
+    UI.refresh(game.get_player(e.player_index))
+    return true
+  end
   if us.tab_id=="cells" and el and el.valid and el.tags and el.tags.ssk_ui=="cell_mode" then
     us.cells=us.cells or {}
     us.cells.mode=el.switch_state=="right" and "capacity" or "measured"
@@ -841,7 +930,8 @@ function UI.on_tab_changed(e)
     return true
   end
   if f.name == "ssk_cell_views" and us.tab_id == "cells" then
-    us.cells.view = f.selected_tab_index == 2 and "map" or nil
+    local index = f.selected_tab_index
+    us.cells.view = index == 2 and "map" or index == 3 and "train_stops" or index == 4 and "train_history" or nil
     UI.refresh(player)
     return true
   end
@@ -926,6 +1016,15 @@ function UI.on_value_changed(e)
     local view = state and CellsUI.zoom(state, el.slider_value)
     if view then
       el.parent.parent.ssk_cell_camera.zoom = view.zoom
+    end
+    return true
+  elseif el.tags.ssk_ui == "rail_preview_zoom" then
+    local state = ustate(e.player_index).cells
+    if state and state.rail then
+      local zoom = math.max(0.05, math.min(2, el.slider_value))
+      state.rail.preview_zoom = zoom
+      local camera = el.parent.parent.ssk_rail_camera
+      if camera and camera.valid then camera.zoom = zoom end
     end
     return true
   end

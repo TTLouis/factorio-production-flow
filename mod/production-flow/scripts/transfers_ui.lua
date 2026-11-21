@@ -273,7 +273,7 @@ local function build(content, width, height)
   caption.style.maximal_width = math.min(320, math.max(32, header_w - (compact and 156 or 240) - 36))
   caption.style.single_line = true
   heading.add { type = "sprite-button", name = "ssk_transfer_jump", style = "tool_button",
-    sprite = "utility/go_to_arrow", tooltip = Loc("transfers-jump-to-this-platform-in-remote-view") }
+    sprite = "utility/map", tooltip = Loc("transfers-jump-to-this-platform-in-remote-view") }
   return panel
 end
 

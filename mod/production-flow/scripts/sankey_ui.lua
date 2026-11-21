@@ -18,6 +18,7 @@ local GuiPlot = require("scripts.gui_plot")
 
 local SK = {}
 local ZOOM_STEP = 1.25
+local SIDEBAR_MIN_W = 690
 
 local function round(v) return math.floor(v + 0.5) end
 
@@ -68,6 +69,12 @@ local function rt(key)
 end
 
 local function base_key(key) return (string.gsub(key, "#.*$", "")) end
+
+local function material_key(n)
+  local key = base_key(n.transport and n.transport.material or n.key)
+  local kind = key:match("^(%a+)/")
+  return (kind == "item" or kind == "fluid") and key or nil
+end
 
 local function transport_caption(transport)
   local kind,name=transport.material:match("^(%a+)/(.+)$")
@@ -141,7 +148,28 @@ local function localised_name(n)
   return proto and proto.localised_name or (name or n.key):gsub("%-", " ")
 end
 
-local function ribbon_tooltip(link)
+local function recipe_name(key)
+  return localised_name({key=key})
+end
+
+local function observed_recipe_icons(player, us)
+  local observations = Sampler.machine_status(us.sidx or player.surface.index, player.force_index) or {}
+  local icons = {}
+  return function(key)
+    if not key then return end
+    if icons[key] == nil then
+      local row = observations[key:sub(8)]
+      local machines = {}
+      for name in pairs(row and row.entities or {}) do machines[#machines + 1] = name end
+      table.sort(machines)
+      for i, name in ipairs(machines) do machines[i] = rt("entity/" .. name) end
+      icons[key] = #machines > 0 and Loc.join_list(machines, " ") or false
+    end
+    return icons[key] or nil
+  end
+end
+
+local function ribbon_tooltip(link, recipe_icons)
   if link.transport then return transport_tooltip(link.transport,true) end
   local function name(node)
     return { "", rt(sprite_for(node)), " ", localised_name(node) }
@@ -149,20 +177,22 @@ local function ribbon_tooltip(link)
   local material = link.a.kind == "recipe" and link.b or link.a
   local parts = { name(link.a), " → ", name(link.b),
     Loc("sankey-total-flow", string.format("%.5g", link.rate), units(material)) }
-  if #link.details > 0 then parts[#parts + 1] = Loc("sankey-flow-by-recipe") end
-  table.sort(link.details, function(a, b)
+  local details = link.details or {}
+  if #details > 0 then parts[#parts + 1] = Loc("sankey-flow-by-recipe") end
+  table.sort(details, function(a, b)
     if a.rate ~= b.rate then return a.rate > b.rate end
     if a.from ~= b.from then return a.from < b.from end
     if a.to ~= b.to then return a.to < b.to end
     return a.recipe < b.recipe
   end)
-  for _, detail in ipairs(link.details) do
+  for _, detail in ipairs(details) do
     local from = { key = detail.from, kind = detail.from:match("^(%a+)/") }
     local to = { key = detail.to, kind = detail.to:match("^(%a+)/") }
-    local row = { "", "\n", name(from), " → ", name(to),
+    local icons = recipe_icons and recipe_icons(detail.recipe)
+    local row = { "", icons and Loc.join("\n", icons, " ") or "\n", name(from), " → ", name(to),
       Loc.join("  ", Loc("history-formatted", string.format("%.5g", detail.rate), units(from.kind == "recipe" and to or from))) }
     if detail.recipe ~= detail.from and detail.recipe ~= detail.to then
-      row[#row + 1] = Loc.join(" ", Loc("flow-via-recipe", localised_name({ key = detail.recipe })))
+      row[#row + 1] = Loc.join(" ", Loc("flow-via-recipe", recipe_name(detail.recipe)))
     end
     parts[#parts + 1] = row
   end
@@ -170,11 +200,48 @@ local function ribbon_tooltip(link)
   return Tooltip.lines(parts)
 end
 
+local function recipe_lines(node, rows, limit, recipe_icons)
+  local lines = {}
+  limit = limit or #rows
+  for i = 1, math.min(#rows, limit) do
+    local row = rows[i]
+    local icons = recipe_icons and recipe_icons(row.recipe)
+    local caption = recipe_name(row.recipe)
+    if icons then caption = Loc.join(icons, " ", caption) end
+    lines[#lines + 1] = Loc("sankey-recipe-rate", caption, fmt(row.rate), units(node))
+  end
+  if #rows > limit then
+    local rate = 0
+    for i = limit + 1, #rows do rate = rate + rows[i].rate end
+    lines[#lines + 1] = Loc("sankey-more-recipe-rates", #rows - limit, fmt(rate), units(node))
+  end
+  return lines
+end
+
+local function recipe_summary(node, limit, recipe_icons)
+  local r, lines = node.recipe_rows, {}
+  if not r then return lines end
+  local function add(title, rows)
+    if #rows == 0 then return end
+    lines[#lines + 1] = title
+    for _, line in ipairs(recipe_lines(node, rows, limit, recipe_icons)) do lines[#lines + 1] = line end
+  end
+  add(Loc("sankey-made-by"), r.made)
+  add(Loc("sankey-used-by"), r.used)
+  if #r.masked_made + #r.masked_used > 0 then
+    lines[#lines + 1] = Loc("sankey-masked-recipes")
+    add(Loc("sankey-made-by"), r.masked_made)
+    add(Loc("sankey-used-by"), r.masked_used)
+  end
+  return lines
+end
+
 local function label_toggle(row, us)
-  row.add { type = "checkbox", caption = Loc("sankey-show-labels"), state = us.show_labels == true,
-    tags = { ssk_sk = "show_labels" },
+  return row.add { type = "checkbox", name = "ssk_show_labels", caption = Loc("sankey-show-labels"),
+    state = us.show_labels == true, tags = { ssk_sk = "show_labels" },
     tooltip = Loc("sankey-keep-all-names-and-rates-visible-otherwise") }
 end
+SK.label_toggle = label_toggle
 
 local function live_toggle(row, us)
   return row.add { type = "checkbox", caption = Loc("sankey-auto-update-chart"), state = us.live, tags = { ssk_sk = "live" },
@@ -187,35 +254,37 @@ end
 -- Keep wrappers tight around their children: empty space in a tall flow catches
 -- clicks meant for earlier rows. Cancel height and Y in separate equal lengths,
 -- so fractional GUI scaling cannot accumulate rounding drift between overlays.
-local function place_raw(e, x, y, w, h)
+local function place_raw(e, x, y, w, h, reset)
   local s = e.style
   s.width, s.height = w, h
   s.left_margin, s.right_margin = x, 0
   s.top_margin, s.bottom_margin = y, -(y + h)
   if e.type == "flow" then
     s.bottom_margin = -h
-    local reset = e.parent.add { type = "empty-widget", ignored_by_interaction = true,
+    reset = reset or e.parent.add { type = "empty-widget", ignored_by_interaction = true,
       tags = { ssk_position_reset = true } }
     reset.style.width, reset.style.height = 0, 0
     reset.style.left_margin, reset.style.bottom_margin = 0, 0
     reset.style.top_margin = -y
+    return reset
   end
 end
 
--- round the EDGES, not the size: pieces that meet (flat → curve, stacked ribbons) then
--- share the exact same pixel boundary, with no 1 px overlap or gap between them
-local function place(e, x, y, w, h)
+-- Round the edges together in layout coordinates. The ribbon sprite path
+-- also accounts for Factorio truncating each scaled widget size separately.
+local function place(e, x, y, w, h, reset)
   local x2, y2 = round(x + w), round(y + h)
   x, y = round(x), round(y)
   w, h = math.max(1, x2 - x), math.max(1, y2 - y)
   local p = e.parent
   if p and p.tags and p.tags.ssk_wrap then
-    place_raw(p, x, y, w, h)
+    reset = place_raw(p, x, y, w, h, reset)
     e.style.width, e.style.height = w, h
     e.style.top_margin = 0
   else
-    place_raw(e, x, y, w, h)
+    reset = place_raw(e, x, y, w, h, reset)
   end
+  return reset
 end
 
 local function add_sprite(parent, sprite, tooltip)
@@ -233,7 +302,7 @@ end
 local ACTION_SPRITES = {
   f_back = "left_arrow", f_forward = "right_arrow", center_selection = "center",
   reflow = "refresh", chart_settings = "ssk-gear", reset_layout = "reset",
-  unpin = "pin_arrow", inputs_more = "add", inputs_less = "collapse", overview_reset = "collapse",
+  unpin = "pin_arrow", inputs_more = "add", overview_reset = "collapse",
   up = "indication_arrow", down = "down_arrow", hide = "filter_blacklist", expand = "expand", collapse = "collapse",
   new_group = "add", ungroup = "reset", deselect = "close", unhide_all = "grid_view",
 }
@@ -247,7 +316,7 @@ local function button(parent, caption, action, tooltip, extra)
   end
   -- Vanilla has no zoom or fit utility sprite. Its square tool button keeps
   -- the game graphics, hover state, dimensions and click sound for these captions.
-  assert(action == "zoom_in" or action == "zoom_out" or action == "zoom_fit", Loc("sankey-missing-toolbar-sprite", action))
+  assert(action == "zoom_in" or action == "zoom_out" or action == "zoom_fit" or action == "inputs_less", Loc("sankey-missing-toolbar-sprite", action))
   local b = parent.add { type = "button", style = "tool_button", caption = caption, tooltip = tooltip or caption, tags = tags }
   if action ~= "zoom_fit" then b.style.width = 28 end
   return b
@@ -315,11 +384,24 @@ local function lines_picker(row, us)
     Loc("sankey-right-angles-steep-ribbons-run-vertically-and"))
 end
 
-local function zoom_buttons(row, compact)
+local function zoom_buttons(row, compact, zoom)
   button(row, "−", "zoom_out", Loc("sankey-zoom-out"))
-  button(row, Loc("sankey-fit"), "zoom_fit", Loc("sankey-fit-the-chart-to-the-window-while"))
-  button(row, "+", "zoom_in", Loc("sankey-zoom-in"))
+  if zoom then
+    local value = row.add{type="label", name="ssk_zoom", caption=Loc("sankey-chart-zoom", round(zoom * 100))}
+    value.style.width = 46
+    value.style.horizontal_align = "center"
+    button(row, "+", "zoom_in", Loc("sankey-zoom-in"))
+    button(row, Loc("sankey-fit"), "zoom_fit", Loc("sankey-fit-entire-chart"))
+  else
+    button(row, Loc("sankey-fit"), "zoom_fit", Loc("sankey-fit-the-chart-to-the-window-while"))
+    button(row, "+", "zoom_in", Loc("sankey-zoom-in"))
+  end
   if not compact then button(row, Loc("sankey-center"), "center_selection", Loc("sankey-center-the-selected-item-or-the-whole")) end
+end
+
+SK.zoom_buttons = zoom_buttons
+function SK.zoom_caption(us)
+  return Loc("sankey-chart-zoom", round((us.render_zoom or 1) * 100))
 end
 
 local function reflow_button(row)
@@ -327,9 +409,13 @@ local function reflow_button(row)
 end
 
 local function settings_button(row, us)
-  button(row, Loc("sankey-chart-settings"), "chart_settings",
-    Loc("sankey-chart-settings-widths-colors-lines-layout-and")).toggled = us.settings_open == true
+  local b = button(row, Loc("sankey-chart-settings"), "chart_settings",
+    Loc("sankey-chart-settings-widths-colors-lines-layout-and"))
+  b.name = "ssk_chart_settings"
+  b.toggled = us.settings_open == true
+  return b
 end
+SK.settings_button = settings_button
 
 -- Chart settings float over the chart's top-right corner, so opening them never
 -- moves or resizes the chart. Every row is a 28 px control, so the frame height
@@ -337,7 +423,8 @@ end
 local function settings_panel(c, us, L, player, W, viewH)
   if c.ssk_settings then c.ssk_settings.destroy() end
   if not us.settings_open then return end
-  local full = us.view ~= "focus"
+  local cell_chart = us.is_cell_chart == true
+  local full = us.view ~= "focus" and not cell_chart
   local panel = c.add { type = "frame", name = "ssk_settings", style = "frame", direction = "vertical" }
   -- The inner frame draws 8 px outside its bounds. Leave another 8 px visible
   -- below that graphic, matching the outer frame's side inset.
@@ -381,11 +468,13 @@ local function settings_panel(c, us, L, player, W, viewH)
     Loc("sankey-right-angles-steep-ribbons-run-vertically-and"))
   if us.neighborhood then
     local cell = line(Loc("sankey-inputs"))
-    local fewer = button(cell, Loc("sankey-fewer-inputs"), "inputs_less", Loc("sankey-hide-the-furthest-upstream-step"))
+    local fewer = button(cell, "−", "inputs_less", Loc("sankey-hide-the-furthest-upstream-step"))
     fewer.enabled = (us.input_depth or 1) > 1
     local more = button(cell, Loc("sankey-expand-inputs"), "inputs_more", Loc("sankey-reveal-another-upstream-production-step-up-to"))
     more.enabled = (us.input_depth or 1) < View.MAX_INPUT_DEPTH
     small(cell, Loc("input-step-count", us.input_depth or 1))
+  elseif cell_chart then
+    -- Cells Flow shares Widths, Colors, Lines, Auto-update and layout actions.
   elseif not full then
     picker(Loc("sankey-steps"), { "1", "2", "3" }, us.focus_steps or 2, "f_steps", Loc("sankey-item-steps-to-include-upstream-and-downstream"))
   else
@@ -487,7 +576,7 @@ local function toolbar_strip(bar, us)
   bar.clear()
   local strip = bar.add { type = "frame", name = "ssk_toolbar_strip", style = "subheader_frame",
     direction = "vertical", tags = { ssk_primary_controls = true } }
-  strip.style.height = SK.toolbar_height(us)
+  strip.style.height = SK.toolbar_height(us, us.toolbar_width)
   strip.style.horizontally_stretchable = true
   strip.style.left_padding, strip.style.right_padding = STRIP_PAD_X, STRIP_PAD_X
   strip.style.top_padding, strip.style.bottom_padding = STRIP_PAD_Y, STRIP_PAD_Y
@@ -496,6 +585,11 @@ local function toolbar_strip(bar, us)
   local first = option_row(rows, "ssk_toolbar_main")
   first.style.height = FIRST_ROW_H
   return rows, first
+end
+
+local function machine_action(parent, key)
+  return parent.add { type = "sprite-button", name = "ssk_machine_action", style = "tool_button", sprite = "utility/map",
+    tags = { ssk_ui = "machine_status", key = key }, tooltip = Loc("sankey-inspect-machines-that-make-or-use-this") }
 end
 
 local function focus_toolbar(bar, us, player)
@@ -513,10 +607,8 @@ local function focus_toolbar(bar, us, player)
     actions.add { type = "sprite-button", name = "ssk_watch_action", style = "tool_button", sprite = "utility/warning",
       tags = { ssk_ui = "watch" }, tooltip = Loc("sankey-configure-this-material-s-watch") }
   end
-  local machines = actions.add { type = "sprite-button", name = "ssk_machine_action", style = "tool_button", sprite = "utility/map",
-    tags = { ssk_ui = "machine_status" }, tooltip = Loc("sankey-inspect-machines-that-make-or-use-this") }
-  machines.enabled = us.focus ~= nil
-  zoom_buttons(actions, true)
+  machine_action(actions).enabled = us.focus ~= nil
+  zoom_buttons(actions, true, us.zoom or 1)
   label_toggle(actions, us)
   settings_button(actions, us)
 end
@@ -534,7 +626,60 @@ function SK.update_balance_actions(panel, us, key, player_index)
   machines.enabled = key ~= nil
 end
 
-local function build_toolbar(bar, us, L, player)
+local function selection_links(row, n)
+  local key = material_key(n)
+  if not key then return end
+  row.add{type="sprite-button", style="tool_button", sprite="utility/right_arrow",
+    tooltip=Loc("sankey-open-material-in-focus"), tags={ssk_ui="sankey_material_tab", target="focus", key=key}}
+  small(row, Loc("ui-focus"))
+  row.add{type="sprite-button", style="tool_button", sprite="utility/list_view",
+    tooltip=Loc("sankey-open-material-in-balance"), tags={ssk_ui="sankey_material_tab", target="balance", key=key}}
+  small(row, Loc("ui-balance"))
+end
+
+local function selection_controls(parent, n, us, player, width)
+  local row = option_row(parent)
+  if us.layout == "lanes" then
+    button(row, "▲", "up", Loc("sankey-move-up-shift-to-top-at-the"))
+    button(row, "▼", "down", Loc("sankey-move-down-shift-to-bottom-at-the"))
+  end
+  button(row, Loc("sankey-hide"), "hide", Loc("sankey-hide-this-node-its-flow-becomes-stubs"))
+  if n.kind == "group" then
+    button(row, Loc("sankey-expand-group"), "expand", Loc("sankey-show-this-group-s-members-and-their"), { gid = n.group })
+  elseif not n.base then
+    button(row, Loc("sankey-collapse-group"), "collapse", Loc("sankey-merge-all-visible-members-of-this-group"), { gid = n.group })
+  end
+  if width then button(row, Loc("sankey-deselect"), "deselect") end
+
+  if n.base then
+    local tip = Loc("sankey-raw-input-split-per-lane-untick-split")
+    if width then
+      local label = parent.add{type="label", caption=tip, style="grey_label"}
+      label.style.width, label.style.single_line = width, false
+    else hint(row, tip, 400) end
+  elseif n.kind ~= "group" then
+    if width then row = option_row(parent) end
+    small(row, Loc("sankey-move-to"))
+    if width then row = option_row(parent) end
+    local gitems, gsel = {}, 1
+    us.group_ids = {}
+    for i, g in ipairs(Gr.list(player.index)) do
+      gitems[i] = Loc.join(g.super_name, " › ", g.name)
+      us.group_ids[i] = g.id
+      if g.id == n.group then gsel = i end
+    end
+    local picker = row.add{type="drop-down", items=gitems, selected_index=gsel, tags={ssk_sk="move_group"}}
+    picker.style.width = width or 180
+    if width then row = option_row(parent) end
+    local tf = row.add{type="textfield", name="ssk_newgroup", tooltip=Loc("sankey-new-group-name")}
+    tf.style.width = width and width - 64 or 140
+    button(row, Loc("sankey-new-group"), "new_group", Loc("sankey-create-a-group-with-this-name-and"))
+    button(row, Loc("sankey-default-group"), "ungroup", Loc("sankey-remove-your-override-for-this-item"))
+  end
+  if not width then button(row, Loc("sankey-deselect"), "deselect") end
+end
+
+local function build_toolbar(bar, us, L, player, width, with_sidebar)
   if us.view == "focus" then return focus_toolbar(bar, us, player) end
   local r1
   bar, r1 = toolbar_strip(bar, us)
@@ -558,53 +703,26 @@ local function build_toolbar(bar, us, L, player)
 
   local actions = right_group(r1, us)
   if us.view == "overview" then button(actions, Loc("sankey-collapse-overview"), "overview_reset", Loc("sankey-unfinished-grouping-return-expanded-groups-to-the")) end
-  zoom_buttons(actions)
+  local sel_material = us.sel and L.nodes[us.sel] and material_key(L.nodes[us.sel])
+  machine_action(actions, sel_material).enabled = sel_material ~= nil
+  zoom_buttons(actions, false, us.render_zoom or 1)
   label_toggle(actions, us)
   settings_button(actions, us)
-  local r2 = option_row(bar)
   local n = us.sel and L.nodes[us.sel]
-  local clean = us.layout ~= "lanes"
-  if clean and not n then
-    hint(r2, Loc("sankey-hover-to-trace-a-chain-click-to"), (us.canvas_w or 1000) - 24)
-  elseif not n then
-    hint(r2, Loc("sankey-click-a-node-to-select-it-reorders"), (us.canvas_w or 1000) - 24)
-  else
-    local selected = small(r2, Loc("sankey-selected-group", rt(sprite_for(n)), display_name(n), n.ginfo.super_name, n.ginfo.name))
-    selected.style.width = (us.canvas_w or 1000) - 24
-    selected.style.single_line = true
-    r2 = option_row(bar)
-    if not clean then
-      button(r2, "▲", "up", Loc("sankey-move-up-shift-to-top-at-the"))
-      button(r2, "▼", "down", Loc("sankey-move-down-shift-to-bottom-at-the"))
-    end
-    button(r2, Loc("sankey-hide"), "hide", Loc("sankey-hide-this-node-its-flow-becomes-stubs"))
-    if n.kind == "group" then
-      button(r2, Loc("sankey-expand-group"), "expand", Loc("sankey-show-this-group-s-members-and-their"), { gid = n.group })
-    elseif n.base then
-      hint(r2, Loc("sankey-raw-input-split-per-lane-untick-split"), 400)
-    else
-      button(r2, Loc("sankey-collapse-group"), "collapse", Loc("sankey-merge-all-visible-members-of-this-group"), { gid = n.group })
-      small(r2, Loc("sankey-move-to"))
-      local glist = Gr.list(player.index)
-      local gitems, gsel = {}, 1
-      us.group_ids = {}
-      for i, g in ipairs(glist) do
-        gitems[i] = Loc.join(g.super_name, " › ", g.name)
-        us.group_ids[i] = g.id
-        if g.id == n.group then gsel = i end
-      end
-      local group_picker = r2.add { type = "drop-down", items = gitems, selected_index = gsel, tags = { ssk_sk = "move_group" } }
-      group_picker.style.width = 180
-      local tf = r2.add { type = "textfield", name = "ssk_newgroup", tooltip = Loc("sankey-new-group-name") }
-      tf.style.width = 140
-      button(r2, Loc("sankey-new-group"), "new_group", Loc("sankey-create-a-group-with-this-name-and"))
-      button(r2, Loc("sankey-default-group"), "ungroup", Loc("sankey-remove-your-override-for-this-item"))
-    end
-    button(r2, Loc("sankey-deselect"), "deselect")
-  end
   local nh = 0
   for _ in pairs(us.hidden) do nh = nh + 1 end
+  if nh == 0 and (not n or with_sidebar) then return end
+  local r2 = option_row(bar)
   if nh > 0 then button(r2, Loc("sankey-show-hidden", nh), "unhide_all") end
+  if n and not with_sidebar then
+    local material = material_key(n)
+    local selected = small(r2, Loc("sankey-selected-group", rt(sprite_for(n)), display_name(n), n.ginfo.super_name, n.ginfo.name))
+    selected.style.width = width - 24 - (material and 200 or 0) - (nh > 0 and 34 or 0)
+    selected.style.single_line = true
+    selection_links(r2, n)
+    if material then machine_action(r2, material) end
+    selection_controls(bar, n, us, player)
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -668,11 +786,11 @@ local function highlight(st, key)
     if node.dimmed ~= dim then
       node.dimmed = dim
       for _, sprite in ipairs(node.sprites) do
-        if sprite.element.valid then sprite.element.sprite = dim and (sprite.dimmed or S.bar(palette.DIM)) or sprite.original end
+        if sprite.element.valid then sprite.element.sprite = dim and (sprite.dim or S.bar(palette.DIM)) or sprite.original end
       end
       for _, shape in ipairs(node.shapes) do
         if shape.object.valid then
-          shape.object.color = dim and Canvas.col(palette.DIM, shape.alpha * 0.16)
+          shape.object.color = dim and Canvas.col(palette.DIM, shape.alpha * palette.dim.alpha)
             or Canvas.col(shape.color, shape.alpha)
         end
       end
@@ -684,7 +802,104 @@ local function highlight(st, key)
   end
 end
 
-local function draw(canvas, L, us, st, player, W, H)
+local RETURN_MARKER_SIZE = 12
+local RETURN_MARKER_SPACING = RETURN_MARKER_SIZE * 5
+local RETURN_ARROW_SIZE = 14
+
+local function draw_return_markers(canvas, y, stops, zoom)
+  local positions, sources_right, targets_right = {}, 0, 0
+  for x, stop in pairs(stops) do
+    positions[#positions + 1] = x
+    if stop.source then sources_right = sources_right + 1 end
+    if stop.target then targets_right = targets_right + 1 end
+  end
+  table.sort(positions)
+  local sources_left, targets_left = 0, 0
+  for i = 1, #positions - 1 do
+    local x = positions[i]
+    local stop = stops[x]
+    if stop.source then sources_left, sources_right = sources_left + 1, sources_right - 1 end
+    if stop.target then targets_left, targets_right = targets_left + 1, targets_right - 1 end
+    local left = sources_right > 0 and targets_left > 0
+    local right = sources_left > 0 and targets_right > 0
+    local length = positions[i + 1] - x
+    -- Shared segments with traffic in both directions keep a plain line.
+    if left ~= right and length >= 2 * RETURN_MARKER_SPACING then
+      local count = math.floor(length / RETURN_MARKER_SPACING)
+      local first = x + (length - (count - 1) * RETURN_MARKER_SPACING) / 2
+      local sprite = left and "utility/backward_arrow" or "utility/forward_arrow"
+      for j = 1, count do
+        local marker = add_sprite(canvas, sprite)
+        marker.ignored_by_interaction = true
+        marker.tags = { ssk_return_direction = left and "left" or "right" }
+        local center = first + (j - 1) * RETURN_MARKER_SPACING
+        place(marker, (center - RETURN_MARKER_SIZE / 2) * zoom, (y + 1 - RETURN_MARKER_SIZE / 2) * zoom,
+          RETURN_MARKER_SIZE * zoom, RETURN_MARKER_SIZE * zoom)
+      end
+    end
+  end
+end
+
+local function draw_returns(canvas, L, late, width, show_markers, zoom)
+  for i, route in ipairs(L.returns or {}) do
+    local y = L.return_y + (i - 1) * 28
+    local origin = route.sources[1]
+    local sprite = S.return_line(origin.color or origin.ginfo.color)
+    local function line(x, top, w, h)
+      local element = add_sprite(canvas, sprite)
+      element.ignored_by_interaction = true
+      place(element, x * zoom, top * zoom, w * zoom, h * zoom)
+    end
+    local offset = 10 + 4 * ((i - 1) % 5)
+    local first, last = math.huge, 0
+    local stops = show_markers and {}
+    local function stop_at(x, kind)
+      if not stops then return end
+      x = round(x)
+      stops[x] = stops[x] or {}
+      stops[x][kind] = true
+    end
+    for _, n in ipairs(route.sources) do
+      local source_x, source_y = n.x + View.NODE_W, n.y + n.h / 2
+      local from = source_x + offset
+      line(source_x, source_y, offset, 2)
+      line(from, source_y, 2, y - source_y + 2)
+      stop_at(from, "source")
+      first, last = math.min(first, from), math.max(last, from)
+    end
+    local destination = route.targets[1].node
+    local recipe = route.recipe and localised_name({ key = route.recipe, kind = "recipe" })
+    local caption = route.fuel and Loc("cells-fuel-return", localised_name(origin), fmt(route.rate))
+      or recipe and Loc("sankey-return-recipe", recipe)
+      or route.catalyst and Loc("sankey-return-catalyst", localised_name(origin))
+      or Loc("sankey-return-flow", localised_name(origin), localised_name(destination))
+    for _, user in ipairs(route.targets) do
+      local consumer = user.node
+      local x, target_y = consumer.x - offset, user.target_y or (consumer.y + consumer.h / 2)
+      line(x, target_y, 2, y - target_y + 2)
+      line(x, target_y, offset, 2)
+      local material = (route.recipe or origin.kind == "recipe") and consumer or origin
+      local tooltip = route.fuel and Loc("cells-fuel-return", localised_name(origin), fmt(user.rate))
+        or Loc.join(caption, "\n", Loc("sankey-return-rate", localised_name(material), fmt(user.rate), units(material)))
+      local arrow = add_sprite(canvas, "utility/forward_arrow", tooltip)
+      -- The vanilla sprite's point ends before its transparent right edge.
+      -- Align the visible point with the bar, which is drawn over the padding.
+      place(arrow, (consumer.x - 9) * zoom, (target_y + 1 - RETURN_ARROW_SIZE / 2) * zoom,
+        RETURN_ARROW_SIZE * zoom, RETURN_ARROW_SIZE * zoom)
+      stop_at(x, "target")
+      first, last = math.min(first, x), math.max(last, x)
+    end
+    line(first, y, last - first + 2, 2)
+    if stops then draw_return_markers(canvas, y, stops, zoom) end
+    late[#late + 1] = { first + 2, y + 5, math.min(360, width / zoom - first - 4), 18,
+      { type = "label", caption = caption, tooltip = route.fuel and Loc("cells-fuel-cold-start") or caption,
+        tags = route.fuel and { ssk_cell_fuel = origin.key }
+          or { ssk_loop_return = route.recipe or origin.key } },
+      font = "default-small" }
+  end
+end
+
+local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons)
   st.ribbons = {}
   st.node_visuals = {}
   st.dim_nodes = not us.neighborhood
@@ -695,6 +910,22 @@ local function draw(canvas, L, us, st, player, W, H)
   local count = 0
   local cx = L.col_x
   local late = {} -- deferred labels / buttons
+  local detailed = zoom >= 0.8
+  st.display_zoom = zoom
+  local function put(e, x, y, w, h)
+    place(e, x * zoom, y * zoom, w * zoom, h * zoom)
+  end
+  local scale = player and player.display_scale or 1
+  local function connected_bar(e, x, y, w, h)
+    local sx, sy, sw, sh = Geometry.box(x * zoom, y * zoom, w * zoom, h * zoom)
+    place(e, sx, sy, Geometry.sprite_span(sx, sw, scale), sh)
+  end
+  local function rect(x, y, w, h, color)
+    return POLY.rect(x * zoom, y * zoom, w * zoom, h * zoom, color)
+  end
+  local function backdrop(color, x, y, w, h, kind_, tip)
+    return bg(canvas, color, x * zoom, y * zoom, w * zoom, h * zoom, kind_, tip)
+  end
   POLY = nil
   if player then Canvas.clear(player.index) end
   if us.renderer == "poly" and player and not GuiPlot.needed(player) then
@@ -702,14 +933,18 @@ local function draw(canvas, L, us, st, player, W, H)
     local cam = canvas.add(Canvas.camera_spec(player, POLY))
     place(cam, 0, 0, W, H)
     cam.ignored_by_interaction = true
+  else
+    local background = add_sprite(canvas, "ssk-plot-background")
+    background.parent.ignored_by_interaction = true
+    place(background, 0, 0, W, H)
   end
 
   -- 1. lanes and sub-lanes (behind everything)
   for _, ln in ipairs(L.lane_list) do
     local x0 = cx[ln.c0] - View.LANE_LEFT
     local x1 = cx[ln.c1] + View.NODE_W + View.LANE_RIGHT
-    bg(canvas, ln.color, x0, ln.y0, x1 - x0, ln.h, "bg", ln.name)
-    bg(canvas, ln.color, x0, ln.y0, 4, ln.h, "line", ln.name)
+    backdrop(ln.color, x0, ln.y0, x1 - x0, ln.h, "bg", ln.name)
+    backdrop(ln.color, x0, ln.y0, 4, ln.h, "line", ln.name)
     late[#late + 1] = { x0 + 10, ln.y0 + 2, 220, 20, { type = "label", caption = ln.name, ignored_by_interaction = true },
                         font = "default-bold", color = { 0.85, 0.85, 0.85 } }
     count = count + 2
@@ -717,8 +952,8 @@ local function draw(canvas, L, us, st, player, W, H)
       for _, sb in ipairs(ln.sub_list) do
         local sx0 = cx[sb.c0] - View.LANE_LEFT + 10
         local sx1 = cx[sb.c1] + View.NODE_W + View.LANE_RIGHT - 10
-        bg(canvas, ln.color, sx0, sb.y0, sx1 - sx0, sb.h, "bg", Loc.join(ln.name, " › ", sb.name))
-        bg(canvas, ln.color, sx0, sb.y0, sx1 - sx0, 1, "line")
+        backdrop(ln.color, sx0, sb.y0, sx1 - sx0, sb.h, "bg", Loc.join(ln.name, " › ", sb.name))
+        backdrop(ln.color, sx0, sb.y0, sx1 - sx0, 1, "line")
         late[#late + 1] = { sx0 + 4, sb.y0 + 1, 200, 14, { type = "label", caption = sb.name, ignored_by_interaction = true },
                             font = "default-small", color = { 0.75, 0.75, 0.75 } }
         count = count + 2
@@ -729,11 +964,26 @@ local function draw(canvas, L, us, st, player, W, H)
   -- 2. Shared route primitives; backend selection cannot change the route.
   st.paths = {}
   local meshes, mesh_order, tooltips, hover = {}, {}, {}, {}
+  local function ribbon_color(link)
+    local src, dst = link.a, link.b
+    local endpoint
+    if src.is_cell or dst.is_cell then
+      endpoint = src.is_cell and dst or src
+    else
+      endpoint = us.color_mode ~= "source" and dst or src
+    end
+    return endpoint.color or endpoint.ginfo.color
+  end
   local function ribbon(l, xa, xb, color)
-    local pieces = Geometry.route(l, xa, xb, l.y1, l.y2)
-    st.paths[#st.paths + 1] = { from = l.from, to = l.to, pieces = pieces }
+    local route = Geometry.route(l, xa, xb, l.y1, l.y2)
     local link = l.link or l
-    if not tooltips[link] then tooltips[link] = ribbon_tooltip(link) end
+    st.paths[#st.paths + 1] = { from=l.from, to=l.to, pieces=route, color=color, weight=link.w }
+    local pieces = route
+    if zoom ~= 1 then
+      pieces = {}
+      for _, piece in ipairs(route) do pieces[#pieces + 1] = Geometry.scaled_piece(piece, zoom) end
+    end
+    if not tooltips[link] then tooltips[link] = ribbon_tooltip(link, recipe_icons) end
     hover[#hover + 1] = { pieces = pieces, tip = tooltips[link], from = l.from, to = l.to,
       tags=link.transport and transport_tags(link.transport) }
     if POLY then
@@ -750,26 +1000,21 @@ local function draw(canvas, L, us, st, player, W, H)
         color = color, from = l.from, to = l.to }
       r.elem = add_sprite(canvas, ribbon_sprite(r, color))
       r.elem.ignored_by_interaction = true
-      place(r.elem, p.x, p.y, p.w, p.h)
+      place(r.elem, p.x, p.y, Geometry.sprite_size(p, scale))
       if r.ro or r.elem then st.ribbons[#st.ribbons + 1] = r end
     end
   end
   for _, sg in ipairs(L.segments or {}) do
-    local x1 = sg.a.kind == "via" and sg.a.x or sg.a.x + View.NODE_W
+    local x1 = sg.a.kind == "via" and sg.a.x or sg.a.x + (sg.a.width or View.NODE_W)
     if sg.b.x > x1 then
-      local src, dst = sg.link.a, sg.link.b
-      local endpoint = us.color_mode ~= "source" and dst or src
-      local color = endpoint.color or endpoint.ginfo.color
-      ribbon(sg, x1, sg.b.x, color)
+      ribbon(sg, x1, sg.b.x, ribbon_color(sg.link))
       count = count + 1
     end
   end
   for _, l in ipairs(L.segments and {} or L.links) do
     local x1, x2 = l.a.x + View.NODE_W, l.b.x
     if x2 > x1 then
-      local endpoint = us.color_mode ~= "source" and l.b or l.a
-      local color = endpoint.color or endpoint.ginfo.color
-      ribbon(l, x1, x2, color)
+      ribbon(l, x1, x2, ribbon_color(l))
       count = count + 1
     end
   end
@@ -785,28 +1030,33 @@ local function draw(canvas, L, us, st, player, W, H)
         hit.style.width, hit.style.height = w, h
       end)
   end
+  local markers = player and player.mod_settings["ssk-return-direction-markers"]
+  draw_returns(canvas, L, late, W, markers and markers.value, zoom)
   -- 3. stubs + node bars (sprites); buttons and labels deferred
   for _, col in ipairs(L.cols) do
     for _, n in ipairs(col) do
       local visual = { sprites = {}, shapes = {}, labels = {}, dimmed = false }
       st.node_visuals[n.key] = visual
       local function stub(x, y, h, tip)
+        local width = View.STUB / #palette.stub_alpha
         local right = x > n.x
-        if POLY then
-          -- fades out away from the node: three steps of decreasing alpha
-          local w3 = View.STUB / 3
-          for i = 0, 2 do
-            local a = 0.25 - 0.08 * i
-            local xx = right and (x + i * w3) or (x + View.STUB - (i + 1) * w3)
-            local object = POLY.rect(xx, y, w3, h, Canvas.col(palette.GREY, a))
-            if object then visual.shapes[#visual.shapes + 1] = { object=object, color=palette.GREY, alpha=a } end
+        for step, alpha in ipairs(palette.stub_alpha) do
+          local offset = right and (step - 1) * width or View.STUB - step * width
+          if POLY then
+            local object = rect(x + offset, y, width, h, Canvas.col(palette.GREY, alpha))
+            if object then visual.shapes[#visual.shapes + 1] = { object=object, color=palette.GREY, alpha=alpha } end
+          else
+            local sx, sy, sw, sh = Geometry.box((x + offset) * zoom, y * zoom, width * zoom, h * zoom)
+            if sw > 0 and sh > 0 then
+              local name = S.stub(step)
+              local e = add_sprite(canvas, name)
+              e.parent.ignored_by_interaction = true
+              place(e, sx, sy, Geometry.sprite_span(sx, sw, scale), sh)
+              visual.sprites[#visual.sprites + 1] = { element=e, original=name, dim=S.stub(step, true) }
+            end
           end
         end
-        local e = add_sprite(canvas, POLY and "ssk-node-hit" or S.stub(right, palette.GREY), tip)
-        if not POLY then
-          visual.sprites[#visual.sprites + 1] = { element=e, original=e.sprite, dimmed=S.stub(right, palette.DIM) }
-        end
-        place(e, x, y, View.STUB, h)
+        put(add_sprite(canvas, "ssk-node-hit", tip), x, y, View.STUB, h)
       end
       local lab_use = n.lab_use or 0
       local other_use = n.stub_out - lab_use
@@ -838,16 +1088,20 @@ local function draw(canvas, L, us, st, player, W, H)
       if lab_tip then tip[#tip + 1] = lab_tip end
       if other_use > 1e-4 then tip[#tip + 1] = Loc("sankey-other-uses-s-2", fmt(other_use)) end
       if (n.catalyst or 0) > 0 then tip[#tip + 1] = Loc("sankey-catalyst-consumed-and-returned-netted-out-s", fmt(n.catalyst)) end
+      local loop_badge = false
       for _, lp in ipairs(n.loops) do
-        local what = rt(base_key(lp.what))
-        if lp.back and lp.out then
-          tip[#tip + 1] = Loc("sankey-feeds-back-s-into-loop-not-drawn", fmt(lp.rate), what)
-        elseif lp.back then
-          tip[#tip + 1] = Loc("sankey-gets-s-back-from-loop-not-drawn", fmt(lp.rate), what)
-        elseif lp.late then
-          tip[#tip + 1] = Loc("sankey-s-later-tech-producer-not-drawn", what, fmt(lp.rate))
-        else
-          tip[#tip + 1] = Loc("sankey-s-recycling-reversing-recipe-not-drawn", what, fmt(lp.rate))
+        if not lp.routed then
+          loop_badge = true
+          local what = rt(base_key(lp.what))
+          if lp.back and lp.out then
+            tip[#tip + 1] = Loc("sankey-feeds-back-s-into-loop-not-drawn", fmt(lp.rate), what)
+          elseif lp.back then
+            tip[#tip + 1] = Loc("sankey-gets-s-back-from-loop-not-drawn", fmt(lp.rate), what)
+          elseif lp.late then
+            tip[#tip + 1] = Loc("sankey-s-later-tech-producer-not-drawn", what, fmt(lp.rate))
+          else
+            tip[#tip + 1] = Loc("sankey-s-recycling-reversing-recipe-not-drawn", what, fmt(lp.rate))
+          end
         end
       end
       if n.members then
@@ -871,12 +1125,17 @@ local function draw(canvas, L, us, st, player, W, H)
         if n.kind~="recipe" then tooltip[#tooltip+1]=Loc("sankey-consumer-production", fmt(n.prod), units(n)) end
       end
       if lab_tip then tooltip[#tooltip + 1] = Loc.join("\n", lab_tip) end
+      local breakdown = recipe_summary(n, 3, recipe_icons)
+      if #breakdown > 0 then
+        breakdown = Loc.join("\n\n", Loc.join_list(breakdown, "\n"))
+        tooltip[#tooltip + 1] = breakdown
+        details = Loc.join(details, breakdown)
+      end
       local imports=external_supply(n)
       if imports then
-        -- Append flat (at most 11 parts) so the rate and selected-material
-        -- lines keep their positions for the Uses label.
-        tooltip[#tooltip+1]="\n\n"
-        tooltip[#tooltip+1]=imports
+        -- Preserve the selected-material rate and usage positions in the hover.
+        tooltip[#tooltip + 1] = "\n\n"
+        tooltip[#tooltip + 1] = imports
         details=Tooltip.lines({details,"\n\n",imports})
       end
       -- Recipe bars list their recipe, rates and machines; material bars the
@@ -899,59 +1158,106 @@ local function draw(canvas, L, us, st, player, W, H)
         details=tooltip
         rate=Loc.join(fmt(n.transport.rate)," ",Loc("history-items-s"))
       end
-      local function node_bar(x, width, color, caption, side)
+      local function node_bar(x, y, width, height, color, caption, tags)
         local bar
         if POLY then
-          local object = POLY.rect(x, n.y, width, n.h, Canvas.col(color, 1))
+          local object = rect(x, y, width, height, Canvas.col(color, 1))
           if object then visual.shapes[#visual.shapes + 1] = { object=object, color=color, alpha=1 } end
           bar = add_sprite(canvas, "ssk-node-hit", caption)
         else
           bar = add_sprite(canvas, S.bar(color), caption)
           visual.sprites[#visual.sprites + 1] = { element=bar, original=bar.sprite }
         end
-        place(bar, x, n.y, width, n.h)
+        if POLY then put(bar, x, y, width, height) else connected_bar(bar, x, y, width, height) end
         bar.raise_hover_events = true
-        bar.tags = n.transport and transport_tags(n.transport,n,us)
-          or { ssk_sk = "node", key = n.key, fx = (us.view == "focus"), part = "bar", side = side }
+        bar.tags = tags
         count = count + 1
       end
+      local bar_tags = n.transport and transport_tags(n.transport,n,us)
+        or { ssk_sk = "node", key = n.key, fx = (us.view == "focus"), part = "bar" }
       if n.is_cell then
-        local half = math.floor(View.NODE_W / 2)
-        node_bar(n.x, half, 4, Loc.join(tooltip, "\n", Loc("cells-inputs")), "inputs")
-        node_bar(n.x + half, View.NODE_W - half, 5, Loc.join(tooltip, "\n", Loc("cells-outputs")), "outputs")
+        local half = n.width / 2
+        local function stack(segments, side, x)
+          if #segments == 0 then
+            node_bar(x, n.y, half, n.h, palette.GREY, tooltip, bar_tags)
+          end
+          for _, sg in ipairs(segments) do
+            local link = sg.link
+            local material = side == "inputs" and link.a or link.b
+            local edge = side == "inputs" and sg.y2 or sg.y1
+            local center = edge + sg.t / 2
+            local height = sg.cell_band_h
+            local sprite = sprite_for(material)
+            local band_tip = tooltips[link] or ribbon_tooltip(link, recipe_icons)
+            local tags = { ssk_sk = "node", key = n.key, part = "bar", side = side, cell_material = sprite }
+            node_bar(x, center - height / 2, half, height, ribbon_color(link), band_tip, tags)
+            local size = View.CELL_ICON
+            late[#late + 1] = { x + (half - size) / 2, center - size / 2, size, size,
+              { type = "sprite-button", style = "slot_button", sprite = sprite, tooltip = band_tip, raise_hover_events = true,
+                tags = { ssk_sk = "node", key = n.key, part = "icon", side = side, cell_material = sprite } }, fill = true }
+          end
+        end
+        local in_segs = n.fins
+        if n.return_fins then
+          in_segs = {}
+          for _, sg in ipairs(n.fins) do in_segs[#in_segs + 1] = sg end
+          for _, sg in ipairs(n.return_fins) do in_segs[#in_segs + 1] = sg end
+        end
+        stack(in_segs, "inputs", n.x)
+        stack(n.fouts, "outputs", n.x + half)
+        local label_w = L.label_w[n.ci]
+        late[#late + 1] = { n.x + (n.width - label_w) / 2, n.top, label_w, 18,
+          { type = "label", style = "caption_label", caption = n.cell_name, tooltip = tooltip,
+            tags = { ssk_label = n.key } }, align = "center", node_label = n.key }
       else
-        node_bar(n.x, View.NODE_W, n.color or n.ginfo.color, tooltip)
-      end
+        node_bar(n.x, n.y, View.NODE_W, n.h, n.color or n.ginfo.color, tooltip, bar_tags)
       local iy = n.y - View.NODE_W - View.ICON_GAP
-      local stem = add_sprite(canvas, S.bar(n.color or n.ginfo.color))
-      visual.sprites[#visual.sprites + 1] = { element=stem, original=stem.sprite }
-      place(stem, n.x + View.NODE_W / 2 - 1, iy + View.NODE_W, 2, View.ICON_GAP)
-      stem.ignored_by_interaction = true
-      late[#late + 1] = { n.x, iy, View.NODE_W, View.NODE_W,
-        { type = "sprite-button", sprite = sprite_for(n), tooltip = tooltip, style = "slot_button",
-          raise_hover_events = true, tags = n.transport and transport_tags(n.transport,n,us) or { ssk_sk = "node", key = n.key, fx = (us.view == "focus") } }, toggled = (us.sel == n.key), fill = true, node_icon=n.key }
+      local label_w = math.min(260, (L.label_w and L.label_w[n.ci]) or 260)
+      if not detailed then
+        local selected = n.key == st.selected
+        local height = selected and 18 or 12
+        local width = math.min(W, selected and 116 or math.floor(label_w * zoom))
+        local header = n.y - (n.top or (iy - 18))
+        if selected or (us.show_labels and width >= 28 and header * zoom >= height + 1) then
+          local x = math.min(n.x * zoom, W - width) / zoom
+          local y = math.max(0, n.y * zoom - height - (selected and 0 or 1)) / zoom
+          late[#late + 1] = { x, y, width / zoom, height / zoom,
+            {type="label", caption=localised_name(n), ignored_by_interaction=true, tags={ssk_label=n.key}},
+            font=selected and "default-small-bold" or "default-tiny-bold", keep=true, node_label=n.key }
+        end
+      end
+      if detailed then
+        local stem = add_sprite(canvas, S.bar(n.color or n.ginfo.color))
+        visual.sprites[#visual.sprites + 1] = { element=stem, original=stem.sprite }
+        put(stem, n.x + View.NODE_W / 2 - 1, iy + View.NODE_W, 2, View.ICON_GAP)
+        stem.ignored_by_interaction = true
+        late[#late + 1] = { n.x, iy, View.NODE_W, View.NODE_W,
+          { type = "sprite-button", sprite = sprite_for(n), tooltip = tooltip, style = "slot_button",
+            raise_hover_events = true, tags = n.transport and transport_tags(n.transport,n,us) or { ssk_sk = "node", key = n.key, fx = (us.view == "focus") } }, toggled = (us.sel == n.key), fill = true, node_icon=n.key }
+      end
       local show_label = us.show_labels or n.key == us.sel or n.key == us.pinned
         or n.kind == "group" or n.transport~=nil
         or (us.view == "focus" and base_key(n.key) == us.focus)
-      if L.label_above then
-        late[#late + 1] = { n.x, n.top or (iy - 18), math.min(260, (L.label_w and L.label_w[n.ci]) or 260), 16,
+      if detailed and L.label_above then
+        late[#late + 1] = { n.x, n.top or (iy - 18), label_w, 16,
           { type = "label", caption = localised_name(n), tooltip = details,
             visible = show_label == true, tags = { ssk_label = n.key } },
           font = "default-small-bold", node_label=n.key }
         if usage or (n.kind ~= "recipe" and n.kind ~= "group") then
-          local rate_w = math.max(1, math.min(260, (L.label_w and L.label_w[n.ci]) or 260) - View.NODE_W - 6)
+          local rate_w = math.max(1, label_w - View.NODE_W - 6)
           late[#late + 1] = { n.x + View.NODE_W + 6, iy + 8, rate_w, 16,
             { type = "label", caption = rate,
               visible = show_label == true, ignored_by_interaction = true, tags = { ssk_rate = n.key } },
             font = "default-small", color = { 0.75, 0.75, 0.75 }, node_label=n.key }
         end
-      else
+      elseif detailed then
         late[#late + 1] = { n.x + View.NODE_W + 3, iy + 6, 80, 16,
           { type = "label", caption = rate, tooltip = details, visible = show_label == true,
             tags = { ssk_label = n.key } }, font = "default-small-bold", node_label=n.key }
       end
-      if #n.loops > 0 then
+      if detailed and loop_badge then
         late[#late + 1] = { n.x - 18, iy + 4, 18, 20, { type = "label", caption = "↺", ignored_by_interaction = true }, font = "default-bold", node_label=n.key }
+      end
       end
     end
   end
@@ -972,23 +1278,187 @@ local function draw(canvas, L, us, st, player, W, H)
 
   -- 5. deferred labels / buttons, each in a fixed-size wrapper
   for _, d in ipairs(late) do
-    local e = wrapped(canvas, d[1], d[2], d[3], d[4], d[5])
-    if d.font then e.style.font = d.font end
-    if d.color then e.style.font_color = d.color end
-    if d.fill or d[5].type == "label" then e.style.width, e.style.height = d[3], d[4] end
-    if d[5].type == "label" then e.style.single_line = d.single_line~=false end
-    if d.toggled then e.toggled = true end
-    if d.node_icon then
-      local visual = st.node_visuals[d.node_icon]
-      visual.icon, visual.grayscale = e, e.style.draw_grayscale_picture == true
-    elseif d.node_label then
-      local visual = st.node_visuals[d.node_label]
-      visual.labels[#visual.labels + 1] = { element=e, original=e.style.font_color or {1, 1, 1} }
+    if detailed or d.keep then
+      local x, y, w, h = Geometry.box(d[1] * zoom, d[2] * zoom, d[3] * zoom, d[4] * zoom)
+      w, h = math.max(1, w), math.max(1, h)
+      local e = wrapped(canvas, x, y, w, h, d[5])
+      if d.keep then e.parent.ignored_by_interaction = true end
+      if d.font then e.style.font = not d.keep and zoom < 1 and "default-tiny-bold" or zoom > 1.25 and "default-bold" or d.font end
+      if d.color then e.style.font_color = d.color end
+      if d.align then e.style.horizontal_align = d.align end
+      if d.fill or d[5].type == "label" then e.style.width, e.style.height = w, h end
+      if d[5].type == "label" then e.style.single_line = d.single_line~=false end
+      if d.toggled then e.toggled = true end
+      if d.node_icon then
+        local visual = st.node_visuals[d.node_icon]
+        visual.icon, visual.grayscale = e, e.style.draw_grayscale_picture == true
+      elseif d.node_label then
+        local visual = st.node_visuals[d.node_label]
+        visual.labels[#visual.labels + 1] = { element=e, original=e.style.font_color or {1, 1, 1} }
+      end
+      count = count + 1
     end
-    count = count + 1
   end
   highlight(st, st.selected)
   return count
+end
+
+local function render_overview(side, L, us, paths, width, height, player)
+  local overview = side.ssk_overview
+  if not overview then
+    overview = side.add{type="frame", name="ssk_overview", style="inside_deep_frame", direction="vertical"}
+    overview.style.width = width
+    overview.style.padding = 8
+    overview.add{type="label", style="caption_label", caption=Loc("sankey-chart-overview")}
+    local map = overview.add{type="flow", name="ssk_overview_map", direction="vertical"}
+    map.style.vertical_spacing = 0
+    map.add{type="flow", name="ssk_overview_paths", direction="vertical", ignored_by_interaction=true}.style.vertical_spacing = 0
+    map.add{type="flow", name="ssk_overview_nodes", direction="vertical"}.style.vertical_spacing = 0
+  end
+  local map = overview.ssk_overview_map
+  local ribbons, nodes = map.ssk_overview_paths, map.ssk_overview_nodes
+  local map_w, map_h = width - 16, math.max(42, math.min(146, math.floor(height * 0.32)))
+  map.style.width, map.style.height = map_w, map_h
+  ribbons.style.width, ribbons.style.height, ribbons.style.bottom_margin = map_w, map_h, -map_h
+  nodes.style.width, nodes.style.height = map_w, map_h
+  ribbons.clear()
+  local selected = L.nodes[us.sel]
+  local selected_key = selected and selected.key
+  if nodes.tags.key ~= selected_key then
+    nodes.clear()
+    nodes.tags = {key=selected_key}
+  end
+  local scale = math.min((map_w - 10) / math.max(1, L.content_w), (map_h - 10) / math.max(1, L.content_h))
+  local ox, oy = (map_w - L.content_w * scale) / 2, (map_h - L.content_h * scale) / 2
+
+  local drawn = {}
+  local function piece(shape, color)
+    local p = Geometry.scaled_piece(shape, scale)
+    local x, y = round(ox + p.x), round(oy + p.y)
+    local sprite = ribbon_sprite(p, color)
+    local key = table.concat({sprite, x, y, p.w, p.h}, ":")
+    if drawn[key] then return end
+    drawn[key] = true
+    local e = add_sprite(ribbons, sprite)
+    -- Scaled pieces use chart coordinates. The native span correction needs
+    -- the offset inside the overview to cover the last device pixel.
+    local w = Geometry.sprite_span(x, p.w, player.display_scale)
+    local h = Geometry.sprite_span(y, p.h, player.display_scale)
+    place(e, x, y, w, h)
+  end
+  for _, selected in ipairs{false, true} do
+    for _, path in ipairs(paths) do
+      if (path.from == us.sel or path.to == us.sel) == selected then
+        local color = selected and path.color or palette.muted(path.color)
+        for _, shape in ipairs(path.pieces) do piece(shape, color) end
+      end
+    end
+  end
+  for _, col in ipairs(L.cols) do
+    for _, n in ipairs(col) do
+      if n.t_stub_in > 0 then
+        piece({kind="bar", x=n.x-View.STUB, y=n.stub_in_y, w=View.STUB, h=n.t_stub_in}, palette.GREY)
+      end
+      if n.t_stub_out > 0 then
+        piece({kind="bar", x=n.x+View.NODE_W, y=n.stub_out_y, w=View.STUB, h=n.t_stub_out}, palette.GREY)
+      end
+    end
+  end
+  local previous = {}
+  local children = nodes.children
+  for i = 1, #children, 2 do
+    local widget = children[i].children[1]
+    previous[widget.tags.key] = {widget=widget, reset=children[i + 1]}
+  end
+  local function dot(n, active)
+    local old = previous[n.key]
+    previous[n.key] = nil
+    local sprite = S.bar(n.color or n.ginfo.color)
+    local e = old and old.widget or add_sprite(nodes, sprite, Loc("sankey-overview-jump", display_name(n)))
+    if not old then e.tags = {ssk_sk="overview_jump", key=n.key}
+    elseif e.sprite ~= sprite then e.sprite = sprite end
+    local w = math.max(active and 6 or 3, View.NODE_W * scale)
+    local h = math.max(active and 7 or 4, n.h * scale)
+    local x = ox + (n.x + View.NODE_W / 2) * scale - w / 2
+    local y = oy + (n.y + n.h / 2) * scale - h / 2
+    place(e, x, y, w, h, old and old.reset)
+  end
+  for _, col in ipairs(L.cols) do
+    for _, n in ipairs(col) do if n.key ~= us.sel then dot(n, false) end end
+  end
+  if selected then dot(selected, true) end
+  for _, obsolete in pairs(previous) do
+    obsolete.widget.parent.destroy()
+    obsolete.reset.destroy()
+  end
+end
+
+local function render_selection(side, L, us, width, player, recipe_icons, keep_controls)
+  local summary = side.ssk_selected_material
+  if not summary then
+    summary = side.add{type="frame", name="ssk_selected_material", style="inside_deep_frame", direction="vertical"}
+    summary.style.width = width
+    summary.style.padding = 8
+    summary.style.vertically_stretchable = true
+    summary.add{type="label", style="caption_label", caption=Loc("sankey-selected-material-2")}
+  end
+  local text_width = width - 32
+  local function row(parent, text, style, name)
+    local e = parent.add{type="label", name=name, style=style, caption=text}
+    if not style then e.style.font = "default-small" end
+    e.style.width, e.style.single_line = text_width, false
+    return e
+  end
+  local selected = L.nodes[us.sel]
+  local pane = summary.ssk_selected_scroll
+  local key = selected and selected.key
+  -- Keep the active editor even if its material has no further sampled flow.
+  if not pane or not keep_controls or (key and pane.tags.key ~= key) then
+    if pane then pane.destroy() end
+    pane = summary.add{type="scroll-pane", name="ssk_selected_scroll", style="naked_scroll_pane",
+      horizontal_scroll_policy="never", tags={key=key}}
+    pane.style.vertically_stretchable = true
+    if selected then
+      row(pane, Loc.join(rt(sprite_for(selected)), " ", display_name(selected)), "caption_label")
+      if material_key(selected) then selection_links(option_row(pane), selected) end
+      if not selected.transport and selected.kind ~= "recipe" then
+        row(pane, "", nil, "ssk_selected_totals")
+      end
+      row(pane, Loc.join(selected.ginfo.super_name, " › ", selected.ginfo.name), "grey_label")
+      selection_controls(pane, selected, us, player, text_width)
+      local breakdown
+      if not selected.transport and selected.kind ~= "recipe" then
+        breakdown = option_row(pane, "ssk_selected_breakdown")
+        breakdown.add{type="label", style="caption_label", caption=Loc("sankey-breakdown")}
+      end
+      local material = material_key(selected)
+      if material then machine_action(breakdown or option_row(pane), material) end
+    end
+    pane.add{type="flow", name="ssk_selected_rates", direction="vertical"}
+  end
+  local rates = pane.ssk_selected_rates
+  rates.clear()
+  local totals = pane.ssk_selected_totals
+  if totals then
+    totals.visible = selected ~= nil
+    if selected then
+      totals.caption = Loc("sankey-produced-consumed", fmt(selected.prod), units(selected), fmt(selected.cons), units(selected))
+    end
+  end
+  if selected then
+    if selected.transport then
+      row(rates, transport_tooltip(selected.transport, false))
+    elseif selected.kind == "recipe" then
+      local rate = L.recipe_rates[selected.key:sub(8)]
+      if rate then row(rates, Loc.join(fmt(rate.cps or 0), " ", units(selected))) end
+    else
+      for _, line in ipairs(recipe_summary(selected, nil, recipe_icons)) do row(rates, line) end
+    end
+  elseif pane.tags.key then
+    row(rates, Loc("no-recorded-material-flow", localised_name({key=pane.tags.key})), "grey_label")
+  else
+    row(rates, Loc("sankey-overview-empty"), "grey_label")
+  end
 end
 
 -- st: runtime per-player render state (ribbon element refs for hover)
@@ -999,14 +1469,24 @@ local function rstate(pi, view)
   return storage.sk_render[k]
 end
 
-function SK.toolbar_height(us)
-  -- Balance and Focus: one material row (Focus history shares it). Full: + hint, or + selection and its actions.
-  local rows = (us.neighborhood or us.view == "focus") and 1 or (us.sel and 3 or 2)
+function SK.toolbar_height(us, width)
+  local rows = 1
+  if not us.neighborhood and us.view ~= "focus" then
+    if us.sel and (width or us.canvas_w or SIDEBAR_MIN_W) < SIDEBAR_MIN_W then
+      rows = 3
+    elseif us.hidden and next(us.hidden) then
+      rows = 2
+    end
+  end
   return 2 * STRIP_PAD_Y + FIRST_ROW_H + (rows - 1) * (ROW_H + ROW_GAP)
 end
 
 -- c: tab content (vertical flow). full=false keeps the scroll-pane (and its scroll position).
-function SK.fill(player, c, us, W, viewH, full, only_auto, source)
+function SK.scroll_pane(c)
+  return c.ssk_body and c.ssk_body.ssk_sp or c.ssk_sp
+end
+
+function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph)
   local hovered=storage.sk_hover and storage.sk_hover[player.index]
   if hovered and hovered.valid then
     local ancestor=hovered
@@ -1015,25 +1495,39 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source)
   end
   SK.clear_hover(player.index)
   SK.defaults(us)
-  if full or not c.ssk_sp then
+  local keep_controls = (only_auto or refresh_graph) and not full
+  local full_chart = not source and us.view ~= "focus" and not us.neighborhood
+  local scalable_chart = full_chart or (source and source.chart_zoom)
+  local sidebar_w = full_chart and W >= SIDEBAR_MIN_W and 208 or 0
+  local chart_w = W - (sidebar_w > 0 and sidebar_w + 8 or 0)
+  local with_sidebar = sidebar_w > 0
+  if full or not SK.scroll_pane(c) or (c.ssk_body ~= nil) ~= with_sidebar then
     c.clear()
     c.add { type = "scroll-pane", name = "ssk_bar", style = "naked_scroll_pane", horizontal_scroll_policy = "auto", vertical_scroll_policy = "auto" }
-    local sp = c.add { type = "scroll-pane", name = "ssk_sp", style = "naked_scroll_pane",
+    local body = c
+    if with_sidebar then
+      body = c.add{type="flow", name="ssk_body", direction="horizontal"}
+      body.style.horizontal_spacing = 8
+    end
+    local sp = body.add { type = "scroll-pane", name = "ssk_sp", style = "naked_scroll_pane",
                        horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
-    sp.style.horizontally_stretchable = true
+    sp.style.horizontally_stretchable = not full_chart
     sp.style.height = viewH
     local canvas = sp.add { type = "flow", name = "ssk_canvas", direction = "vertical" }
     canvas.style.vertical_spacing = 0
+    if with_sidebar then body.add{type="flow", name="ssk_sidebar", direction="vertical"} end
   end
   c.ssk_bar.visible = not source
   c.ssk_bar.style.width = W
   us.toolbar_width = W
-  c.ssk_sp.style.height = viewH
-  c.ssk_bar.style.height = SK.toolbar_height(us)
+  local pane = SK.scroll_pane(c)
+  pane.style.height = viewH
+  if full_chart then pane.style.width = chart_w end
+  c.ssk_bar.style.height = SK.toolbar_height(us, W)
   c.ssk_bar.style.padding = 0
-  local canvas = c.ssk_sp.ssk_canvas
+  local canvas = pane.ssk_canvas
   if us.view == "focus" and not us.focus then
-    if not only_auto or #c.ssk_bar.children==0 then
+    if not keep_controls or #c.ssk_bar.children==0 then
       focus_toolbar(c.ssk_bar, us, player)
       settings_panel(c, us, nil, player, W, viewH)
     end
@@ -1044,22 +1538,52 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source)
     place(l, 24, 40, math.max(100, W - 48), 60)
     return
   end
-  local L = View.build(player, us, W, viewH, source)
-  if not source and (not only_auto or #c.ssk_bar.children==0) then
-    build_toolbar(c.ssk_bar, us, L, player)
+  local L = View.build(player, us, chart_w, viewH, source)
+  local zoom = 1
+  if scalable_chart then
+    zoom = us.chart_zoom or 1
+    if us.chart_fit then
+      zoom = math.min(1, math.max(1, chart_w - 26) / math.max(1, L.content_w),
+        math.max(1, viewH - 12) / math.max(1, L.content_h))
+      local step = math.floor(zoom * 10) / 10
+      if step > 0 then zoom = step end
+    end
+    us.render_zoom = zoom
+  end
+  if not source and (not keep_controls or #c.ssk_bar.children==0) then
+    build_toolbar(c.ssk_bar, us, L, player, W, with_sidebar)
     settings_panel(c, us, L, player, W, viewH)
+  elseif source then
+    settings_panel(c, us, L, player, W, viewH)
+  else
+    local strip = c.ssk_bar.ssk_toolbar_strip
+    local actions = strip and strip.ssk_toolbar_rows.ssk_toolbar_main.ssk_toolbar_actions
+    if actions and actions.ssk_zoom then
+      actions.ssk_zoom.caption = Loc("sankey-chart-zoom", round((scalable_chart and zoom or (us.zoom or 1)) * 100))
+    end
+    if full_chart and actions and actions.ssk_machine_action then
+      local sel_material = us.sel and L.nodes[us.sel] and material_key(L.nodes[us.sel])
+      actions.ssk_machine_action.enabled = sel_material ~= nil
+      actions.ssk_machine_action.tags = { ssk_ui = "machine_status", key = sel_material }
+    end
   end
   us.last_order = L.order
   us.last_lanes = L.lane_order
   us.last_subs = L.sub_order
 
   canvas.clear()
-  local CW = math.max(W, math.floor(L.content_w or W))
+  local width = math.ceil(L.content_w * zoom)
+  local height = math.ceil(L.content_h * zoom)
+  local inner_w = scalable_chart and chart_w - 18 or chart_w
+  local CW = math.max(inner_w, width)
+  local CH = math.max(viewH - 4, height)
   canvas.style.width = CW
-  canvas.style.height = math.max(viewH - 4, L.content_h)
-  c.ssk_sp.horizontal_scroll_policy = (CW > W) and "auto" or "never"
+  canvas.style.height = CH
+  pane.horizontal_scroll_policy = (CW > inner_w) and "auto" or "never"
   local nn = 0
   for _ in pairs(L.nodes) do nn = nn + 1 end
+  local recipe_icons = full_chart and nn > 0 and observed_recipe_icons(player, us)
+  local paths = {}
   if nn == 0 then
     Canvas.clear(player.index)
     local caption = (L.seconds < 2)
@@ -1072,24 +1596,31 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source)
     l.style.single_line = false
     place(l, 24, 40, math.max(100, W - 48), 80)
   else
-    draw(canvas, L, us, rstate(player.index, us.view), player, CW, math.max(viewH - 4, L.content_h))
+    local st = rstate(player.index, us.view)
+    draw(canvas, L, us, st, player, CW, CH, zoom, recipe_icons)
+    paths = st.paths
     if us.center_pending or (us.neighborhood and (us.centered_focus ~= us.focus or full)) then
       local n=L.nodes[us.view=="focus" and us.focus or us.sel]
       do
-        local aw, ah=math.min(W-24,CW), math.min(viewH-24,L.content_h)
-        local mx=n and n.x+View.NODE_W/2 or (us.fit_pending and aw/2 or CW/2)
-        local my=n and n.y+n.h/2 or (us.fit_pending and ah/2 or L.content_h/2)
+        local aw, ah=math.min(chart_w-26,CW), math.min(viewH-24,CH)
+        local mx=n and (n.x+View.NODE_W/2)*zoom or (us.fit_pending and aw/2 or width/2)
+        local my=n and (n.y+n.h/2)*zoom or (us.fit_pending and ah/2 or height/2)
         local x=math.max(0,math.min(CW-aw,mx-aw/2))
-        local y=math.max(0,math.min(L.content_h-ah,my-ah/2))
+        local y=math.max(0,math.min(CH-ah,my-ah/2))
         local anchor=canvas.add{type="empty-widget", ignored_by_interaction=true}
         place(anchor,x,y,aw,ah)
-        c.ssk_sp.scroll_to_element(anchor)
+        pane.scroll_to_element(anchor)
       end
       us.center_pending,us.centered_focus=false,us.focus
       us.fit_pending=nil
     end
   end
-
+  if with_sidebar then
+    local side = c.ssk_body.ssk_sidebar
+    side.style.width, side.style.height = sidebar_w, viewH
+    render_overview(side, L, us, paths, sidebar_w, viewH, player)
+    render_selection(side, L, us, sidebar_w, player, recipe_icons, keep_controls)
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -1177,6 +1708,7 @@ function SK.on_click(e, us)
     us.pinned = us.pinned ~= tags.key and tags.key or nil
   elseif a == "unpin" then us.pinned=nil; if us.view~="focus" then us.sel=nil end
   elseif a == "center_selection" then us.center_pending=true
+  elseif a == "overview_jump" then us.sel, us.center_pending = tags.key, true
   elseif a == "node" and us.view == "focus" then
     local k = base_key(tags.key)
     if string.sub(k, 1, 6) == "group/" or string.sub(k, 1, 7) == "recipe/" or k == us.focus then return "none" end
@@ -1192,9 +1724,24 @@ function SK.on_click(e, us)
   elseif a == "inputs_more" then us.input_depth = math.min(View.MAX_INPUT_DEPTH, (us.input_depth or 1) + 1)
   elseif a == "inputs_less" then us.input_depth = math.max(1, (us.input_depth or 1) - 1)
   elseif a == "deselect" then us.sel = nil
-  elseif a == "zoom_in" then us.zoom = math.min(8, us.zoom * ZOOM_STEP)
-  elseif a == "zoom_out" then us.zoom = math.max(0.25, us.zoom / ZOOM_STEP)
-  elseif a == "zoom_fit" then us.zoom = 1; us.layout_snapshot=nil; us.center_pending=true; us.fit_pending=true
+  elseif a == "zoom_in" or a == "zoom_out" then
+    if us.view == "focus" or us.neighborhood then
+      local step = a == "zoom_in" and ZOOM_STEP or 1 / ZOOM_STEP
+      us.zoom = math.max(0.25, math.min(8, us.zoom * step))
+    else
+      local zoom = us.render_zoom or 1
+      local tenth = round(zoom * 100) / 10
+      local next_step = a == "zoom_in" and math.floor(tenth) + 1 or math.ceil(tenth) - 1
+      us.chart_zoom = math.max(math.min(0.02, zoom), math.min(2.5, next_step / 10))
+      us.chart_fit, us.center_pending = false, true
+    end
+  elseif a == "zoom_fit" then
+    if us.view == "focus" or us.neighborhood then
+      us.zoom, us.layout_snapshot = 1, nil
+    else
+      us.chart_fit = true
+    end
+    us.center_pending, us.fit_pending = true, true
   elseif a == "reflow" then us.reflow = (us.reflow or 0) + 1; us.auto_rank = {}
   elseif a == "overview_reset" then us.overview_open = {}; us.sel = nil
   elseif a == "reset_layout" then

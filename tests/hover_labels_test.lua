@@ -45,9 +45,8 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
         "recipe details close the hover card: " .. text)
       tail = tail - 2
     end
-    assert(icon.tooltip[5] == "\n" and (tail == 6
-      or (tail == 7 and LOC(icon.tooltip[7]):find("Labs (estimated)", 1, true))),
-      "compact name and rate on separate lines with a lab estimate for science packs")
+    assert(icon.tooltip[5] == "\n" and type(icon.tooltip[6]) == "table",
+      "compact name and rate stay on separate lines before recipe breakdown")
     if renderer == "poly" then assert(bar.sprite == "ssk-node-hit", "polygon hit area must be transparent") end
   end
   -- Recipe bars show the recipe, its measured rates and the machines running it.

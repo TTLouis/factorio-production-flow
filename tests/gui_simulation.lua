@@ -60,7 +60,8 @@ local function open(s)
   frame.style.width,frame.style.height=W+24,H+90
   frame.style.padding=0;frame.location={40,40}
   SK.fill(p,frame,chart,W,H,true)
-  local canvas=assert(frame.ssk_sp.ssk_canvas)
+  local pane=SK.scroll_pane and SK.scroll_pane(frame) or frame.ssk_sp
+  local canvas=assert(pane.ssk_canvas)
   local columns={}
   for _,wrapper in ipairs(canvas.children) do
     local child=wrapper.children[1]
@@ -83,7 +84,7 @@ local function open(s)
   -- Caption enables native widget lookup without replacing the actual icon or
   -- changing its fixed dimensions, sprite, tags, ancestry or event routing.
   local e=target.element;local width,height=length(e,'width'),length(e,'height')
-  frame.ssk_sp.scroll_to_element(e)
+  pane.scroll_to_element(e)
   s.caption='GUI_SIMULATION_'..s.index;e.caption=s.caption
   assert(width==length(e,'width') and height==length(e,'height'),'Caption changed icon dimensions')
   emit{stage='open',case=c,key=s.key,expected=s.expected,before=s.before,

@@ -10,6 +10,8 @@ local Transfers = require("scripts.transfers")
 local SERockets = require("scripts.se_rockets")
 local SECannons = require("scripts.se_cannons")
 local Cells = require("scripts.cells")
+local CellRail = require("scripts.cell_rail")
+local CellCapacity = require("scripts.cell_capacity")
 
 local STATS_EVERY = 60
 local UI_REFRESH_EVERY = 300
@@ -18,6 +20,7 @@ local function setup(rescan)
   storage.test = storage.test or {}
   storage.ui = storage.ui or {}
   Graph.build()
+  CellCapacity.index()
   Sampler.init()
   if SERockets.available() then SERockets.init(game.tick) end
   if SECannons.available() then SECannons.init(game.tick) end
@@ -75,6 +78,10 @@ script.on_event(defines.events.on_runtime_mod_setting_changed, function(e)
   if e.setting == "ssk-allow-small-window" then
     local player = e.player_index and game.get_player(e.player_index)
     if player then UI.on_display_changed(player) end
+  end
+  if e.setting == "ssk-return-direction-markers" then
+    local player = e.player_index and game.get_player(e.player_index)
+    if player and UI.is_open(player) then UI.refresh(player) end
   end
 end)
 
@@ -134,8 +141,11 @@ end)
 -- these run after SE's own on_tick handlers in the same tick.
 local se_rockets_active = SERockets.available()
 local se_cannons_active = SECannons.available()
+script.on_event(defines.events.on_train_changed_state, CellRail.on_state)
+script.on_event(defines.events.on_train_created, CellRail.on_train_created)
 script.on_event(defines.events.on_tick, function(e)
   Sampler.on_tick(e.tick)
+  CellRail.on_tick(e.tick)
   local cells = storage.production_cells
   if cells and cells.clones then Cells.resolve_clones() end
   if se_rockets_active then SERockets.on_tick(e.tick) end

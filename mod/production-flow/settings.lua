@@ -57,4 +57,11 @@ data:extend({
     default_value = false,
     order = "f",
   },
+  {
+    type = "bool-setting",
+    name = "ssk-return-direction-markers",
+    setting_type = "runtime-per-user",
+    default_value = false,
+    order = "g",
+  },
 })

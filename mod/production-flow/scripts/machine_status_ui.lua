@@ -212,7 +212,7 @@ local function open_preview(player, status, tags)
     value = DEFAULT_ZOOM, value_step = 0.05, tags = { ssk_machine_status = "zoom" } }
   slider.style.width = math.min(180, width - 135)
   toolbar.add { type = "empty-widget" }.style.horizontally_stretchable = true
-  toolbar.add { type = "sprite-button", style = "tool_button", sprite = "utility/go_to_arrow",
+  toolbar.add { type = "sprite-button", style = "tool_button", sprite = "utility/map",
     tooltip = Loc("machine-status-jump-to-this-machine-in-remote-view"), tags = { ssk_machine_status = "jump" } }
   local camera = panel.add { type = "camera", name = CAMERA, surface_index = scope.surface,
     position = entity.position, zoom = DEFAULT_ZOOM }

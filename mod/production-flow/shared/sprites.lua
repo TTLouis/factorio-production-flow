@@ -46,8 +46,12 @@ function S.bar(color)
   return S.name("d", steps.count, color)
 end
 
-function S.stub(right, color)
-  return string.format("ssk-stub-%s-c%02d", right and "right" or "left", color)
+function S.return_line(color)
+  return string.format("ssk-return-line-c%02d", color)
+end
+
+function S.stub(step, dim)
+  return (dim and "ssk-stub-dim-" or "ssk-stub-") .. step
 end
 
 return S

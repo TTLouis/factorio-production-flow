@@ -26,7 +26,7 @@ assert(c.children[#c.children] == c.ssk_settings, "Chart settings must be drawn 
 for _, lines in ipairs({ "curves", "metro" }) do
   local cfg = { view = "detail", layout = "clean", lines = lines, renderer = "poly", period = 600, canvas_w = 1200 }
   SK.fill(player, c, cfg, 1200, 800, true)
-  local L = V.build(player, cfg, 1200, 800)
+  local L = V.build(player, cfg, SK.scroll_pane(c).style.width, 800)
   local st, paths = storage.sk_render[1], {}
   for _, path in ipairs(st.paths) do
     paths[path.from .. ">" .. path.to] = true
@@ -87,6 +87,22 @@ local cycle, cycle_links = N.build(cycle_nodes, {
 }, { residuals = {} }, "item/b", 3)
 local cycle_count = 0; for _ in pairs(cycle) do cycle_count = cycle_count + 1 end
 assert(cycle_count == 5 and cycle_links["item/a#input3>item/b#input2"], "cycle expansion must terminate at requested depth")
+-- A cycle in the tiered layout keeps its smaller edge as a thin return.
+local a, b = "item/iron-plate", "item/iron-gear-wheel"
+local source = { nodes = {}, links = {} }
+for _, key in ipairs({ a, b }) do
+  source.nodes[key] = { key = key, kind = "item", prod = 4, cons = 4, loops = {}, contrib = {} }
+end
+source.links[a .. ">" .. b] = { from = a, to = b, rate = 4, details = {} }
+source.links[b .. ">" .. a] = { from = b, to = a, rate = 1, details = {} }
+local loop_cfg = { view = "detail", split_raw = false }
+SK.defaults(loop_cfg)
+local loop = V.build(player, loop_cfg, 1200, 800, source)
+assert(#loop.links == 1 and loop.links[1].from == a, "Only the forward part belongs in the weighted layout")
+assert(#loop.returns == 1 and loop.returns[1].sources[1].key == b
+  and loop.returns[1].targets[1].node.key == a and loop.returns[1].targets[1].rate == 1,
+  "The thin return must retain the direction and rate")
+assert(loop.return_y >= loop.nodes[b].y + loop.nodes[b].h)
 -- Primitive strips are joined with zero-area triangles, never diagonal fills.
 local mesh = G.mesh({ { kind = "bar", x = 0, y = 0, w = 20, h = 5 }, { kind = "bar", x = 20, y = 0, w = 10, h = 5 } })
 local area = 0

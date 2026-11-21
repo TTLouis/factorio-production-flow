@@ -27,10 +27,23 @@ local function label(key)
     proto and proto.localised_name or name:gsub("%-", " ") }
 end
 
+local function kinds_for(target)
+  return target == "cell" and { "item", "fluid", "recipe" } or { "item", "fluid" }
+end
+
 local function valid_material(key)
   if type(key) ~= "string" then return false end
   local kind, name = key:match("^(%a+)/(.+)$")
-  return (kind == "item" or kind == "fluid") and prototypes[kind][name] ~= nil
+  return (kind == "item" or kind == "fluid") and prototypes[kind] and prototypes[kind][name] ~= nil
+end
+
+local function valid_for(key, target)
+  if type(key) ~= "string" then return false end
+  local kind, name = key:match("^(%a+)/(.+)$")
+  if target == "cell" and kind == "recipe" then
+    return prototypes.recipe and prototypes.recipe[name] ~= nil
+  end
+  return valid_material(key)
 end
 
 -- A mod configuration change can remove a material that was selected or saved
@@ -58,7 +71,7 @@ function P.sanitize_state(s)
 end
 
 function P.update_button(button, key, target)
-  if not valid_material(key) then key = nil end
+  if not valid_for(key, target) then key = nil end
   button.sprite = key or "utility/search"
   button.tags = { ssk_picker = "open", target = target, current = key or "" }
   if target == "cell" then
@@ -147,12 +160,15 @@ end
 -- and sort is the complete group/subgroup/prototype ordering key.
 -- Groups and total cover all selectable prototypes, even while searching;
 -- entries and matched_groups cover only the current text query.
-local function collect_catalog(picker_state, query, allowed)
+local function collect_catalog(picker_state, query, allowed, target, current)
   local entries, groups, matched_groups, total = {}, {}, {}, 0
-  for _, kind in ipairs({ "item", "fluid" }) do
-    for name, proto in pairs(prototypes[kind]) do
+  local seen_names = {}
+  for _, kind in ipairs(kinds_for(target)) do
+    for name, proto in pairs(prototypes[kind] or {}) do
       local key = Loc.join(kind, "/", name)
-      if (not allowed or allowed[key]) and selectable(proto) then
+      local duplicate_recipe = kind == "recipe" and seen_names[name] and key ~= current
+      if not duplicate_recipe and (not allowed or allowed[key]) and selectable(proto) then
+        if kind ~= "recipe" then seen_names[name] = true end
         local group = kind == "fluid" and { name = "fluids", order = "zzzz", localised_name = { "item-group-name.fluids" } }
           or proto.group or (proto.subgroup and proto.subgroup.group)
           or { name = "other", order = "z", localised_name = Loc("material-picker-other") }
@@ -242,7 +258,7 @@ local function populate(player)
   local picker_state = state(player)
   local query = frame.ssk_title.ssk_query.text:lower()
   local chosen_group = query == "" and frame.tags.group or ""
-  local entries, groups, matched_groups, total = collect_catalog(picker_state, query, frame.tags.allowed)
+  local entries, groups, matched_groups, total = collect_catalog(picker_state, query, frame.tags.allowed, frame.tags.target, frame.tags.current)
   local group_list = order_catalog(entries, groups)
   entries, chosen_group = filter_group(frame, query, entries, groups, group_list, chosen_group)
   local grid, keys, material_rows = render_materials(frame, entries)
@@ -291,15 +307,15 @@ function P.open(player, target, current, allowed)
   local kind, name = (current or ""):match("^(%a+)/(.+)$")
   if kind == "fluid" then
     group = "fluids"
-  elseif kind == "item" then
-    local proto = prototypes.item[name]
+  elseif kind == "item" or (kind == "recipe" and target == "cell") then
+    local proto = prototypes[kind] and prototypes[kind][name]
     group = proto and proto.group and proto.group.name or ""
   end
   -- Frame tags retain the selection target, browsing group and current typed key.
   local f = player.gui.screen.add { type = "frame", name = NAME, direction = "vertical", tags = { target = target, group = group, current = current or "", allowed = allowed } }
   local title = f.add { type = "flow", name = "ssk_title", direction = "horizontal" }
   title.style.horizontal_spacing = 8
-  title.add { type = "label", caption = Loc("material-picker-select-item-fluid"), style = "frame_title" }
+  title.add { type = "label", caption = Loc(target == "cell" and "material-picker-select-display" or "material-picker-select-item-fluid"), style = "frame_title" }
   local drag = title.add { type = "empty-widget", style = "draggable_space_header" }
   drag.style.horizontally_stretchable = true
   drag.style.height = 24
@@ -332,13 +348,17 @@ function P.open(player, target, current, allowed)
   if query.focus then query.focus() end
   local s = state(player)
   s.pending = {}
-  local strings, keys = {}, {}
-  for _, kind in ipairs({ "item", "fluid" }) do
-    for name, proto in pairs(prototypes[kind]) do
+  local strings, keys, seen_names = {}, {}, {}
+  for _, kind in ipairs(kinds_for(target)) do
+    for name, proto in pairs(prototypes[kind] or {}) do
       local key = Loc.join(kind, "/", name)
-      if (not allowed or allowed[key]) and selectable(proto) and not s.names[key] then
-        keys[#keys + 1] = key
-        strings[#strings + 1] = proto.localised_name or name:gsub("%-", " ")
+      local duplicate_recipe = kind == "recipe" and seen_names[name] and key ~= current
+      if not duplicate_recipe and (not allowed or allowed[key]) and selectable(proto) then
+        if kind ~= "recipe" then seen_names[name] = true end
+        if not s.names[key] then
+          keys[#keys + 1] = key
+          strings[#strings + 1] = proto.localised_name or name:gsub("%-", " ")
+        end
       end
     end
   end

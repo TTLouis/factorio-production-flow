@@ -10,13 +10,18 @@ for name,color in pairs(require("shared.plot_colors")) do
   protos[#protos+1]={type="sprite",name="ssk-plot-"..name,filename="__core__/graphics/white-square.png",
     width=10,height=10,tint=color,flags={"gui"}}
 end
--- Sprite charts use the same fade direction and peak opacity as the polygon stubs.
-for _, right in ipairs({false, true}) do
-  for _, color in ipairs({palette.GREY, palette.DIM}) do
-    local alpha = palette.grey.alpha * (color == palette.DIM and palette.dim.alpha or 1)
-    protos[#protos + 1] = { type = "sprite", name = S.stub(right, color),
-      filename = "__production-flow__/graphics/stubs.png", x = 0, y = right and 8 or 0,
-      width = 32, height = 8, tint = palette.tint(color, alpha), flags = { "gui" } }
+-- Thin returns need a lighter version of the source hue against the chart.
+for color = 1, palette.count do
+  local rgb = palette.rgb(color)
+  protos[#protos + 1] = { type = "sprite", name = S.return_line(color),
+    filename = "__core__/graphics/white-square.png", width = 10, height = 10, flags = { "gui" },
+    tint = { r = (rgb[1] / 255 + 1) / 2, g = (rgb[2] / 255 + 1) / 2, b = (rgb[3] / 255 + 1) / 2, a = 1 } }
+end
+for step, alpha in ipairs(palette.stub_alpha) do
+  for _, dim in ipairs{false, true} do
+    protos[#protos+1] = {type="sprite", name=S.stub(step, dim), filename="__core__/graphics/white-square.png",
+      width=10, height=10, tint=palette.tint(dim and palette.DIM or palette.GREY, dim and alpha * palette.dim.alpha or alpha),
+      flags={"gui"}}
   end
 end
 -- Invisible GUI hit area over polygon node bars; keeps native tooltips and clicks.
@@ -101,6 +106,12 @@ protos[#protos + 1] = { type = "sprite", name = "ssk-gear", filename = "__core__
 data:extend(protos)
 
 -- Native table grids separate items while retaining the paired Details lines.
+-- Leave room for the independent drill label without changing the list row's background.
+data.raw["gui-style"].default.ssk_layered_cell_list = {
+  type = "list_box_style", parent = "list_box",
+  item_style = { type = "button_style", parent = "list_box_item", right_padding = 32 },
+}
+
 data.raw["gui-style"].default.ssk_balance_grid = {
   type = "table_style", parent = "table",
   horizontal_line_color = {0.16, 0.17, 0.18, 1},
@@ -122,7 +133,8 @@ local cell_selection = require("shared.cell_selection")
 data:extend {{
   type = "selection-tool",
   name = cell_selection.tool,
-  icon = "__base__/graphics/icons/blueprint.png",
+  icon = "__production-flow__/graphics/icon.png",
+  icon_size = 64,
   localised_name = {"production-flow.cells-title"},
   flags = {"only-in-cursor", "not-stackable", "spawnable"},
   hidden = true,
@@ -131,7 +143,7 @@ data:extend {{
     border_color = {0.3, 0.8, 1},
     mode = {"any-entity"},
     cursor_box_type = "copy",
-    entity_type_filters = cell_selection.types,
+    entity_type_filters = cell_selection.initial_types,
   },
   alt_select = {border_color = {0.3, 0.8, 1}, mode = {"nothing"}, cursor_box_type = "copy"},
 }, {
@@ -141,10 +153,10 @@ data:extend {{
   order = "d[wires]-z[production-cell]",
   action = "spawn-item",
   item_to_spawn = cell_selection.tool,
-  icon = "__base__/graphics/icons/shortcut-toolbar/mip/new-blueprint-x56.png",
-  icon_size = 56,
-  small_icon = "__base__/graphics/icons/shortcut-toolbar/mip/new-blueprint-x24.png",
-  small_icon_size = 24,
+  icon = "__production-flow__/graphics/icon.png",
+  icon_size = 64,
+  small_icon = "__production-flow__/graphics/icon.png",
+  small_icon_size = 64,
 }, {
   -- Clicking outside the saved-cells list closes it. Never consumes the click.
   type = "custom-input",
@@ -154,3 +166,18 @@ data:extend {{
   consuming = "none",
   action = "lua",
 }}
+
+for _, selection in ipairs({
+  { cell_selection.stop_tool, cell_selection.stop_types, "rail-pick-stops", "train-stop" },
+  { cell_selection.buffer_tool, cell_selection.buffer_types, "rail-pick-buffers", "steel-chest" },
+}) do
+  local color = {0.95, 0.74, 0.34}
+  data:extend {{
+    type = "selection-tool", name = selection[1],
+    icon = "__base__/graphics/icons/" .. selection[4] .. ".png",
+    localised_name = {"production-flow." .. selection[3]},
+    flags = {"only-in-cursor", "not-stackable", "spawnable"}, hidden = true, stack_size = 1,
+    select = { border_color = color, mode = {"any-entity"}, cursor_box_type = "copy", entity_type_filters = selection[2] },
+    alt_select = { border_color = color, mode = {"nothing"}, cursor_box_type = "copy" },
+  }}
+end

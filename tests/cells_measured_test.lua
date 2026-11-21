@@ -7,7 +7,7 @@ return function(handlers, nth)
   local Sampler = TREQ("scripts.sampler")
 
   local nauvis, FORCE = game.surfaces[1], game.forces.player
-  local saved_cells, saved_units = storage.production_cells, storage.cell_units
+  local saved_cells, saved_units, saved_shared = storage.production_cells, storage.cell_units, storage.cell_shared_units
 
   local mine, next_unit = {}, 990000
   local function machine(x, recipe)
@@ -83,6 +83,11 @@ return function(handlers, nth)
   assert(young.partial and young.mode == "measured", "A cell younger than the period must be marked partial")
   assert(young.nodes["recipe/copper-cable"].rate_line, "Measured recipe nodes need a utilisation line")
   near(young.utilisation, 1, 0.05, "full-speed utilisation")
+  storage.production_cells.records[3] = { id = 3, parent_id = 1, surface_index = 1,
+    members = {}, since = game.tick, name = "New child" }
+  local parent_after_child = Flow.build(1, { mode = "measured", period = 600 })
+  near(parent_after_child.seconds, young.seconds, 0.01, "parent history after creating a child")
+  storage.production_cells.records[3] = nil
 
   -- Phase 2: the cable machine stops; half the cell's crafting time is idle.
   a.running = false
@@ -127,6 +132,24 @@ return function(handlers, nth)
   for _, bin in pairs(storage.bins or {}) do check(bin) end
   for _, ring in ipairs(storage.rings or {}) do for _, bin in pairs(ring.bins) do check(bin) end end
 
+  -- Parent and child inclusion is not sharing, but overlapping siblings are.
+  local phase = game.tick
+  local root = cell(10, "Parent", { a, b })
+  local child = cell(11, "Child", { a })
+  child.parent_id = 10
+  root.since, child.since = phase, phase
+  storage.production_cells = { next_id = 13, records = { [10] = root, [11] = child }, drafts = {} }
+  Cells.reindex()
+  run(65)
+  near(cps(Sampler.cell_rates(10, 1, 60, phase, true), "copper-cable"), 1, 0.05, "parent inclusion is not overlap")
+  near(cps(Sampler.cell_rates(11, 1, 60, phase, true), "copper-cable"), 1, 0.05, "child inclusion is not overlap")
+  local sibling = cell(12, "Sibling", { a }); sibling.parent_id, sibling.since = 10, game.tick
+  storage.production_cells.records[12] = sibling
+  Cells.reindex()
+  run(65)
+  assert(cps(Sampler.cell_rates(11, 1, 60, phase, true), "copper-cable") < 0.05, "Sibling overlap must be excluded")
+  near(cps(Sampler.cell_rates(10, 1, 60, phase, true), "copper-cable"), 1, 0.05, "Sibling overlap must not exclude parent")
+
   -- Restore the shared world for later tests.
   local drop = {}
   for _, e in ipairs(mine) do drop[e.unit_number] = true; storage.machines[e.unit_number] = nil; e.valid = false end
@@ -134,6 +157,6 @@ return function(handlers, nth)
   for _, u in ipairs(storage.mlist) do if not drop[u] then list[#list + 1] = u end end
   storage.mlist = list
   if storage.mcursor > #list then storage.mcursor = 1 end
-  storage.production_cells, storage.cell_units = saved_cells, saved_units
+  storage.production_cells, storage.cell_units, storage.cell_shared_units = saved_cells, saved_units, saved_shared
   print("CELL MEASURED PASS: per-cell attribution, exclusive shared, since clipping, ring roll-up, utilisation, membership change, purge, modes")
 end

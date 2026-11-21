@@ -41,6 +41,24 @@ for _, dy in ipairs({ -150, 150 }) do
   assert(corners == 2, "long routed link must retain both rounded corners")
 end
 
+assert(not G.steep(200, 30, 6, false) and G.steep(32, 400, 6, false), "Curves mode must reserve bends for steep runs")
+assert(not G.steep(80, 100, 32, false), "A thick ribbon can stay readable in a tighter curve")
+assert(G.steep(1400, 400, 6, false), "Long straight approaches must not hide a steep capped curve")
+for _, dy in ipairs({ -400, 400 }) do
+  local bend = assert(G.bend(6, math.abs(dy), 25), "A narrow gap must allow a compact rounded bend")
+  bend.xv = 80 + bend.R + 2
+  local pieces = G.route({ t = 6, cx0 = 80, ortho = bend }, 80, 105, 450, 450 + dy)
+  assert(#pieces == 5 and pieces[2].kind == "elbow" and pieces[4].kind == "elbow")
+  assert(pieces[3].vertical and pieces[3].w == 6, "A steep ribbon must retain its width on the vertical run")
+end
+for _, scale in ipairs({ 1, 1.25, 1.5 }) do
+  local expected = scale == 1 and 3 or 4
+  local w, h = G.sprite_size({ kind = "bar", x = 3, y = 3, w = 3, h = 3 }, scale)
+  assert(w == expected and h == 3, "Only the joined horizontal edge should close a fractional-scale gap")
+  w, h = G.sprite_size({ kind = "bar", x = 3, y = 3, w = 3, h = 3, vertical = true }, scale)
+  assert(w == 3 and h == expected, "Only the joined vertical edge should close a fractional-scale gap")
+end
+
 -- Check real polygon vertices, not just a route signature shared by construction.
 local painter = Canvas.begin(player, 300, 300)
 local object = painter.curve(20, 116, 40, 104, 6, Canvas.col(1))
@@ -71,7 +89,7 @@ local c = player.gui.screen.add { type = "flow", name = "ssk_drawing_test", dire
 local thick_header_checked = false
 local grouped_detail_checked = false
 local function headers(us, width)
-  local layout = View.build(player, us, width, 900)
+  local layout = View.build(player, us, SK.scroll_pane(c).style.width or width, 900)
   local function find(el, name)
     if el.name == name then return el end
     for _, child in ipairs(el.children) do local hit = find(child, name); if hit then return hit end end
@@ -210,19 +228,15 @@ for _, renderer in ipairs({"sprites", "poly"}) do
   end
   assert(connected > 0, "Focus fixture must include a ribbon connected to the selected material")
   SK.on_hover({player_index=1,element={valid=true,tags={ssk_sk="node",key="item/iron-plate",fx=true}}},true)
-  local dimmed, related = 0, 0
-  local fade_directions = {}
+  local dimmed, related, stub_steps = 0, 0, {}
   for _, n in pairs(state.node_visuals) do
     if renderer == "sprites" then
       for _, visual in ipairs(n.sprites) do
-        local direction = visual.original:match("^ssk%-stub%-(%a+)%-")
-        if direction then
-          fade_directions[direction] = true
-          assert(visual.element.style.width == View.STUB and type(visual.element.tooltip) == "table",
-            "Other branch must retain its original width and native tooltip")
-          assert(visual.element.sprite == (n.dimmed and visual.dimmed or visual.original),
-            "Highlight must preserve the fade direction for dimmed and visible branches")
-          assert(visual.dimmed:match("^ssk%-stub%-(%a+)%-") == direction)
+        local step = visual.original:match("^ssk%-stub%-(%d+)$")
+        if step then
+          stub_steps[tonumber(step)] = true
+          assert(visual.dim == "ssk-stub-dim-" .. step and visual.element.valid,
+            "Every fade step must retain its dimmed sprite")
         end
       end
     end
@@ -233,8 +247,7 @@ for _, renderer in ipairs({"sprites", "poly"}) do
   end
   assert(dimmed>0 and related>0, "Focus hover must retain the related chain and dim the other branch")
   if renderer == "sprites" then
-    assert(fade_directions.left and fade_directions.right,
-      "The fixture must exercise Other sources and uses in the sprite renderer")
+    for step = 1, #Palette.stub_alpha do assert(stub_steps[step], "missing stepped stub fade") end
   end
 end
 assert(thick_header_checked, "missing thick-bar header regression fixture")

@@ -22,6 +22,7 @@ def is_complete_png(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", default="D:/SteamLibrary/steamapps/common/Factorio/bin/x64/Factorio.exe")
+    parser.add_argument("--space-age", action="store_true", help="Include a native Bioflux burner loop")
     args = parser.parse_args()
     exe = Path(args.exe).resolve()
     stage = TESTS / "out" / datetime.now().strftime("cells-native-%Y%m%d-%H%M%S-%f")
@@ -55,9 +56,14 @@ assert(not shortcut.technology_to_unlock)
     assert text.count(hook) == 1
     control.write_text('local CellTest = require("scripts.cells_native")\n' +
                        text.replace(hook, hook + "\n  CellTest.tick(UI)"), encoding="utf-8")
+    enabled = {"base", "production-flow"}
+    bundled = ("space-age", "elevated-rails", "quality", "recycler")
+    if args.space_age:
+        enabled.update(bundled)
     (stage / "mods/mod-list.json").write_text(json.dumps({"mods": [
-        {"name": name, "enabled": name in ("base", "production-flow")}
-        for name in ("base", "production-flow", "space-age", "elevated-rails", "quality", "recycler")]}))
+        {"name": name, "enabled": name in enabled}
+        for name in ("base", "production-flow", *bundled)]}))
+    manifest["enabled_mods"] = sorted(enabled)
     (stage / "config.ini").write_text(
         f"[path]\nread-data={exe.parents[2].as_posix()}/data\nwrite-data={stage.as_posix()}\n"
         "[graphics]\nfull-screen=false\n[other]\nautosave-interval=0\n[interface]\nui-scale-mode=manual-pixels\ncustom-ui-scale=1\n"
@@ -76,15 +82,27 @@ assert(not shortcut.technology_to_unlock)
                            check=True, timeout=120)
         log = stage / "native.log"
         with log.open("w") as stream:
-            game = subprocess.Popen(common + ["--load-game", str(save), "--window-size", "1600x900",
+            game = subprocess.Popen(common + ["--load-game", str(save), "--window-size", "1920x1080",
                                     "--disable-migration-window", "--force-graphics-preset", "low"],
                                     stdout=stream, stderr=subprocess.STDOUT, env=env, startupinfo=startup)
             try:
                 deadline = time.monotonic() + 150
+                names = [
+                    "suggestions.png", "draft.png", "saved.png", "missing.png", "overview.png",
+                    "inside.png", "inside-capacity.png", "map.png", "help-cells.png", "delete.png",
+                    "recipe-returns.png", "recipe-returns-markers.png",
+                    "refinery-editor.png", "refinery-inside.png", "refinery-overview.png",
+                ]
+                markers = ["PRODUCTION CELLS NATIVE PASS", "CELL REPLACEMENT PASS", "CELL MEASURED PASS", "CELL CLONE PASS"]
+                markers.append("RECIPE RETURNS NATIVE PASS")
+                markers.append("CELL REFINERY BANDS PASS")
+                if args.space_age:
+                    names.extend(("bioflux-fuel.png", "bioflux-fuel-markers.png", "bioflux-editor.png", "bioflux-inputs.png"))
+                    markers.append("CELL BIOFLUX FUEL PASS")
+                screenshots = [stage / "script-output/cells" / name for name in names]
                 while time.monotonic() < deadline:
                     output = log.read_text(encoding="utf-8", errors="replace")
-                    screenshots = [stage / "script-output/cells" / name for name in ("draft.png", "saved.png", "missing.png", "overview.png", "inside.png", "inside-capacity.png", "delete.png")]
-                    if "PRODUCTION CELLS NATIVE PASS" in output and "CELL REPLACEMENT PASS" in output and "CELL MEASURED PASS" in output and "CELL CLONE PASS" in output and all(is_complete_png(p) for p in screenshots):
+                    if all(marker in output for marker in markers) and all(is_complete_png(p) for p in screenshots):
                         manifest["screenshots_sha256"] = {path.name: digest(path) for path in screenshots}
                         break
                     if game.poll() is not None or "Error while running" in output:

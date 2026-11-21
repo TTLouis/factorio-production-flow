@@ -291,3 +291,6 @@ dofile(TESTDIR .. "/gui_state_lifecycle_test.lua")(handlers)
 dofile(TESTDIR .. "/force_scope_test.lua")(handlers)
 dofile(TESTDIR .. "/localization_test.lua")
 print("ALL OK")
+
+-- Return overlays share the Full Sankey zoom transform.
+dofile(TESTDIR .. "/return_zoom_test.lua")

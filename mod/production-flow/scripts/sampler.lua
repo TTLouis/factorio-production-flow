@@ -57,6 +57,7 @@ end
 ---@field req number? Rocket parts required per rocket.
 ---@field status_due integer? Earliest tick to observe status again unless the recipe changes.
 ---@field status_row table? Shared recipe status aggregate for this machine's last observation.
+---@field status_entity string? Prototype counted in the recipe's observed machine types.
 ---@field status_surface integer? Last observed surface for status.
 ---@field status_force integer? Last observed force for status.
 ---@field issue string? Last observed category of production issue.
@@ -198,7 +199,7 @@ local function add_into(dst, src)
     end
   end
   -- Production cells: bin.cell[id][recipe] holds every member's crafts and
-  -- bin.cell_shared[id][recipe] the part made by machines in several cells.
+  -- bin.cell_shared[id][recipe] the part made by machines in several siblings.
   add_cells(dst, src, "cell")
   add_cells(dst, src, "cell_shared")
   for s, keys in pairs(src.stat) do
@@ -421,6 +422,13 @@ local function remove_observation(rec)
   local row = rec.status_row
   if not row then return end
   remove_issue(row, rec.issue, rec.u)
+  local name = rec.status_entity
+  if name then
+    local remaining = ((row.entities and row.entities[name]) or 1) - 1
+    row.entities = row.entities or {}
+    row.entities[name] = remaining > 0 and remaining or nil
+    rec.status_entity = nil
+  end
   row.observed = row.observed - 1
   if row.observed == 0 then
     local surfaces = storage.machine_status
@@ -453,6 +461,11 @@ local function observe_status(rec, e, recipe, tick)
     if not row then row = { observed = 0, issues = {} }; recipes[recipe] = row end
     row.observed = row.observed + 1
     rec.status_row, rec.status_surface, rec.status_force = row, surface, force
+  end
+  if e.name and not rec.status_entity then
+    row.entities = row.entities or {}
+    row.entities[e.name] = (row.entities[e.name] or 0) + 1
+    rec.status_entity = e.name
   end
   row.sample_tick = tick
   local category = status_categories[e.status]
@@ -559,13 +572,13 @@ function Sm.on_tick(tick)
           if cell_ids then
             local all = bin.cell
             if not all then all = {}; bin.cell = all end
-            local shared = #cell_ids > 1
+            local shared = storage.cell_shared_units and storage.cell_shared_units[u]
             for i = 1, #cell_ids do
               local id = cell_ids[i]
               local cr = all[id]
               if not cr then cr = {}; all[id] = cr end
               add_crafts(cr, r, d, normal)
-              if shared then
+              if shared and shared[id] then
                 local sh = bin.cell_shared
                 if not sh then sh = {}; bin.cell_shared = sh end
                 local sr = sh[id]

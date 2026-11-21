@@ -12,7 +12,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
-from zipfile import ZipFile, ZIP_DEFLATED
+from zipfile import BadZipFile, ZipFile, ZIP_DEFLATED
 
 ROOT=Path(__file__).resolve().parents[1]
 TESTS=ROOT/'tests'
@@ -23,7 +23,9 @@ def digest(p):
     with p.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 
 def prepare(args):
-    stage=TESTS/'out'/datetime.now().strftime('modded-gui-%Y%m%d-%H%M%S-%f')
+    rail=getattr(args,'cells_rail',False)
+    prefix='cells-rail-se-' if rail else 'modded-gui-'
+    stage=TESTS/'out'/(prefix+datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
     mods=stage/'mods';mods.mkdir(parents=True)
     config=json.loads((args.mods/'mod-list.json').read_text(encoding='utf-8-sig'))
     enabled={m['name']:m.get('version') for m in config['mods'] if m['enabled']}
@@ -60,10 +62,27 @@ def prepare(args):
     entries=[{'name':name,'enabled':True,**({'version':version} if version else {})} for name,version in sorted(enabled.items())]
     for name in BUILTIN-set(enabled):entries.append({'name':name,'enabled':False})
     (mods/'mod-list.json').write_text(json.dumps({'mods':entries}))
-    for a,b in [('modded_gui.lua','modded_gui.lua'),('development/gui_interaction_checks.lua','gui_interaction_checks.lua')]:
+    hooks=[('cells_rail_native.lua','modded_gui.lua')] if rail else [
+        ('modded_gui.lua','modded_gui.lua'),('development/gui_interaction_checks.lua','gui_interaction_checks.lua')]
+    for a,b in hooks:
         shutil.copyfile(TESTS/a,target/'scripts'/b)
     (target/'scripts/modded_gui_config.lua').write_text(
         f'return {{warm_seconds={args.warm_seconds},resolution={{{args.width},{args.height}}}}}\n')
+    if rail:
+        # Verify the actual data-stage selection prototype, not only injected area events.
+        with (target/'data-final-fixes.lua').open('a', encoding='utf-8') as data:
+            data.write("""
+local selection = require("shared.cell_selection")
+local function has(values, wanted)
+  for _, value in pairs(values) do if value == wanted then return true end end
+end
+for _, tool in ipairs({selection.tool, selection.stop_tool}) do
+  local filters = assert(data.raw["selection-tool"][tool].select.entity_type_filters)
+  for _, kind in ipairs({"train-stop", "container", "logistic-container", "storage-tank"}) do
+    assert(has(filters, kind), tool .. " missing " .. kind)
+  end
+end
+""")
     control=target/'control.lua';code=control.read_text(encoding='utf-8')
     needle='  Sampler.on_tick(e.tick)';assert code.count(needle)==1
     code='local ModdedGui=require("scripts.modded_gui")\n'+code.replace(needle,needle+'\n  ModdedGui.tick(UI,Sampler)')
@@ -83,11 +102,12 @@ def prepare(args):
         'candidate_sha256':digest(package),'source_sha256':hashes,'configured_scale':args.scale,
         'resolution':[args.width,args.height],'warm_seconds':args.warm_seconds,
         'protected_sha256':{str(p):digest(p) for p in protected if p.is_file()},
-        'test_sha256':{n:digest(TESTS/n) for n in ['modded_gui.lua','development/gui_interaction_checks.lua']}}
+        'test_sha256':{n:digest(TESTS/n) for n,_ in hooks}}
     (stage/'manifest.json').write_text(json.dumps(manifest,indent=2))
     return stage,manifest
 
 def run(stage,manifest,args):
+    rail=getattr(args,'cells_rail',False)
     command=[str(args.exe),'--config',str(stage/'config.ini'),'--mod-directory',str(stage/'mods'),
         '--load-game',str(stage/'input.zip'),'--window-size',f'{args.width}x{args.height}',
         '--disable-audio','--disable-migration-window','--force-graphics-preset','low']
@@ -104,8 +124,23 @@ def run(stage,manifest,args):
                 progress=[line for line in output.splitlines() if 'MODDED GUI HISTORY' in line]
                 if progress and progress[-1]!=last_progress:last_progress=progress[-1];print(last_progress,flush=True)
                 if 'MODDED GUI NATIVE PASS' in output:
+                    playtest=stage/'saves/_autosave-rail-playtest.zip'
+                    if rail:
+                        if not playtest.is_file():time.sleep(.5);continue
+                        try:
+                            with ZipFile(playtest) as saved:
+                                if not saved.namelist():raise ValueError('Empty rail playtest save')
+                        except (BadZipFile, OSError, ValueError, EOFError):
+                            time.sleep(.5);continue
                     evidence=json.loads((stage/'script-output/modded-gui/results.json').read_text())
-                    if len(evidence['cases'])!=6:raise RuntimeError('Incomplete modded case matrix')
+                    if rail:
+                        expected={'rail-port-exclusions','rail-dedicated-ports','rail-suggestion-draft','rail-outlines-chart','rail-editor','cells-shared-edit','rail-overview','rail-stopped','rail-heading',
+                            'rail-scheduled','rail-history-time','rail-history-events','cells-flow','cells-map',
+                            'cells-layer-root','cells-layer-one','cells-layer-two',
+                            'cells-layer-selected-root','cells-layer-selected-one'}
+                        names=[case['name'] for case in evidence['cases']]
+                        if len(names)!=len(expected) or set(names)!=expected:raise RuntimeError('Incomplete modded case matrix')
+                    elif len(evidence['cases'])!=6:raise RuntimeError('Incomplete modded case matrix')
                     if evidence['display_scale']!=args.scale:raise RuntimeError('Unexpected actual native GUI scale')
                     shots={}
                     witnesses={}
@@ -121,6 +156,7 @@ def run(stage,manifest,args):
                             if count<100:raise RuntimeError(f'Native camera failed visible-pixel witness: {witness} ({count} pixels)')
                             witnesses[witness.name]={'magenta_pixels':count,'sha256':digest(witness)}
                     evidence.update(candidate_sha256=manifest['candidate_sha256'],screenshots_sha256=shots)
+                    if rail:evidence['playtest_sha256']=digest(playtest)
                     evidence['camera_pixel_witnesses']=witnesses
                     (stage/'evidence.json').write_text(json.dumps(evidence,indent=2))
                     print(f'PASS real modded factory: {stage}',flush=True);return
@@ -144,8 +180,10 @@ def main():
     parser.add_argument('--height',type=int,default=1440)
     parser.add_argument('--warm-seconds',type=int,default=600)
     parser.add_argument('--timeout',type=int,default=1200)
+    parser.add_argument('--cells-rail',action='store_true',help='Capture Cells rail UI and save an isolated playable copy')
     args=parser.parse_args();args.save=args.save.resolve();args.mods=args.mods.resolve()
-    if args.warm_seconds<600:raise ValueError('Collect at least600 game seconds of real production history')
+    minimum=60 if args.cells_rail else 600
+    if args.warm_seconds<minimum:raise ValueError(f'Collect at least {minimum} game seconds of real production history')
     stage,manifest=prepare(args)
     try:run(stage,manifest,args)
     finally:

@@ -5,7 +5,7 @@ local Loc = require("scripts.locale")
 --   * single-output recipes are elided: each ingredient links straight to the product
 --   * multi-output recipes (oil processing, uranium, scrap…) stay as small recipe nodes
 --   * ribbons carry the SOURCE item's units (x/s of the item leaving the node)
---   * reversing recipes (recycling, unbarrel) and cycle back-edges become ↺ badges, not ribbons
+--   * reversing recipes and cycle back-edges use thin returns outside the ribbon layout
 -- Filters: preset roots (+ancestors) → hidden → collapsed groups → tier range (D19, D20)
 -- Stubs:   right = consumption not shown (other uses), left = production not from shown
 --          recipes (mining, handcraft, recycling…) — so every node keeps its full flow.
@@ -17,7 +17,7 @@ local Gr = require("scripts.groups")
 local Graph = require("scripts.graph")
 local Default = require("shared.groups_default")
 local palette = require("shared.palette")
-local S = require("shared.sprites")
+local Geometry = require("scripts.ribbon_geometry")
 local Neighborhood = require("scripts.neighborhood")
 local Transport = require("scripts.transport_flows")
 local RecipeDetails = require("scripts.recipe_details")
@@ -27,6 +27,8 @@ V.MAX_INPUT_DEPTH = Neighborhood.MAX_DEPTH
 
 local EPS = 1e-4
 V.NODE_W = 32      -- node bar width (= icon size)
+V.CELL_W = 96
+V.CELL_ICON = 22
 V.HEADER_W = 176   -- reserved horizontal band for readable item headers
 V.F_LABEL = 18     -- single-line name strip above the icon
 V.ICON_GAP = 4     -- short connecting stem between icon and flow bar
@@ -149,7 +151,7 @@ local function collect_imports(target, source)
 end
 
 local function build_graph(pi, m, us)
-  local nodes, links = {}, {}
+  local nodes, links, reversing = {}, {}, {}
   local function node(k)
     local n = nodes[k]
     if not n then
@@ -227,6 +229,8 @@ local function build_graph(pi, m, us)
   for _, r in ipairs(sorted_keys(by_recipe)) do
     local x = by_recipe[r]
     if x.reversing then
+      reversing[#reversing + 1] = { recipe = r, inputs = x.ins, outputs = x.outs }
+      for _, i in ipairs(x.ins) do if i.rate > EPS then node(i.from) end end
       for _, o in ipairs(x.outs) do
         if o.rate > EPS then table.insert(node(o.to).loops, { what = r, rate = o.rate }) end
       end
@@ -266,7 +270,54 @@ local function build_graph(pi, m, us)
       rn.shown_in = math.huge -- recipe nodes have no stubs
     end
   end
-  return nodes, links
+  return nodes, links, reversing, by_recipe
+end
+
+local function recipe_rows(nodes, links, recipes)
+  local materials, shown = {}, {}
+  for _, n in pairs(nodes) do
+    if n.kind == "item" or n.kind == "fluid" then
+      local key = (n.key:gsub("#.*$", ""))
+      materials[key] = materials[key] or {made={}, used={}, masked_made={}, masked_used={}}
+      n.recipe_rows = materials[key]
+    end
+  end
+  local function mark(key, direction, recipe)
+    if not materials[key] then return end
+    shown[key] = shown[key] or {made={}, used={}}
+    shown[key][direction][recipe] = true
+  end
+  for _, l in ipairs(links) do
+    for _, item in ipairs(l.details or {}) do
+      mark(item.from, "used", item.recipe)
+      mark(item.to, "made", item.recipe)
+    end
+  end
+  local function add(recipe, edges, endpoint, direction)
+    local totals = {}
+    for _, edge in ipairs(edges) do
+      local key = edge[endpoint]
+      if materials[key] then totals[key] = (totals[key] or 0) + edge.rate end
+    end
+    for key, rate in pairs(totals) do
+      if rate > EPS then
+        local visible = shown[key] and shown[key][direction][recipe]
+        local rows = materials[key][visible and direction or "masked_" .. direction]
+        rows[#rows + 1] = {recipe=recipe, rate=rate}
+      end
+    end
+  end
+  for recipe, sides in pairs(recipes) do
+    add(recipe, sides.ins, "from", "used")
+    add(recipe, sides.outs, "to", "made")
+  end
+  local function order(a, b)
+    if a.rate ~= b.rate then return a.rate > b.rate end
+    return a.recipe < b.recipe
+  end
+  for _, sides in pairs(materials) do
+    for _, rows in pairs(sides) do table.sort(rows, order) end
+  end
 end
 
 local function drop_nodes(nodes, links, keep_fn)
@@ -448,8 +499,8 @@ local function node_era(g, n)
   return nd and nd.era or 0
 end
 
--- Tiers (D25). Sets n.tier (number) for every node; links that would point backwards
--- become ↺ loop badges. Returns the sorted list of distinct tier values.
+-- Tiers (D25). Sets n.tier (number) for every node. Cycle returns stay outside
+-- the tier graph. Returns the sorted list of distinct tier values.
 --   depth: longest path from raw over the SCC condensation (integers)
 --   tech : era (tech tree) + fractional production depth inside the era:
 --          E(n) = max(era(n), E(p) for inputs p whose own era ≤ era(n))
@@ -474,7 +525,7 @@ local function tiers(nodes, links, mode)
   end
 
   -- Break each cycle with a minimal-weight feedback set (Eades–Lin–Smyth, rate-weighted):
-  -- only the feedback links become ↺ badges, every other link in the loop is drawn.
+  -- feedback links are drawn separately from the forward ribbons.
   local inner = {}
   for id, l in pairs(links) do
     if comp[l.from] == comp[l.to] then
@@ -623,8 +674,13 @@ local function tiers(nodes, links, mode)
     end
   end
 
+  local last = -1
+  for _, n in pairs(nodes) do
+    if not n.cell_output then last = math.max(last, n.tier) end
+  end
   local set, list = {}, {}
   for _, n in pairs(nodes) do
+    if n.cell_output then n.tier = last + 1 end
     local key = math.floor(n.tier * 1000 + 0.5) / 1000
     n.tier = key
     if not set[key] then set[key] = true; list[#list + 1] = key end
@@ -640,20 +696,116 @@ function V.tier_label(t)
   return Loc("tier", s)
 end
 
+local function visible_returns(nodes, kmap, reversing, fuel_returns, cell_returns)
+  local routes, copies, catalysts = {}, {}, {}
+  local keys = sorted_keys(nodes)
+  for _, key in ipairs(keys) do
+    local n = nodes[key]
+    local base = n.base or n.group_key
+    if base and not copies[base] then copies[base] = n end
+  end
+  local function resolve(key)
+    key = kmap[key] or key
+    return nodes[key] or copies[key]
+  end
+  for _, fuel in ipairs(fuel_returns or {}) do
+    local material, targets, rate = resolve(fuel.key), {}, 0
+    for _, user in ipairs(fuel.consumers) do
+      local destination = resolve(user.key)
+      if destination then
+        targets[#targets + 1] = { node = destination, rate = user.rate }
+        rate = rate + user.rate
+      end
+    end
+    if material and #targets > 0 then
+      routes[#routes + 1] = { sources = { material }, targets = targets, fuel = true, rate = rate }
+    end
+  end
+  for _, ret in ipairs(cell_returns or {}) do
+    local material, targets, rate = resolve(ret.key), {}, 0
+    for _, user in ipairs(ret.consumers) do
+      local destination = resolve(user.key)
+      if destination then
+        targets[#targets + 1] = { node = destination, rate = user.rate }
+        rate = rate + user.rate
+      end
+    end
+    if material and #targets > 0 then
+      routes[#routes + 1] = { sources = { material }, targets = targets, rate = rate }
+    end
+  end
+  for _, key in ipairs(keys) do
+    local n = nodes[key]
+    for _, lp in ipairs(n.loops) do
+      local target = lp.back and lp.out and resolve(lp.what)
+      if target then
+        routes[#routes + 1] = { sources = { n }, targets = { { node = target, rate = lp.rate } }, rate = lp.rate }
+        lp.routed = true
+        for _, incoming in ipairs(target.loops) do
+          if incoming.back and not incoming.out and incoming.what == (n.base or n.key) then incoming.routed = true end
+        end
+      end
+    end
+    local base = n.base or n.group_key or key
+    if (n.catalyst or 0) > EPS and not catalysts[base] then
+      catalysts[base] = true
+      routes[#routes + 1] = {
+        sources = { n }, targets = { { node = n, rate = n.catalyst } }, rate = n.catalyst, catalyst = true,
+      }
+    end
+  end
+  for _, reverse in ipairs(reversing or {}) do
+    local sources, targets, input_rates, outputs = {}, {}, {}, {}
+    for _, link in ipairs(reverse.inputs) do
+      local n = resolve(link.from)
+      if n and link.rate > EPS then
+        if not input_rates[n] then sources[#sources + 1] = n end
+        input_rates[n] = (input_rates[n] or 0) + link.rate
+      end
+    end
+    if #sources > 0 then
+      for _, link in ipairs(reverse.outputs) do
+        local n = resolve(link.to)
+        if n and link.rate > EPS then
+          local target = outputs[n]
+          if not target then
+            target = { node = n, rate = 0 }
+            outputs[n] = target
+            targets[#targets + 1] = target
+          end
+          target.rate = target.rate + link.rate
+          for _, lp in ipairs(n.loops) do
+            if lp.what == reverse.recipe then lp.routed = true end
+          end
+        end
+      end
+      if #targets > 0 then
+        for n, rate in pairs(input_rates) do n.return_out = (n.return_out or 0) + rate end
+        for _, target in ipairs(targets) do
+          local n = target.node
+          n.return_in = (n.return_in or 0) + target.rate
+        end
+        routes[#routes + 1] = { sources = sources, targets = targets, recipe = reverse.recipe }
+      end
+    end
+  end
+  return routes
+end
+
 ---------------------------------------------------------------------------
 -- public: build everything needed to draw
 ---------------------------------------------------------------------------
 function V.build(player, us, W, viewH, source)
   local pi = player.index
   local sidx = us.sidx or player.surface.index -- surfaces are never combined
-  local m, nodes, links
+  local m, nodes, links, reversing, recipes
   if source then
     -- Cell graphs are self-contained; they carry no history or recorded transport.
     m = { residuals = {}, seconds = 0 }
     nodes, links = source.nodes, source.links
   else
     m = Model.build(sidx, us.period)
-    nodes, links = build_graph(pi, m, us)
+    nodes, links, reversing, recipes = build_graph(pi, m, us)
     add_transport(nodes, links, Transport.query(player.force, game.surfaces[sidx], game.tick, us.period))
   end
   local ff = player.mod_settings["ssk-fluid-scale"].value
@@ -703,7 +855,8 @@ function V.build(player, us, W, viewH, source)
   for _, l in pairs(links) do touched[l.from] = true; touched[l.to] = true end
   drop_nodes(nodes, links, function(k)
     local n = nodes[k]
-    return n.is_cell or us.neighborhood and k == us.focus or touched[k] or n.prod > EPS or n.cons > EPS
+    return n.is_cell or n.cell_output or us.neighborhood and k == us.focus or touched[k]
+      or n.prod > EPS or n.cons > EPS or (n.catalyst or 0) > EPS
   end)
 
   -- tier range (values; nil = open)
@@ -715,6 +868,7 @@ function V.build(player, us, W, viewH, source)
   local hi = us.tier_hi or math.huge
   if hi < lo then hi = lo end
   drop_nodes(nodes, links, function(k) local t = nodes[k].tier; return t >= lo and t <= hi end)
+  local returns = visible_returns(nodes, kmap, reversing, source and source.fuel_returns, source and source.cell_returns)
 
   -- per-node sums, stubs, value
   for _, n in pairs(nodes) do n.ins, n.outs, n.sin, n.sout = {}, {}, 0, 0 end
@@ -743,12 +897,14 @@ function V.build(player, us, W, viewH, source)
     -- units: an item/fluid/group source carries its own units; a recipe node's outputs carry the product's
     local f = (l.a.kind == "recipe") and factor_of(l.b) or factor_of(l.a)
     l.w = sq(l.rate * f)
+    if l.a.is_cell or l.b.is_cell then l.cell_weight = l.rate * f end
   end
   local lab_inputs = Graph.lab_inputs()
   for _, n in pairs(nodes) do
     local f = factor_of(n)
     local cat_in, cat_out = n.catalyst_in or n.catalyst or 0, n.catalyst_out or n.catalyst or 0
-    n.stub_out = (n.kind == "item" or n.kind == "fluid") and math.max(0, n.cons - n.sout - (n.loop_out or 0) - cat_out) or 0
+    n.stub_out = (n.kind == "item" or n.kind == "fluid")
+      and math.max(0, n.cons - n.sout - (n.loop_out or 0) - (n.return_out or 0) - cat_out) or 0
     -- production that reaches this node through a drawn link; the rest is "other sources"
     local shown = 0
     local looped = {}
@@ -759,7 +915,8 @@ function V.build(player, us, W, viewH, source)
         if links[f .. ">" .. n.key] or looped[f] then shown = shown + c.rate; break end
       end
     end
-    n.stub_in = (n.kind == "item" or n.kind == "fluid") and math.max(0, n.prod - shown - cat_in) or 0
+    n.stub_in = (n.kind == "item" or n.kind == "fluid")
+      and math.max(0, n.prod - shown - (n.return_in or 0) - cat_in) or 0
     if n.stub_out < EPS then n.stub_out = 0 end
     local key = n.group_key or n.key
     local measured = lab_inputs[key] and m.residuals[key]
@@ -844,7 +1001,11 @@ function V.build(player, us, W, viewH, source)
     end
   end
   if us.split_raw ~= false and not focused then
-    V.split_raw(nodes, link_list, pi)
+    local split = V.split_raw(nodes, link_list, pi)
+    for _, route in ipairs(returns) do
+      for i, n in ipairs(route.sources) do route.sources[i] = split[n] or n end
+      for _, target in ipairs(route.targets) do target.node = split[target.node] or target.node end
+    end
     -- a copy whose consumer was itself a raw item (steam → water) follows that consumer's
     -- final lane
     for _ = 1, 3 do
@@ -898,17 +1059,39 @@ function V.build(player, us, W, viewH, source)
   if source then
     L.details = source.recipe_rates and { rates = source.recipe_rates, members = source.members,
       capacity = source.mode == "capacity", sidx = sidx }
+    for _, n in pairs(nodes) do
+      if n.cell_output then
+        L.column_labels = { [n.tier] = Loc("cells-outputs") }
+        break
+      end
+    end
   else
     L.details = { rates = RecipeDetails.from_model(m.rates and m.rates.recipes), sidx = sidx }
   end
+  L.returns = returns
+  for _, route in ipairs(returns) do
+    local origin = route.sources[1]
+    if origin then
+      local f = factor_of(origin)
+      for _, user in ipairs(route.targets) do
+        if user.node and user.node.is_cell then
+          user.w = sq(user.rate * f)
+          user.cell_weight = user.rate * f
+        end
+      end
+    end
+  end
+  local return_room = 28 * #L.returns
+  if return_room > 0 then viewH = math.max(100, viewH - math.min(return_room, math.floor(viewH / 5))) end
+  if recipes and us.view ~= "focus" and not us.neighborhood then recipe_rows(nodes, link_list, recipes) end
   -- Rates change every sample; topology and explicit layout controls define when
   -- it is useful to optimise again. Renderer changes do not invalidate geometry.
-  local signature = { "readable-fit-v3", tostring(sidx), tostring(us.period), tostring(W), tostring(viewH),
+  local signature = { "readable-fit-v4", tostring(sidx), tostring(us.period), tostring(W), tostring(viewH),
     us.view or "detail", tostring(us.neighborhood), us.layout or "clean", us.heights or "sqrt", us.lines or "metro",
-    tostring(us.zoom), tostring(us.reflow), tostring(L.min_t), tostring(ff) }
+    tostring(focused and us.zoom or 1), tostring(us.reflow), tostring(L.min_t), tostring(ff) }
   for _, k in ipairs(sorted_keys(nodes)) do
     local n = nodes[k]
-    signature[#signature + 1] = k .. ":" .. n.ci .. ":" .. n.group
+    signature[#signature + 1] = k .. ":" .. n.ci .. ":" .. n.group .. (n.is_cell and ":" .. V.CELL_W or "")
   end
   for _, l in ipairs(link_list) do signature[#signature + 1] = l.from .. ">" .. l.to end
   for _, field in ipairs({ "pos", "gpos", "lpos" }) do
@@ -917,8 +1100,13 @@ function V.build(player, us, W, viewH, source)
   signature = table.concat(signature, "|")
   us.keep_layout = us.layout_snapshot and us.layout_snapshot.signature == signature or false
   if us.neighborhood then Neighborhood.layout(L, us, W, viewH, V)
-  elseif focused or (us.view ~= "focus" and us.layout ~= "lanes") then V.layout_focus(L, us, W, viewH, not focused)
+  elseif (source and source.columns) or focused or (us.view ~= "focus" and us.layout ~= "lanes") then
+    V.layout_focus(L, us, W, viewH, not focused)
   else V.layout(L, us, W, viewH) end
+  if return_room > 0 then
+    L.return_y = L.content_h
+    L.content_h = L.content_h + return_room
+  end
   local snap = { signature = signature, scale = L.scale, content_h = L.content_h, tops = {}, col_x = L.col_x, lanes = {}, subs = {} }
   for k, y in pairs(us.auto_rank or {}) do snap.tops[k] = y end
   for i, lane in ipairs(L.lane_list) do
@@ -937,6 +1125,7 @@ end
 --   proportion; "other uses" stays on the biggest copy.
 ---------------------------------------------------------------------------
 function V.split_raw(nodes, links, pi)
+  local split = {}
   for _, key in ipairs(sorted_keys(nodes)) do
     local n = nodes[key]
     local raw = not n.transport_material and (n.kind == "item" or n.kind == "fluid") and #n.outs > 0
@@ -990,9 +1179,11 @@ function V.split_raw(nodes, links, pi)
         for _, l in ipairs(c.ins) do l.b, l.to = c, ck; win = win + l.w end
         c.wvalue = math.max(win, wout)
         nodes[ck] = c
+        if i == 1 then split[n] = c end
       end
     end
   end
+  return split
 end
 
 ---------------------------------------------------------------------------
@@ -1228,9 +1419,8 @@ end
 -- long links (spanning several columns): flat segment + one curve. Choose the variant whose
 -- flat segment overlaps fewer node slots: flat at the source height then curve into the
 -- target ("late"), or curve out of the source then flat at the target height ("early").
-function V.route(L, us)
-  -- right-angle preference: more ribbons take the metro route (90° crossings)
-  local steep = (us and us.lines == "metro") and 0.3 or 0.9
+function V.route(L, us, keep_header_level)
+  local metro = us.lines == "metro"
   local cx = L.col_x
   local function overlap(ci0, ci1, y0, y1)
     local o = 0
@@ -1245,7 +1435,10 @@ function V.route(L, us)
   end
   for _, l in ipairs(L.links) do
     local ca, cb = l.a.ci, l.b.ci
-    if cb - ca > 1 then
+    if keep_header_level then
+      l.route = "late"
+      l.curve_x0, l.curve_x1 = l.a.x + V.HEADER_W, l.b.x
+    elseif cb - ca > 1 then
       local late = overlap(ca + 1, cb - 1, l.y1, l.y1 + l.t)
       local early = overlap(ca + 1, cb - 1, l.y2, l.y2 + l.t)
       if early < late then
@@ -1263,22 +1456,16 @@ function V.route(L, us)
     else l.cx0, l.cx1 = l.curve_x0 or (cx[ca] + V.NODE_W), l.curve_x1 or cx[ca + 1] end
   end
 
-  -- Orthogonal ("metro") routing for steep ribbons: an S-curve keeps a constant VERTICAL
-  -- thickness, so a steep one turns into a hairline. Instead: bar → rounded corner →
-  -- vertical bar → rounded corner → bar. Vertical runs get their own track in the gap.
+  -- Rounded bends keep their width through steep runs in either line mode.
   local gaps = {}
   for _, l in ipairs(L.links) do
     local w = l.cx1 - l.cx0
     local D = math.abs(l.y2 - l.y1)
-    if w > 0 and D > steep * w then
-      local k, q = S.elbow_index(math.min(0.7, l.t / (l.t + math.max(8, l.t * 0.6))))
-      local R = l.t * (1 - q) / q
-      if w >= 2 * R + l.t + 4 and D >= 2 * R + l.t + 2 then
-        l.ortho = { k = k, R = R }
-        local g = gaps[l.cx0]
-        if not g then g = { x0 = l.cx0, x1 = l.cx1, links = {} }; gaps[l.cx0] = g end
-        table.insert(g.links, l)
-      end
+    l.ortho = Geometry.steep(w, D, l.t, metro) and Geometry.bend(l.t, D, w) or nil
+    if l.ortho then
+      local g = gaps[l.cx0]
+      if not g then g = { x0 = l.cx0, x1 = l.cx1, links = {} }; gaps[l.cx0] = g end
+      table.insert(g.links, l)
     end
   end
   for _, g in pairs(gaps) do
@@ -1431,7 +1618,7 @@ function V.layout(L, us, W, viewH)
   end
   if s <= 0 or s ~= s then s = 1e-6 end
   L.fit = s
-  L.scale = us.keep_layout and us.layout_snapshot.scale or s * (us.zoom or 1)
+  L.scale = us.keep_layout and us.layout_snapshot.scale or s * (us.view == "focus" and us.zoom or 1)
   size_nodes(L, L.scale)
   L.H = measure(L)
   if not us.keep_layout then V.optimise_lanes(L, us) end
@@ -1500,8 +1687,7 @@ end
 --     stacked like a node, so its straight run can never lie on a node or another run
 --   * order: barycenter sweeps + transpose over nodes AND vias (crossings minimised)
 --   * y: stacked with gaps, then pulled toward their neighbours' ports (keeps vias straight)
---   * gaps between columns are widened until every vertical (right-angle) run has its own
---     track; ribbons only ever CROSS, never run on top of each other
+--   * gaps reserve space for vertical tracks, shared in Full Sankey by bends with disjoint spans
 --   * labels sit above their node, inside the node's slot
 ---------------------------------------------------------------------------
 V.F_GAP = 14       -- vertical gap between slots
@@ -1509,15 +1695,93 @@ V.F_BAR_MIN = 22   -- a node bar is never thinner than this (ribbons are centred
 V.F_MIN_GAP = 140  -- minimum horizontal gap between columns
 V.F_MAX_GAP = 420
 
+local CELL_BAND_MIN = V.CELL_ICON + 6
+
+local function cell_band_ratio(links, scale)
+  local ratio = 0
+  for _, link in ipairs(links) do
+    local thickness = link.w * scale
+    if thickness > CELL_BAND_MIN then ratio = math.max(ratio, thickness / link.cell_weight) end
+  end
+  return ratio
+end
+
+local function cell_stack_height(links, ratio)
+  local height = 0
+  for _, link in ipairs(links) do height = height + math.max(CELL_BAND_MIN, link.cell_weight * ratio) end
+  return height
+end
+
+local function size_cell_bands(segments, height, min_ratio)
+  if #segments == 0 then return end
+  local weight = 0
+  for _, sg in ipairs(segments) do weight = weight + sg.link.cell_weight end
+  -- Reserve the icon floor for small flows and redistribute any space it takes
+  -- from the other bands in proportion to their rates. Each still fits its ribbon.
+  local ratio = height / weight
+  while ratio > min_ratio do
+    local free_height, free_weight = height, weight
+    for _, sg in ipairs(segments) do
+      local w = sg.link.cell_weight
+      if w * ratio < CELL_BAND_MIN then
+        free_height, free_weight = free_height - CELL_BAND_MIN, free_weight - w
+      end
+    end
+    if free_weight <= 0 then break end
+    local next_ratio = math.max(min_ratio, free_height / free_weight)
+    if next_ratio >= ratio then break end
+    ratio = next_ratio
+  end
+  for _, sg in ipairs(segments) do sg.cell_band_h = math.max(CELL_BAND_MIN, sg.link.cell_weight * ratio) end
+end
+
+-- The occupied vertical span includes the horizontal ports and both corners.
+-- Disjoint bends can use the same X track without drawing over one another.
+local function pack_tracks(segments)
+  table.sort(segments, function(a, b)
+    if a.y1 ~= b.y1 then return a.y1 < b.y1 end
+    if a.y2 ~= b.y2 then return a.y2 < b.y2 end
+    if a.from ~= b.from then return a.from < b.from end
+    return a.to < b.to
+  end)
+  local tracks = {}
+  for _, sg in ipairs(segments) do
+    local top = math.min(sg.y1, sg.y2)
+    local bottom = math.max(sg.y1, sg.y2) + sg.t
+    local slot
+    for _, track in ipairs(tracks) do
+      local clear = true
+      for _, other in ipairs(track.segments) do
+        if top < other.bottom + 2 and bottom + 2 > other.top then clear = false; break end
+      end
+      if clear then slot = track; break end
+    end
+    if not slot then
+      slot = { width = 0, segments = {} }
+      tracks[#tracks + 1] = slot
+    end
+    slot.width = math.max(slot.width, sg.t)
+    slot.segments[#slot.segments + 1] = {segment=sg, top=top, bottom=bottom}
+  end
+  local width = 0
+  for _, track in ipairs(tracks) do width = width + track.width + 6 end
+  return tracks, width
+end
+
 function V.layout_focus(L, us, W, viewH, wide)
   local ncol = #L.cols
   -- the whole-base view is wide (scrolls sideways): tighter gaps, fewer dedicated tracks
-  local MIN_GAP = (wide and 32 or V.F_MIN_GAP) + V.HEADER_W - V.NODE_W
-  local MAX_GAP = wide and 300 or V.F_MAX_GAP
-  local cols = {}
-  for ci = 1, ncol do cols[ci] = {} end
+  local header_w = wide and 128 or V.HEADER_W
+  local MIN_GAP = (wide and 32 or V.F_MIN_GAP) + header_w - V.NODE_W
+  local MAX_GAP = wide and 222 or V.F_MAX_GAP
+  local cols, col_widths = {}, {}
+  for ci = 1, ncol do cols[ci], col_widths[ci] = {}, V.NODE_W end
   for ci, col in ipairs(L.cols) do
-    for _, n in ipairs(col) do n.ci = ci; n.fins, n.fouts = {}, {}; table.insert(cols[ci], n) end
+    for _, n in ipairs(col) do
+      n.ci, n.fins, n.fouts = ci, {}, {}
+      if n.is_cell then n.width, col_widths[ci] = V.CELL_W, V.CELL_W end
+      table.insert(cols[ci], n)
+    end
   end
 
   -- 1. split long links into segments through via slots
@@ -1539,9 +1803,52 @@ function V.layout_focus(L, us, W, viewH, wide)
     if prev.kind == "via" then table.insert(prev.outs, s) else table.insert(prev.fouts, s) end
     table.insert(b.fins, s); segs[#segs + 1] = s
   end
+  for _, route in ipairs(L.returns or {}) do
+    local origin = route.sources[1]
+    if origin then
+      for _, user in ipairs(route.targets) do
+        local consumer = user.node
+        if consumer and consumer.is_cell and user.cell_weight then
+          local pseudo = { a = origin, b = consumer, from = origin.key, to = consumer.key,
+            rate = user.rate, w = user.w, cell_weight = user.cell_weight, is_return = true, details = {} }
+          consumer.return_ins = consumer.return_ins or {}
+          consumer.return_ins[#consumer.return_ins + 1] = pseudo
+          consumer.return_fins = consumer.return_fins or {}
+          consumer.return_fins[#consumer.return_fins + 1] = { a = origin, b = consumer, link = pseudo,
+            from = origin.key, to = consumer.key, rate = user.rate, w = user.w, t = 0, route_target = user }
+        end
+      end
+    end
+  end
+
+  local function cell_inputs(n)
+    if not n.return_ins then return n.ins end
+    local all = {}
+    for _, l in ipairs(n.ins) do all[#all + 1] = l end
+    for _, l in ipairs(n.return_ins) do all[#all + 1] = l end
+    return all
+  end
+  local function cell_input_segs(n)
+    if not n.return_fins then return n.fins end
+    local all = {}
+    for _, sg in ipairs(n.fins) do all[#all + 1] = sg end
+    for _, sg in ipairs(n.return_fins) do all[#all + 1] = sg end
+    return all
+  end
 
   -- Fit complete columns, including port stacks, headers and invisible long-link
   -- slots. Dense columns retain scrolling at the minimum readable geometry.
+  local function bar_height(n, scale, tin, tout)
+    if n.is_cell then
+      local ins = cell_inputs(n)
+      local input_ratio = cell_band_ratio(ins, scale)
+      local output_ratio = cell_band_ratio(n.outs, scale)
+      return math.max(CELL_BAND_MIN, cell_stack_height(ins, input_ratio), cell_stack_height(n.outs, output_ratio)),
+        input_ratio, output_ratio
+    end
+    return math.max(V.F_BAR_MIN, L.min_t, n.wvalue * scale, tin, tout)
+  end
+  local function head_height(n) return n.is_cell and V.F_LABEL + 4 or V.NODE_HEAD end
   local function packed(scale)
     local highest=0
     for _,col in ipairs(cols) do
@@ -1553,7 +1860,7 @@ function V.layout_focus(L, us, W, viewH, wide)
           local tout=n.w_stub_out>0 and math.max(L.min_t,n.w_stub_out*scale) or 0
           for _,l in ipairs(n.ins) do tin=tin+math.max(L.min_t,l.w*scale) end
           for _,l in ipairs(n.outs) do tout=tout+math.max(L.min_t,l.w*scale) end
-          h=h+V.NODE_HEAD+math.max(V.F_BAR_MIN,n.wvalue*scale,tin,tout)+V.F_GAP
+          h=h+head_height(n)+bar_height(n, scale, tin, tout)+V.F_GAP
         end
       end
       highest=math.max(highest,h-V.F_GAP)
@@ -1571,7 +1878,7 @@ function V.layout_focus(L, us, W, viewH, wide)
   end
   local s=lo
   L.fit = s
-  L.scale = us.keep_layout and us.layout_snapshot.scale or s * (us.zoom or 1)
+  L.scale = us.keep_layout and us.layout_snapshot.scale or s * (not wide and us.zoom or 1)
   for _, l in ipairs(L.links) do l.t = math.max(L.min_t, l.w * L.scale) end
   for _, sg in ipairs(segs) do sg.t = sg.link.t end
   for ci = 1, ncol do
@@ -1586,10 +1893,16 @@ function V.layout_focus(L, us, W, viewH, wide)
         for _, l in ipairs(n.ins) do tin = tin + l.t end
         for _, l in ipairs(n.outs) do tout = tout + l.t end
         n.tin, n.tout = tin, tout
-        n.h = math.max(V.F_BAR_MIN, L.min_t, n.wvalue * L.scale, tin, tout)
+        local height, input_ratio, output_ratio = bar_height(n, L.scale, tin, tout)
+        n.h = height
+        if n.is_cell then
+          for _, sg in ipairs(n.return_fins or {}) do sg.t = math.max(L.min_t, sg.w * L.scale) end
+          size_cell_bands(cell_input_segs(n), n.h, input_ratio)
+          size_cell_bands(n.fouts, n.h, output_ratio)
+        end
         -- a thin bar would hide behind its icon: then the icon sits above the bar
         n.icon_above = true
-        n.slot = V.NODE_HEAD + n.h
+        n.slot = head_height(n) + n.h
       end
     end
   end
@@ -1599,7 +1912,7 @@ function V.layout_focus(L, us, W, viewH, wide)
   -- port helpers: bar top of a slot, and centre of the bar
   local function bar_y(n)
     if n.kind == "via" then return n.top end
-    return n.top + V.NODE_HEAD
+    return n.top + head_height(n)
   end
   local function mid(n) return bar_y(n) + n.h / 2 end
   local function ins_of(n) return (n.kind == "via") and n.ins or n.fins end
@@ -1671,6 +1984,15 @@ function V.layout_focus(L, us, W, viewH, wide)
   --    vertical "blocks" with their median neighbour (so a long ribbon's vias line up into
   --    one straight run), blocks are compacted with real slot sizes, and the four
   --    alignments (left/right neighbours × top/bottom bias) are balanced.
+  local function stack_ports(n, list, total, edge)
+    local y = n.y + ((n.is_cell or n.kind == "via") and 0 or (n.h - total) / 2)
+    for _, sg in ipairs(list) do
+      local height = n.is_cell and sg.cell_band_h or sg.t
+      sg[edge] = y + (height - sg.t) / 2
+      y = y + height
+    end
+    return y
+  end
   local function ports()
     for ci = 1, ncol do
       for _, n in ipairs(cols[ci]) do
@@ -1678,10 +2000,17 @@ function V.layout_focus(L, us, W, viewH, wide)
         local o, i = outs_of(n), ins_of(n)
         table.sort(o, function(a, b) local ya, yb = mid(a.b), mid(b.b); if ya ~= yb then return ya < yb end return a.to < b.to end)
         table.sort(i, function(a, b) local ya, yb = mid(a.a), mid(b.a); if ya ~= yb then return ya < yb end return a.from < b.from end)
-        local off = (n.kind == "via") and 0 or (n.h - (n.tout or 0)) / 2
-        for _, sg in ipairs(o) do sg.y1 = n.y + off; off = off + sg.t end
-        off = (n.kind == "via") and 0 or (n.h - (n.tin or 0)) / 2
-        for _, sg in ipairs(i) do sg.y2 = n.y + off; off = off + sg.t end
+        n.stub_out_y = stack_ports(n, o, n.tout, "y1")
+        n.stub_in_y = stack_ports(n, i, n.tin, "y2")
+        if n.is_cell and n.return_fins then
+          local y = n.stub_in_y
+          for _, sg in ipairs(n.return_fins) do
+            local height = sg.cell_band_h
+            sg.y2 = y + (height - sg.t) / 2
+            sg.route_target.target_y = y + height / 2
+            y = y + height
+          end
+        end
       end
     end
   end
@@ -1850,71 +2179,74 @@ function V.layout_focus(L, us, W, viewH, wide)
     end
   end
 
-  -- 5. port stacking (ordered by the far end's y), stubs below
-  for ci = 1, ncol do
-    for _, n in ipairs(cols[ci]) do
-      local o, i = outs_of(n), ins_of(n)
-      table.sort(o, function(a, b) local ya, yb = mid(a.b), mid(b.b); if ya ~= yb then return ya < yb end return a.to < b.to end)
-      table.sort(i, function(a, b) local ya, yb = mid(a.a), mid(b.a); if ya ~= yb then return ya < yb end return a.from < b.from end)
-      -- ribbons + stub are centred on the bar on each side
-      local off = (n.kind == "via") and 0 or (n.h - (n.tout or 0)) / 2
-      for _, sg in ipairs(o) do sg.y1 = n.y + off; off = off + sg.t end
-      if n.kind ~= "via" then n.stub_out_y = n.y + off end
-      off = (n.kind == "via") and 0 or (n.h - (n.tin or 0)) / 2
-      for _, sg in ipairs(i) do sg.y2 = n.y + off; off = off + sg.t end
-      if n.kind ~= "via" then n.stub_in_y = n.y + off end
-    end
-  end
+  -- 5. final port positions after balancing the columns
+  ports()
 
-  -- 6. columns' x: every gap gets room for its vertical tracks (right angles) + stubs
+  -- 6. Reserve room for rounded bends that would otherwise be too steep at
+  -- the normal column spacing, including curves mode.
   local metro = us.lines == "metro"
   local gap_need = {}
-  for ci = 1, ncol - 1 do gap_need[ci] = MIN_GAP end
-  local function ortho_params(sg)
-    local k, q = S.elbow_index(math.min(0.7, sg.t / (sg.t + math.max(8, sg.t * 0.6))))
-    return k, sg.t * (1 - q) / q
-  end
+  local clearance = V.STUB + 8
+  local packed_gaps = {}
+  local last_width = col_widths[ncol] or V.NODE_W
+  local right_pad = header_w + 8 - last_width
+  local avail = W - V.PAD_L - right_pad
+  for _, width in ipairs(col_widths) do avail = avail - width end
+  local default_gap = ncol > 1 and math.max(MIN_GAP, math.min(MAX_GAP, avail / (ncol - 1))) or MIN_GAP
   local gap_segs = {}
   for _, sg in ipairs(segs) do
     local ci = sg.a.ci
     gap_segs[ci] = gap_segs[ci] or {}
     table.insert(gap_segs[ci], sg)
   end
-  if metro then
-    for ci, list in pairs(gap_segs) do
-      local need, rmax = 0, 0
-      for _, sg in ipairs(list) do
-        local D = math.abs(sg.y2 - sg.y1)
-        if D > 0.3 * MIN_GAP then
-          local _, R = ortho_params(sg)
+  for ci = 1, ncol - 1 do
+    local band = header_w - col_widths[ci]
+    local width = default_gap - band
+    local need, rmax, curve_width = 0, 0, 0
+    local bends = {}
+    for _, sg in ipairs(gap_segs[ci] or {}) do
+      local drop = math.abs(sg.y2 - sg.y1)
+      if Geometry.steep(width, drop, sg.t, metro) then
+        sg.ortho = Geometry.bend(sg.t, drop, math.huge)
+        if sg.ortho then
           need = need + sg.t + 6
-          if R > rmax then rmax = R end
+          rmax = math.max(rmax, sg.ortho.R)
+          if wide then bends[#bends + 1] = sg end
         end
+      else
+        curve_width = math.max(curve_width, Geometry.curve_width(drop, sg.t, metro))
       end
-      gap_need[ci] = math.max(MIN_GAP, V.HEADER_W - V.NODE_W + need + 2 * rmax + 2 * V.STUB + 16)
     end
+    if wide then
+      local slots
+      slots, need = pack_tracks(bends)
+      packed_gaps[ci] = {slots=slots, radius=rmax}
+    end
+    local tracks = need > 0 and need + 2 * (rmax + clearance) or 0
+    gap_need[ci] = math.ceil(math.max(MIN_GAP + V.NODE_W - col_widths[ci], band + math.max(curve_width, tracks)))
   end
-  local right_pad = V.HEADER_W + 8 - V.NODE_W
-  local avail = W - V.PAD_L - right_pad - ncol * V.NODE_W
   local sum = 0
   for ci = 1, ncol - 1 do sum = sum + gap_need[ci] end
-  local extra = (ncol > 1) and math.max(0, (avail - sum) / (ncol - 1)) or 0
+  local slack = 0
+  for ci = 1, ncol - 1 do slack = slack + math.max(0, default_gap - gap_need[ci]) end
+  local fill = slack > 0 and math.min(1, math.max(0, (avail - sum) / slack)) or 0
   local x = V.PAD_L
-  if ncol == 1 then x = math.max(V.PAD_L,math.floor((W-V.HEADER_W)/2)) end
+  if ncol == 1 then x = math.max(V.PAD_L,math.floor((W-header_w)/2)) end
   if us.keep_layout then x=us.layout_snapshot.col_x[1] or x end
   L.col_x = {}
   for ci = 1, ncol do
     L.col_x[ci] = math.floor(x + 0.5)
     for _, n in ipairs(cols[ci]) do n.x = L.col_x[ci] end
     if ci < ncol then
-      x = math.floor(L.col_x[ci] + V.NODE_W + math.max(gap_need[ci], math.min(MAX_GAP, gap_need[ci] + extra)) + 0.5)
+  local gap = gap_need[ci] + fill * math.max(0, default_gap - gap_need[ci])
+      x = math.floor(L.col_x[ci] + col_widths[ci] + gap + 0.5)
       if us.keep_layout then
         x = math.max(us.layout_snapshot.col_x[ci + 1] or x,
-          math.floor(L.col_x[ci] + V.NODE_W + gap_need[ci] + 0.5))
+          math.floor(L.col_x[ci] + col_widths[ci] + gap_need[ci] + 0.5))
       end
     end
   end
-  L.content_w = x + V.NODE_W + right_pad
+  L.content_w = x + last_width + right_pad
   if ncol>1 and not us.keep_layout and L.content_w<W then
     local dx=math.floor((W-L.content_w)/2)
     for ci,col in ipairs(cols) do
@@ -1927,18 +2259,19 @@ function V.layout_focus(L, us, W, viewH, wide)
 
   -- 7. routes: straight if level, else S-curve or right-angle track inside the gap
   for ci, list in pairs(gap_segs) do
-    local x0, x1 = L.col_x[ci] + V.HEADER_W, L.col_x[ci + 1]
+    local x0, x1 = L.col_x[ci] + header_w, L.col_x[ci + 1]
     local tracks = {}
     for _, sg in ipairs(list) do
       -- Stay level throughout the header band; all turns happen beyond labels.
       sg.route, sg.curve_x0, sg.cx0, sg.cx1 = "late", x0, x0, x1
-      local D = math.abs(sg.y2 - sg.y1)
-      if metro and D > 0.3 * (x1 - x0) then
-        local k, R = ortho_params(sg)
-        if D >= 2 * R + sg.t + 2 then
-          sg.ortho = { k = k, R = R }
-          tracks[#tracks + 1] = sg
-        end
+      if sg.ortho and not wide then tracks[#tracks + 1] = sg end
+    end
+    if wide then
+      local packed = packed_gaps[ci]
+      local xv = x0 + clearance + packed.radius
+      for _, track in ipairs(packed.slots) do
+        for _, entry in ipairs(track.segments) do entry.segment.ortho.xv = xv end
+        xv = xv + track.width + 6
       end
     end
     -- downward runs on the left, ordered so corners nest instead of crossing
@@ -1953,11 +2286,12 @@ function V.layout_focus(L, us, W, viewH, wide)
     -- has to turn before the other one comes in
     local placed = {}
     local function yover(a0, a1, b0, b1) return math.min(a1, b1) - math.max(a0, b0) > 0.5 end
-    local xv = x0 + V.STUB + 8
+    local xv = x0 + clearance
     for _, sg in ipairs(tracks) do
       local R, t = sg.ortho.R, sg.t
-      local lo = math.max(xv, x0 + V.STUB + 8 + R)
-      local hi = x1 - V.STUB - 8 - t - R
+      local first = math.max(xv, x0 + clearance + R)
+      local last = x1 - clearance - t - R
+      local lo, hi = first, last
       for _, p in ipairs(placed) do
         if yover(sg.y1, sg.y1 + t, p.y2, p.y2 + p.t) then
           hi = math.min(hi, p.ortho.xv + p.t + p.ortho.R + R)       -- turn before p arrives
@@ -1966,12 +2300,13 @@ function V.layout_focus(L, us, W, viewH, wide)
           lo = math.max(lo, p.ortho.xv - p.ortho.R - t - R)          -- arrive after p left
         end
       end
-      if lo > hi then
-        sg.ortho = nil -- no clean track: an S-curve crosses instead
-      else
+      if lo > hi then lo = first end -- keep a dedicated track even when legs must cross
+      if lo <= last then
         sg.ortho.xv = lo
         xv = lo + t + 6
         placed[#placed + 1] = sg
+      else
+        sg.ortho = nil
       end
     end
   end
@@ -1991,7 +2326,7 @@ function V.layout_focus(L, us, W, viewH, wide)
   L.label_above = true
   L.label_w = {}
   for ci = 1, ncol do
-    L.label_w[ci] = V.HEADER_W - 8
+    L.label_w[ci] = header_w - 8
   end
   L.lane_list = {}
   -- ribbons that cross inside a gap get different colours
