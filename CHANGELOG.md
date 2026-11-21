@@ -29,6 +29,22 @@ See [validation and engineering notes](docs/validation.md) for historical test d
 - Use rounded bends on steep flows and close gaps at ribbon joins, including at fractional UI scales.
 - Preserve dropdowns, sidebar controls and unfinished group names during live and manual graph refreshes.
 
+## 0.3.11 — 2026-11-20
+
+### Gui
+
+- Give Full Sankey more room with tighter column spacing and a single toolbar row when no extra controls are needed.
+- Add a clickable overview with all routed flows. Move grouping controls into Selected material and add shortcuts to Focus and Balance.
+- Show recipe rates and observed machine icons on material hover and in the Selected material Breakdown. Open Machine status from the map icon beside Breakdown. List active recipes hidden from the chart in a separate section.
+- Show material names without icons or rates below 80% chart zoom when label space permits.
+- Zoom the whole Full Sankey chart in 10-percentage-point steps. Fit rounds down to the largest step that fits both axes.
+
+### Bugfixes
+
+- Use rounded bends on steep flows and close gaps at ribbon joins, including at fractional UI scales.
+- Match the chart background and gray branch fades across the polygon and night-vision-safe sprite renderers.
+- Preserve dropdowns, sidebar controls and unfinished group names during live and manual graph refreshes.
+
 ## 0.3.10 — 2026-11-19
 
 ### Features

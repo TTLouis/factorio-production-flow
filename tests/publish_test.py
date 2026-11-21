@@ -44,10 +44,10 @@ class ReleaseTests(unittest.TestCase):
         self.remote = {"id": 123, "tag_name": "v0.1.1", "draft": False,
                        "assets": [{"name": self.archive.name, "state": "uploaded", "digest": "sha256:" + P.digest(self.archive)}]}
 
-    def bundle(self):
+    def bundle(self, gallery_source=None):
         output = self.root / "bundle"
         with patch.object(P, "release", return_value=self.remote), patch.object(P, "request", return_value=self.archive.read_bytes()):
-            P.prepare(self.root, "v0.1.1", output)
+            P.prepare(self.root, "v0.1.1", output, gallery_source)
         return output
 
     def test_valid_archive_and_page(self):
@@ -266,6 +266,44 @@ class ReleaseTests(unittest.TestCase):
         previous = "Old wording.\n\n![Test](/old.png)"
         self.assertEqual(P.gallery_description(previous, self.description), self.description)
         self.assertEqual(P.gallery_description("Approved description.", self.description), self.description)
+
+    def test_gallery_only_uses_new_images_and_preserves_the_live_page(self):
+        gallery_source = self.root / "updated"
+        screenshots = gallery_source / "docs/screenshots"
+        screenshots.mkdir(parents=True)
+        new_image = screenshots / "new.png"
+        new_image.write_bytes(b"new screenshot")
+        (gallery_source / "docs/mod-portal.md").write_text(
+            (self.root / "docs/mod-portal.md").read_text().replace("/test.png", "/new.png"))
+        bundle = self.bundle(gallery_source)
+        plan = P.verify_bundle(bundle)
+        self.assertTrue(plan["gallery_only"])
+        self.assertEqual((bundle / "gallery/new.png").read_bytes(), new_image.read_bytes())
+        fake = FakePortal(plan)
+        previous = "Approved\r\n description.\r\n\r\n![Test](/assets/old.png)"
+        fake.state = {"releases": [{"version": plan["version"], "sha1": plan["sha1"]}],
+                      "description": previous, "summary": "Live summary", "tags": ["manual"],
+                      "images": [{"id": "old", "url": "/assets/old.png"}]}
+        with patch.object(P, "github") as github:
+            self.deploy(bundle, fake)
+        github.assert_not_called()
+        self.assertEqual(fake.uploads, 0)
+        self.assertEqual(fake.image_uploads, 1)
+        self.assertEqual(fake.state["description"], previous.replace("/assets/old.png", "https://cdn.example/test.png"))
+        self.assertEqual(fake.state["summary"], "Live summary")
+        self.assertEqual(fake.state["tags"], ["manual"])
+
+    def test_gallery_only_stops_before_writes_when_release_or_wording_differs(self):
+        bundle = self.bundle(self.root)
+        plan = P.verify_bundle(bundle)
+        fake = FakePortal(plan)
+        with self.assertRaisesRegex(P.PublishError, "existing Mod Portal release"):
+            self.deploy(bundle, fake)
+        fake.state = {"releases": [{"version": plan["version"], "sha1": plan["sha1"]}],
+                      "description": "Different live wording.\n\n![Test](/assets/old.png)"}
+        with self.assertRaisesRegex(P.PublishError, "change the live description"):
+            self.deploy(bundle, fake)
+        self.assertEqual(fake.calls, [])
 
 
 class FakePortal:

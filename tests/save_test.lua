@@ -77,7 +77,7 @@ if mode == "focus" then
   cases={
     {name="focus-petroleum-before",surface="nauvis",tab="focus",focus="fluid/petroleum-gas"},
     {name="focus-wood",surface="nauvis",tab="focus",pick="item/wood",empty=true},
-    {name="focus-back",surface="nauvis",tab="focus",back=true},
+    {name="focus-back",surface="nauvis",tab="focus",focus="fluid/petroleum-gas",back_from="item/wood"},
     {name="focus-wood-sprites",surface="nauvis",tab="focus",pick="item/wood",empty=true,renderer="sprites"},
     {name="focus-unrecorded-fluid",surface="nauvis",tab="focus",pick="fluid/lithium-brine",empty=true},
   }
@@ -1077,8 +1077,14 @@ function T.tick(UI, Sampler)
       UI.on_text_changed{element=dialog.ssk_title.ssk_query,player_index=player.index}
       local slot=assert(matching(dialog,function(el) return el.tags.ssk_picker=="pick" and el.tags.key==c.pick end))
       assert(UI.on_click{element=slot,player_index=player.index})
-    elseif c.back then
-      assert(UI.on_click{element=find_action(root,"f_back"),player_index=player.index})
+      local back=assert(find_action(root,"f_back"))
+      assert(not back.enabled,"Selecting a new Focus root in the picker must clear the visit history")
+    elseif c.back_from then
+      local fx=SK.focus_state(us)
+      assert(SK.select_focus(fx,c.back_from),"The Back case needs a visit from the active oil chart")
+      UI.refresh(player,false,false,true)
+      local back=assert(find_action(root,"f_back"))
+      assert(back.enabled and UI.on_click{element=back,player_index=player.index})
     end
     local fx=SK.focus_state(us)
     local L=View.build(player,fx,us.canvas_w,us.canvas_h)
@@ -1287,8 +1293,9 @@ function T.tick(UI, Sampler)
           assert(not fx.focus and not fx.sel and not fx.pinned and #fx.focus_hist==0 and #fx.focus_forward==0
             and storage.bins==bins and fx.zoom==zoom and fx.live==live,"Clear did not reset root/navigation while preserving data and preferences")
           assert(not find_action(root,"f_back").enabled and not find_action(root,"f_forward").enabled,"Cleared history still navigates")
-          local slot=find_named(root,"ssk_material_slot")
-          assert(slot.sprite=="utility/search" and slot.tags.current=="" and not find_action(root,"f_clear_history").enabled,
+          local slot=assert(picker_action(root,"open"))
+          assert(slot.tags.target=="focus" and slot.sprite=="utility/search" and slot.tags.current==""
+            and not find_action(root,"f_clear_history").enabled,
             "Cleared Focus must show an empty search slot")
         end
       else
