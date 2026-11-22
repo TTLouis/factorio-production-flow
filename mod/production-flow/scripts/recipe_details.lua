@@ -71,7 +71,7 @@ local function count(counts, recipe, name, quality, speed)
   by_speed[rounded] = (by_speed[rounded] or 0) + 1
 end
 
-local function machines_for(context, recipe)
+function RD.machine_counts(context)
   local key = context.members or context.sidx
   if cache.tick ~= game.tick or cache.key ~= key then
     local counts = {}
@@ -92,10 +92,15 @@ local function machines_for(context, recipe)
     end
     cache = { tick = game.tick, key = key, counts = counts, groups = {} }
   end
+  return cache.counts
+end
+
+local function machines_for(context, recipe)
+  local counts = RD.machine_counts(context)
   local groups = cache.groups[recipe]
   if groups then return groups end
   groups = {}
-  for name, by_quality in pairs(cache.counts[recipe] or {}) do
+  for name, by_quality in pairs(counts[recipe] or {}) do
     local prototype = prototypes.entity[name]
     for quality, by_speed in pairs(by_quality) do
       local base = prototype and prototype.get_crafting_speed(quality) or 0

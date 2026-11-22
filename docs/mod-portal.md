@@ -20,7 +20,7 @@ Available in English, Simplified Chinese (简体中文), and Traditional Chinese
 
 ### Group your factory into production cells
 
-Open **Cells**, click **+**, and drag over a production area. The editor suggests a name, an icon, inputs and outputs, and can link train stops and storage in the selection. Adjust the suggestions to match your setup, and divide larger builds into smaller cells when you want to inspect their stages separately.
+Open **Cells**, click **+**, and drag over a production area. The editor suggests a name, an icon, inputs and outputs, and can link train stops and storage in the selection. Click **?** beside **+** for the creation guide, including how item or fluid icons in stop names help match storage. Adjust the suggestions to match your setup, and divide larger builds into smaller cells when you want to inspect their stages separately.
 
 - **Flow** shows what a cell takes in and makes. Switch between **Measured** and **Capacity** to compare recorded production with what the machines could make at full speed. Choose **All** to compare net inputs and outputs across production stages.
 - **Map** shows where the cell's machines, train stops and buffers are. See their outlines in the world and on the map, then jump to the area in remote view.
@@ -78,6 +78,8 @@ Use **Back**, **Forward** or **Last visits** to revisit materials in Focus. Zoom
 ![Focus traces the recipes connected to electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/35-focus-circuit.png)
 
 **Full Sankey** shows recipe flows across one surface. Click a material in the chart overview to jump to it. Zoom in for detail or use **Fit** to bring the chart into view. In **Selected material**, the **Breakdown** lists recipes that make or use the material, including active recipes hidden from the chart. Open **Focus**, **Balance**, or **Machine status** from there to investigate further.
+
+Large **Cells Flow** and **Full Sankey** charts show up to 150 nodes and 300 links. Use **Refresh** to update an oversized chart. Enable **Bypass Sankey size limit** in the save’s map mod settings to draw the full chart on refresh.
 
 Hover a recipe bar to see recipe amounts, rates and the machines running it. Thin return arrows show flows that loop back, such as recycling or circulating catalysts.
 

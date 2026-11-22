@@ -65,6 +65,23 @@ local function screenshot(player, name)
     resolution = {1920, 1080}, show_gui = true, force_render = true}
 end
 
+local function dense_chart()
+  local graph = { nodes = {}, links = {}, columns = { "Inputs", "Outputs" }, chart_zoom = true, mode = "measured" }
+  for i = 1, 152 do
+    local key = "item/copper-plate#" .. i
+    graph.nodes[key] = { key = key, kind = "item", prod = 2, cons = 0, tier = 2, loops = {} }
+  end
+  for i = 1, 2 do
+    local key = "item/iron-plate#" .. i
+    graph.nodes[key] = { key = key, kind = "item", prod = 0, cons = 152, tier = 1, loops = {} }
+    for j = 1, 152 do
+      local output = "item/copper-plate#" .. j
+      graph.links[key .. ">" .. output] = { from = key, to = output, rate = 1, details = {} }
+    end
+  end
+  return graph
+end
+
 local function outlines(player, slot)
   local mine = storage.cell_outlines and storage.cell_outlines[player.index]
   return mine and mine[slot or "map"]
@@ -596,6 +613,45 @@ function T.tick(UI)
     storage.cell_test_phase = "capture-overview"
   elseif stage == "capture-overview" then
     screenshot(player, "overview")
+    storage.cell_test_phase = "flow-settings"
+  elseif stage == "flow-settings" then
+    local main = player.gui.screen.ssk_main
+    local us = storage.ui[player.index]
+    local state = us.cells.chart
+    local chart = cells_tab(player).ssk_cell_views.ssk_cell_chart
+    local toolbar, plot = chart.ssk_cell_toolbar.ssk_cell_title, chart.ssk_cell_plot
+    click(player, toolbar, "ssk_sk", "chart_settings")
+    local panel = assert(plot.ssk_settings, "The All Flow gear must open its settings panel")
+    assert(state.settings_open and toolbar.ssk_chart_settings.toggled and not us.settings_open,
+      "The gear changes only the active Cells chart")
+    UI.refresh(player, true)
+    assert(panel.valid and plot.ssk_settings == panel, "Measured refresh must preserve the open controls")
+    for _, option in ipairs({
+      { "f_heights", 1, "heights", "linear" },
+      { "balance_colors", 2, "color_mode", "source" },
+      { "f_lines", 2, "lines", "metro" },
+    }) do
+      local dropdown = assert(find(plot.ssk_settings, "ssk_sk", option[1]))
+      dropdown.selected_index = option[2]
+      script.get_event_handler(defines.events.on_gui_selection_state_changed){player_index = player.index, element = dropdown}
+      assert(state[option[3]] == option[4], "The dropdown must update the Cells chart")
+    end
+    local live = assert(find(plot.ssk_settings, "ssk_sk", "live"))
+    live.state = false
+    script.get_event_handler(defines.events.on_gui_checked_state_changed){player_index = player.index, element = live}
+    local node = assert(find(plot, "key", "recipe/cell-2"))
+    UI.refresh(player, true)
+    assert(state.live == false and node.valid, "Turning off Auto-update must pause the measured chart")
+    click(player, plot.ssk_settings, "ssk_sk", "chart_settings")
+    assert(not plot.ssk_settings and not toolbar.ssk_chart_settings.toggled, "Close must dismiss the settings panel")
+    local labels = toolbar.ssk_show_labels
+    labels.state = false
+    script.get_event_handler(defines.events.on_gui_checked_state_changed){player_index = player.index, element = labels}
+    assert(state.show_labels == false and not labels.state, "The label checkbox must update the Cells chart")
+    click(player, toolbar, "ssk_sk", "chart_settings")
+    script.get_event_handler(defines.events.on_gui_closed){player_index = player.index, element = main}
+    assert(main.valid and player.opened == main and not plot.ssk_settings and not state.settings_open,
+      "Esc must dismiss the settings before it closes the Cells window")
     storage.cell_test_phase = "open-inside"
   elseif stage == "open-inside" then
     local tabs = player.gui.screen.ssk_main.ssk_inner.ssk_tabs
@@ -739,6 +795,26 @@ function T.tick(UI)
     storage.cell_test_phase = "capture-capacity"
   elseif stage == "capture-capacity" then
     screenshot(player, "inside-capacity")
+    storage.cell_test_phase = "capacity-settings"
+  elseif stage == "capacity-settings" then
+    local views = cells_tab(player).ssk_cell_views
+    local chart = views.ssk_cell_chart
+    click(player, chart.ssk_cell_toolbar, "ssk_sk", "chart_settings")
+    local panel = assert(chart.ssk_cell_plot.ssk_settings, "The selected cell's Capacity gear must open")
+    assert(find(panel, "ssk_sk", "f_heights") and not find(panel, "ssk_sk", "live"),
+      "Capacity supports chart options and refreshes on demand")
+    storage.cell_test_phase = "capture-capacity-settings"
+  elseif stage == "capture-capacity-settings" then
+    screenshot(player, "flow-settings")
+    storage.cell_test_phase = "leave-capacity-settings"
+  elseif stage == "leave-capacity-settings" then
+    local views = cells_tab(player).ssk_cell_views
+    views.selected_tab_index = 2
+    script.get_event_handler(defines.events.on_gui_selected_tab_changed){player_index = player.index, element = views}
+    assert(not storage.ui[player.index].cells.chart.settings_open, "Leaving Flow must close chart settings")
+    views.selected_tab_index = 1
+    script.get_event_handler(defines.events.on_gui_selected_tab_changed){player_index = player.index, element = views}
+    assert(not views.ssk_cell_chart.ssk_cell_plot.ssk_settings, "Returning to Flow must keep the panel closed")
     storage.cell_test_phase = "measured-again"
   elseif stage == "measured-again" then
     local main = player.gui.screen.ssk_main
@@ -887,13 +963,33 @@ function T.tick(UI)
     screenshot(player, "empty-surface")
     storage.cell_test_phase = "help"
   elseif stage == "help" then
-    click(player, player.gui.screen.ssk_main, "ssk_ui", "help")
+    local main = player.gui.screen.ssk_main
+    click(player, main, "ssk_ui", "help")
+    local general = player.gui.screen.ssk_help.ssk_help_inner.ssk_help_tabs
+    assert(general.selected_tab_index == 1, "General help must open on Start here")
+    local bar = cells_tab(player).ssk_cell_sidebar.ssk_cell_list_bar
+    local buttons = bar.children
+    assert(buttons[#buttons - 1] == bar.ssk_cell_create_help and buttons[#buttons] == bar.ssk_cell_new_button,
+      "Create help must sit beside the add button")
+    assert(bar.ssk_cell_create_help.tooltip[1] == "production-flow.cells-create-help")
+    assert(bar.ssk_cell_new_button.tooltip[4][1] == "production-flow.cells-first-drag-tip")
+    click(player, bar, "ssk_ui", "cell_create_help")
     local tabs = player.gui.screen.ssk_help.ssk_help_inner.ssk_help_tabs
-    assert(tabs.tabs[4].tab.caption[1] == "production-flow.cells-tab", "Help needs a Cells topic")
-    tabs.selected_tab_index = 4
+    local topic = tabs.tabs[tabs.selected_tab_index]
+    local body = topic.content.children[1]
+    assert(topic.tab.caption[1] == "production-flow.cells-tab", "Create help must open the Cells topic")
+    assert(body.children[1].caption[1] == "production-flow.help-cells-create",
+      "Create and edit must be the first section")
+    assert(has_caption(body, "production-flow.cells-first-drag-tip")
+      and has_caption(body, "production-flow.help-cells-create-rail"), "Creation help must explain both rail selection paths")
+    assert(player.opened == main, "Opening help must keep the Cells window active")
     storage.cell_test_phase = "capture-help"
   elseif stage == "capture-help" then
     screenshot(player, "help-cells")
+    storage.cell_test_phase = "close-help"
+  elseif stage == "close-help" then
+    click(player, player.gui.screen.ssk_help, "ssk_ui", "help_close")
+    assert(not player.gui.screen.ssk_help and player.opened == player.gui.screen.ssk_main)
     storage.cell_test_phase = "refinery-editor"
   elseif stage == "refinery-editor" then
     edit_refinery(player, UI)
@@ -982,6 +1078,40 @@ function T.tick(UI)
     storage.cell_test_phase = "capture-recipe-markers"
   elseif stage == "capture-recipe-markers" then
     screenshot(player, "recipe-returns-markers")
+    storage.cell_test_phase = "open-dense-chart"
+  elseif stage == "open-dense-chart" then
+    local ui_state = storage.ui[player.index]
+    ui_state.tab_id, ui_state.cells.view = "cells", nil
+    UI.open(player)
+    local chart = cells_tab(player).ssk_cell_views.ssk_cell_chart
+    chart.ssk_cell_toolbar.ssk_cell_title.ssk_cell_heading.caption = "Synthetic dense Flow"
+    local plot = chart.ssk_cell_plot
+    local state = storage.ui[player.index].cells.chart
+    state.chart_fit, state.show_labels, state.split_raw = true, false, false
+    Sankey.fill(player, plot, state, 1260, 730, true, false, dense_chart())
+    local notice = assert(plot.ssk_size_notice)
+    assert(notice.visible and notice.caption[1] == "production-flow.sankey-size-limited")
+    assert(tonumber(notice.tooltip[2]) == 150 and tonumber(notice.tooltip[3]) == 296,
+      "Native graph should retain both feed nodes and their links: " .. serpent.line(notice.tooltip))
+    local first = plot.ssk_sp.ssk_canvas.children[1]
+    Sankey.fill(player, plot, state, 1260, 730, false, true, dense_chart())
+    assert(first.valid, "Automatic refresh must leave the oversized chart intact")
+    storage.cell_test_phase = "capture-dense-chart"
+  elseif stage == "capture-dense-chart" then
+    screenshot(player, "budget-limited")
+    storage.cell_test_phase = "dense-bypass"
+  elseif stage == "dense-bypass" then
+    settings.global["ssk-bypass-sankey-size-limit"] = { value = true }
+    local plot = cells_tab(player).ssk_cell_views.ssk_cell_chart.ssk_cell_plot
+    local state = storage.ui[player.index].cells.chart
+    Sankey.fill(player, plot, state, 1260, 730, false, false, dense_chart())
+    assert(plot.ssk_size_notice.caption[1] == "production-flow.sankey-size-unlimited")
+    assert(tonumber(plot.ssk_size_notice.tooltip[2]) == 154 and tonumber(plot.ssk_size_notice.tooltip[3]) == 304)
+    settings.global["ssk-bypass-sankey-size-limit"] = { value = false }
+    storage.cell_test_phase = "capture-dense-bypass"
+  elseif stage == "capture-dense-bypass" then
+    screenshot(player, "budget-bypassed")
+    log("CHART BUDGET NATIVE PASS")
     storage.cell_test_phase = "finish"
   elseif stage == "finish" then
     storage.cell_test_phase = "done"

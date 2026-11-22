@@ -14,7 +14,7 @@ local CellRail = require("scripts.cell_rail")
 local CellCapacity = require("scripts.cell_capacity")
 
 local STATS_EVERY = 60
-local UI_REFRESH_EVERY = 300
+local UI_REFRESH_STRIDE, UI_REFRESH_SLOTS = 6, 50 -- One pass per player every 300 ticks.
 
 local function setup(rescan)
   storage.test = storage.test or {}
@@ -153,7 +153,7 @@ script.on_event(defines.events.on_tick, function(e)
 end)
 
 script.on_nth_tick(STATS_EVERY, function(e) Sampler.on_stats(e.tick) end)
-script.on_nth_tick(UI_REFRESH_EVERY, function() UI.auto_refresh() end)
+script.on_nth_tick(UI_REFRESH_STRIDE, function(e) UI.auto_refresh(e.tick / UI_REFRESH_STRIDE, UI_REFRESH_SLOTS) end)
 script.on_nth_tick(600, function(e)
   Sampler.on_stock(e.tick)
   if track_cargo then Transfers.on_housekeeping(e.tick) end

@@ -378,6 +378,21 @@ contracts: [initial publication](https://wiki.factorio.com/Mod_publish_API),
 [images](https://wiki.factorio.com/Mod_images_API).
 
 
+## Sankey refresh and chart limits
+
+Cells Flow and Full Sankey limit the displayed graph to 150 nodes and 300
+links, including raw-input copies and return connections. Chart filters and
+grouping apply first. The budget prioritizes the selected or pinned material
+and its connections, then ranks other links by their scaled flow. Sampling and
+saved history retain their full scope.
+
+An oversized chart shows a manual-refresh notice. The map setting **Bypass
+Sankey size limit** permits an uncapped draw when a player refreshes or changes
+the chart. The setting applies across the save. Oversized charts stay on manual
+refresh with either setting. Connected players are assigned stable refresh
+phases within each 300-tick interval. For open, under-budget charts, matching
+chart data skips layout and GUI reconstruction during automatic refresh.
+
 ## Chest stock and UPS stress tests
 
 `python tests/stock_stress.py --open --save PATH_TO_COPIED_SPACE_AGE_SAVE`

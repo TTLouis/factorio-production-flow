@@ -190,7 +190,7 @@ for t = 1, 60 * 300 do
   stats_out["automation-science-pack"] = (stats_out["automation-science-pack"] or 0) + 0.15/60
   handlers.on_tick({ tick = t })
   if t % 60 == 0 then nth[60]({ tick = t }) end
-  if t % 300 == 0 then nth[300]({ tick = t }) end
+  if t % 6 == 0 then nth[6]({ tick = t }) end
   if t % 600 == 0 then nth[600]({ tick = t }) end
   if t == 100 then machines[6].valid = false end   -- removed gear machine
 end
@@ -274,6 +274,7 @@ dofile(TESTDIR .. "/full_readability_test.lua")
 dofile(TESTDIR .. "/recipe_api_test.lua")
 dofile(TESTDIR .. "/productivity_test.lua")
 dofile(TESTDIR .. "/selection_refresh_test.lua")
+dofile(TESTDIR .. "/chart_budget_test.lua")
 dofile(TESTDIR .. "/history_ui_test.lua")
 dofile(TESTDIR .. "/plain_names_test.lua")
 dofile(TESTDIR .. "/usability_test.lua")

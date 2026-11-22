@@ -6,6 +6,22 @@ Release history is maintained in the [Factorio changelog](mod/production-flow/ch
 Run `python tools/changelog.py --write` after editing it.
 See [validation and engineering notes](docs/validation.md) for historical test details.
 
+## 0.4.12 — 2026-11-21
+
+### Gui
+
+- Add a question-mark button beside + in Cells that opens Create and edit help. The help and tooltips explain first-drag linking, how item or fluid icons in stop names help match storage, and when to use the crosshair tools.
+
+### Bugfixes
+
+- Make the Chart settings gear and Show labels checkbox in Cells Flow control the active chart. Keep the settings panel open during Measured auto-updates.
+
+### Optimizations
+
+- Limit large Cells Flow and Full Sankey charts to 150 visible nodes and 300 links, giving priority to the selected or pinned chain.
+- Add the per-save Bypass Sankey size limit setting. Oversized charts refresh on demand with either setting.
+- Stagger automatic updates across players and skip layout and redraw when the chart data is unchanged.
+
 ## 0.4.11 — 2026-11-21
 
 ### Features

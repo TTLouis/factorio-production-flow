@@ -293,8 +293,10 @@ function UI.refresh(player, only_auto, full, keep_balance_rows, refresh_graph)
   update_header(player,us)
   if id == "cells" then
     us.cells = us.cells or {}
-    if only_auto and not CellsUI.rail_view(us.cells) and CellsUI.mode(us.cells) ~= "measured" then return end
     us.cells.chart = us.cells.chart or {}
+    if only_auto and not CellsUI.rail_view(us.cells)
+      and (CellsUI.mode(us.cells) ~= "measured" or (us.cells.view ~= "map"
+        and (us.cells.chart.live == false or us.cells.chart.oversized))) then return end
     us.cells.period, us.cells.sidx = us.period, us.sidx
     CellsUI.fill(player, c, us.cells, us.canvas_w, tab_pane_height(us), full, only_auto)
     return
@@ -319,7 +321,7 @@ end
 -- Chart settings float over the chart; Esc, tab changes and reopening close them.
 local function close_chart_settings(us)
   local open = false
-  for _, s in pairs({ us, us.fx, us.bal_fx }) do
+  for _, s in pairs({ us, us.fx, us.bal_fx, us.cells and us.cells.chart }) do
     if s.settings_open then s.settings_open, open = nil, true end
   end
   return open
@@ -458,6 +460,7 @@ end
 
 local function chart_state(us)
   if us.tab_id == "balance" then return SK.balance_state(us) end
+  if us.tab_id == "cells" then return us.cells and us.cells.chart or us end
   return us.tab_id == "focus" and SK.focus_state(us) or us
 end
 
@@ -575,18 +578,6 @@ function UI.on_click(e)
     UI.refresh(player)
     return true
   end
-  if us.tab_id == "cells" and (el.tags.ssk_sk == "zoom_in" or el.tags.ssk_sk == "zoom_out"
-      or el.tags.ssk_sk == "zoom_fit") then
-    SK.on_click(e, us.cells.chart)
-    UI.refresh(player)
-    return true
-  end
-  if us.tab_id == "cells" and el.tags.ssk_sk == "node" then
-    local chart = us.cells.chart
-    chart.sel = chart.sel ~= el.tags.key and el.tags.key or nil
-    UI.refresh(player)
-    return true
-  end
   local chart = chart_state(us)
   local previous = chart.focus
   local r = SK.on_click(e, chart)
@@ -650,7 +641,9 @@ function UI.on_click(e)
     UI.refresh(player)
   elseif a == "cell_delete" and us.tab_id == "cells" and us.cells.selected then
     Cells.prompt_delete(player, us.cells.selected, true, UI.close)
-  elseif a == "help" then close_inspectors(player); Help.open(player)
+  elseif a == "help" or (a == "cell_create_help" and us.tab_id == "cells") then
+    close_inspectors(player)
+    Help.open(player, a == "cell_create_help" and "cells" or nil)
   elseif a == "help_close" then Help.close(player);player.opened=player.gui.screen[WIN]
   elseif a == "watch" or a == "machine_status" then
     local material = chart.focus
@@ -931,6 +924,7 @@ function UI.on_tab_changed(e)
   end
   if f.name == "ssk_cell_views" and us.tab_id == "cells" then
     local index = f.selected_tab_index
+    close_chart_settings(us)
     us.cells.view = index == 2 and "map" or index == 3 and "train_stops" or index == 4 and "train_history" or nil
     UI.refresh(player)
     return true
@@ -1053,9 +1047,9 @@ function UI.on_string_translated(e)
   end
 end
 
-function UI.auto_refresh()
+function UI.auto_refresh(phase, slots)
   for _, p in pairs(game.connected_players) do
-    if UI.is_open(p) then UI.refresh(p, true) end
+    if (not phase or p.index % slots == phase % slots) and UI.is_open(p) then UI.refresh(p, true) end
   end
 end
 

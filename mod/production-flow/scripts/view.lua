@@ -1,4 +1,5 @@
 local Loc = require("scripts.locale")
+local Budget = require("scripts.chart_budget")
 -- M4 view model + layout: turns the measured Model into a drawable Sankey.
 --
 -- Display graph (D1):
@@ -795,7 +796,7 @@ end
 ---------------------------------------------------------------------------
 -- public: build everything needed to draw
 ---------------------------------------------------------------------------
-function V.build(player, us, W, viewH, source)
+function V.build(player, us, W, viewH, source, automatic)
   local pi = player.index
   local sidx = us.sidx or player.surface.index -- surfaces are never combined
   local m, nodes, links, reversing, recipes
@@ -869,6 +870,10 @@ function V.build(player, us, W, viewH, source)
   if hi < lo then hi = lo end
   drop_nodes(nodes, links, function(k) local t = nodes[k].tier; return t >= lo and t <= hi end)
   local returns = visible_returns(nodes, kmap, reversing, source and source.fuel_returns, source and source.cell_returns)
+  local budget
+  if us.is_cell_chart or (not source and us.view ~= "focus" and not us.neighborhood) then
+    budget, returns = Budget.apply(nodes, links, returns, us, kmap, ff, automatic)
+  end
 
   -- per-node sums, stubs, value
   for _, n in pairs(nodes) do n.ins, n.outs, n.sin, n.sout = {}, {}, 0, 0 end
@@ -956,8 +961,13 @@ function V.build(player, us, W, viewH, source)
 
   -- columns = distinct tiers still shown
   local idx, col_tiers = {}, {}
+  local occupied
+  if budget and budget.oversized and not budget.bypass then
+    occupied = {}
+    for _, n in pairs(nodes) do occupied[n.tier] = true end
+  end
   for _, t in ipairs(all_tiers) do
-    if t >= lo and t <= hi then col_tiers[#col_tiers + 1] = t; idx[t] = #col_tiers end
+    if t >= lo and t <= hi and (not occupied or occupied[t]) then col_tiers[#col_tiers + 1] = t; idx[t] = #col_tiers end
   end
   for _, n in pairs(nodes) do n.ci = idx[n.tier] end
 
@@ -1001,7 +1011,7 @@ function V.build(player, us, W, viewH, source)
     end
   end
   if us.split_raw ~= false and not focused then
-    local split = V.split_raw(nodes, link_list, pi)
+    local split = V.split_raw(nodes, link_list, pi, budget)
     for _, route in ipairs(returns) do
       for i, n in ipairs(route.sources) do route.sources[i] = split[n] or n end
       for _, target in ipairs(route.targets) do target.node = split[target.node] or target.node end
@@ -1069,6 +1079,10 @@ function V.build(player, us, W, viewH, source)
     L.details = { rates = RecipeDetails.from_model(m.rates and m.rates.recipes), sidx = sidx }
   end
   L.returns = returns
+  if budget and budget.oversized then
+    L.budget = budget
+    viewH = math.max(100, viewH - 24)
+  end
   for _, route in ipairs(returns) do
     local origin = route.sources[1]
     if origin then
@@ -1098,6 +1112,16 @@ function V.build(player, us, W, viewH, source)
     for _, k in ipairs(sorted_keys(us[field] or {})) do signature[#signature + 1] = field .. k .. "=" .. us[field][k] end
   end
   signature = table.concat(signature, "|")
+  if budget and not budget.oversized then
+    local minimum_evidence = m.seconds >= 2
+    L.render_fingerprint = Budget.fingerprint(signature, L, {
+      minimum_evidence, source and source.empty, L.column_labels, L.all_tiers, L.details and L.details.rates,
+      L.details and RecipeDetails.machine_counts(L.details), us.sel, us.pinned, us.show_labels,
+      us.chart_zoom, us.chart_fit, us.renderer, us.color_mode, player.display_scale,
+      player.mod_settings["ssk-return-direction-markers"] and player.mod_settings["ssk-return-direction-markers"].value,
+    })
+    if automatic and us.render_fingerprint == L.render_fingerprint then return end
+  end
   us.keep_layout = us.layout_snapshot and us.layout_snapshot.signature == signature or false
   if us.neighborhood then Neighborhood.layout(L, us, W, viewH, V)
   elseif (source and source.columns) or focused or (us.view ~= "focus" and us.layout ~= "lanes") then
@@ -1124,7 +1148,7 @@ end
 --   earliest consumer there, in an Loc("group-inputs") sub-lane. Mining (stub_in) is shared out in
 --   proportion; "other uses" stays on the biggest copy.
 ---------------------------------------------------------------------------
-function V.split_raw(nodes, links, pi)
+function V.split_raw(nodes, links, pi, budget)
   local split = {}
   for _, key in ipairs(sorted_keys(nodes)) do
     local n = nodes[key]
@@ -1149,37 +1173,42 @@ function V.split_raw(nodes, links, pi)
         g.rate, g.w = g.rate + l.rate, g.w + l.w
         if l.b.ci < g.ci then g.ci = l.b.ci end
       end
-      table.sort(order, function(a, b) return by_lane[a].rate > by_lane[b].rate end)
+      table.sort(order, function(a, b)
+        if by_lane[a].rate ~= by_lane[b].rate then return by_lane[a].rate > by_lane[b].rate end
+        return a < b
+      end)
       local total = n.sout
       local copies = #order
-      nodes[key] = nil
-      for i, lane in ipairs(order) do
-        local g = by_lane[lane]
-        local share = (total > 0) and (g.rate / total) or (1 / copies)
-        local ck = (copies > 1) and (key .. "#" .. lane) or key
-        local sup = Default.supers[lane]
-        local c = {
-          key = ck, base = key, kind = n.kind, loops = (i == 1) and n.loops or {}, members = nil,
-          prod = n.prod * share, cons = g.rate + ((i == 1) and n.stub_out or 0),
-          total_prod = n.prod, total_cons = n.cons, copies = copies, share = share,
-          stub_in = n.stub_in * share, stub_out = (i == 1) and n.stub_out or 0,
-          lab_use = i == 1 and n.lab_use or nil,
-          w_stub_in = n.w_stub_in * share, w_stub_out = (i == 1) and n.w_stub_out or 0,
-          ins = (i == 1) and n.ins or {}, outs = g.links, sin = (i == 1) and n.sin or 0, sout = g.rate,
-          tier = n.tier, era = n.era, shown_in = n.shown_in,
-          ci = math.max(1, g.ci - 1),
-          group = "inputs@" .. lane, lane = lane,
-        }
-        c.ginfo = { id = c.group, name = Loc("group-inputs"), super = lane,
-                    super_name = sup and sup.name or (n.ginfo and n.ginfo.super_name) or lane,
-                    color = n.ginfo.color, order = -1, super_order = sup and Default.super_order[lane] or 99 }
-        c.origin_ginfo = n.ginfo
-        local wout, win = c.w_stub_out, c.w_stub_in
-        for _, l in ipairs(g.links) do l.a, l.from = c, ck; wout = wout + l.w end
-        for _, l in ipairs(c.ins) do l.b, l.to = c, ck; win = win + l.w end
-        c.wvalue = math.max(win, wout)
-        nodes[ck] = c
-        if i == 1 then split[n] = c end
+      if not budget or Budget.reserve_copies(budget, copies - 1) then
+        nodes[key] = nil
+        for i, lane in ipairs(order) do
+          local g = by_lane[lane]
+          local share = (total > 0) and (g.rate / total) or (1 / copies)
+          local ck = (copies > 1) and (key .. "#" .. lane) or key
+          local sup = Default.supers[lane]
+          local c = {
+            key = ck, base = key, kind = n.kind, loops = (i == 1) and n.loops or {}, members = nil,
+            prod = n.prod * share, cons = g.rate + ((i == 1) and n.stub_out or 0),
+            total_prod = n.prod, total_cons = n.cons, copies = copies, share = share,
+            stub_in = n.stub_in * share, stub_out = (i == 1) and n.stub_out or 0,
+            lab_use = i == 1 and n.lab_use or nil,
+            w_stub_in = n.w_stub_in * share, w_stub_out = (i == 1) and n.w_stub_out or 0,
+            ins = (i == 1) and n.ins or {}, outs = g.links, sin = (i == 1) and n.sin or 0, sout = g.rate,
+            tier = n.tier, era = n.era, shown_in = n.shown_in,
+            ci = math.max(1, g.ci - 1),
+            group = "inputs@" .. lane, lane = lane,
+          }
+          c.ginfo = { id = c.group, name = Loc("group-inputs"), super = lane,
+                      super_name = sup and sup.name or (n.ginfo and n.ginfo.super_name) or lane,
+                      color = n.ginfo.color, order = -1, super_order = sup and Default.super_order[lane] or 99 }
+          c.origin_ginfo = n.ginfo
+          local wout, win = c.w_stub_out, c.w_stub_in
+          for _, l in ipairs(g.links) do l.a, l.from = c, ck; wout = wout + l.w end
+          for _, l in ipairs(c.ins) do l.b, l.to = c, ck; win = win + l.w end
+          c.wvalue = math.max(win, wout)
+          nodes[ck] = c
+          if i == 1 then split[n] = c end
+        end
       end
     end
   end

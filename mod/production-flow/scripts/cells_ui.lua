@@ -192,8 +192,11 @@ function UI.fill(player, container, state, width, height, full, only_auto)
     bar.add { type = "label", style = "subheader_caption_label", caption = Loc("cells-tab") }
     local gap = bar.add { type = "empty-widget" }
     gap.style.horizontally_stretchable = true
+    bar.add { type = "sprite-button", name = "ssk_cell_create_help", style = "tool_button",
+      sprite = "utility/questionmark", tooltip = Loc("cells-create-help"), tags = { ssk_ui = "cell_create_help" } }
     bar.add { type = "sprite-button", name = "ssk_cell_new_button", style = "tool_button",
-      sprite = "utility/add", tooltip = Loc("cells-new"), tags = { ssk_ui = "cell_new" } }
+      sprite = "utility/add", tooltip = Loc.join(Loc("cells-new"), "\n\n", Loc("cells-first-drag-tip")),
+      tags = { ssk_ui = "cell_new" } }
     -- Flow charts the cells; Map shows where they are, like Balance's Flow and History.
     local views = split.add { type = "tabbed-pane", name = "ssk_cell_views", style = "tabbed_pane_with_no_side_padding",
       tags = { ssk_ui = "cell_views" } }

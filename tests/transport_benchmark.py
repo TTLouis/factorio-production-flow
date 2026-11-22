@@ -203,8 +203,10 @@ def require_idle_engine(engine):
 
 def inject(control):
     tick = "  Sampler.on_tick(e.tick)"
-    auto = "script.on_nth_tick(UI_REFRESH_EVERY, function() UI.auto_refresh() end)"
-    if control.count(tick) != 1 or control.count(auto) != 1:
+    old_auto = "script.on_nth_tick(UI_REFRESH_EVERY, function() UI.auto_refresh() end)"
+    staggered_auto = ("script.on_nth_tick(UI_REFRESH_STRIDE, "
+                      "function(e) UI.auto_refresh(e.tick / UI_REFRESH_STRIDE, UI_REFRESH_SLOTS) end)")
+    if control.count(tick) != 1 or control.count(old_auto) + control.count(staggered_auto) != 1:
         raise RuntimeError("Control hooks changed; inspect and update the private benchmark injection")
     init = "script.on_init(function() setup(true) end)"
     if control.count(init) != 1:
@@ -215,10 +217,13 @@ def inject(control):
         if control.count(needle) != 1:
             raise RuntimeError("Control player hook changed: " + event)
         control = control.replace(needle, needle + "\n  TransportBench.build_ready()")
+    if old_auto in control:
+        control = control.replace(old_auto, "script.on_nth_tick(UI_REFRESH_EVERY, function() "
+                                  "TransportBench.before_auto(); UI.auto_refresh(); TransportBench.after_auto(UI) end)")
+    else:
+        control += "\nscript.on_nth_tick(300, function() TransportBench.before_auto(); TransportBench.after_auto(UI) end)\n"
     return 'local TransportBench=require("scripts.transport_benchmark")\n' + control.replace(
-        tick, "  TransportBench.tick(UI)\n" + tick).replace(
-        auto, "script.on_nth_tick(UI_REFRESH_EVERY, function() TransportBench.before_auto(); "
-        "UI.auto_refresh(); TransportBench.after_auto(UI) end)")
+        tick, "  TransportBench.tick(UI)\n" + tick)
 
 
 def function_block(source, header):

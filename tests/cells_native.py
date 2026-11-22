@@ -89,13 +89,15 @@ assert(not shortcut.technology_to_unlock)
                 deadline = time.monotonic() + 150
                 names = [
                     "suggestions.png", "draft.png", "saved.png", "missing.png", "overview.png",
-                    "inside.png", "inside-capacity.png", "map.png", "help-cells.png", "delete.png",
+                    "inside.png", "inside-capacity.png", "flow-settings.png", "map.png", "help-cells.png", "delete.png",
                     "recipe-returns.png", "recipe-returns-markers.png",
                     "refinery-editor.png", "refinery-inside.png", "refinery-overview.png",
+                    "budget-limited.png", "budget-bypassed.png",
                 ]
                 markers = ["PRODUCTION CELLS NATIVE PASS", "CELL REPLACEMENT PASS", "CELL MEASURED PASS", "CELL CLONE PASS"]
                 markers.append("RECIPE RETURNS NATIVE PASS")
                 markers.append("CELL REFINERY BANDS PASS")
+                markers.append("CHART BUDGET NATIVE PASS")
                 if args.space_age:
                     names.extend(("bioflux-fuel.png", "bioflux-fuel-markers.png", "bioflux-editor.png", "bioflux-inputs.png"))
                     markers.append("CELL BIOFLUX FUEL PASS")

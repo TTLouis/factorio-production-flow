@@ -791,7 +791,7 @@ function Cells.open(player, focus_side, focus_key)
       selected_index = selected, tooltip = Loc("cells-list-surface-tip"),
       tags = { ssk_cell_list_surface = true, surfaces = listed } }
     surfaces.style.width = 180
-    action(bar, "select", "utility/add", Loc("cells-new"))
+    action(bar, "select", "utility/add", Loc.join(Loc("cells-new"), "\n\n", Loc("cells-first-drag-tip")))
     local rows = panel.add { type = "scroll-pane", style = "naked_scroll_pane", direction = "vertical", horizontal_scroll_policy = "never" }
     rows.style.maximal_height = 350
     rows.style.padding = 8

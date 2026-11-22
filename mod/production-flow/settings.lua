@@ -33,6 +33,13 @@ data:extend({
     order = "b-stock",
   },
   {
+    type = "bool-setting",
+    name = "ssk-bypass-sankey-size-limit",
+    setting_type = "runtime-global",
+    default_value = false,
+    order = "c",
+  },
+  {
     type = "int-setting",
     name = "ssk-min-ribbon-px",
     setting_type = "runtime-per-user",

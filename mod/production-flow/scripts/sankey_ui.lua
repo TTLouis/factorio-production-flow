@@ -420,7 +420,7 @@ SK.settings_button = settings_button
 -- Chart settings float over the chart's top-right corner, so opening them never
 -- moves or resizes the chart. Every row is a 28 px control, so the frame height
 -- is known and the panel takes no layout height of its own.
-local function settings_panel(c, us, L, player, W, viewH)
+local function settings_panel(c, us, L, W, viewH, allow_auto_update)
   if c.ssk_settings then c.ssk_settings.destroy() end
   if not us.settings_open then return end
   local cell_chart = us.is_cell_chart == true
@@ -500,7 +500,13 @@ local function settings_panel(c, us, L, player, W, viewH)
     line("").add { type = "checkbox", caption = Loc("sankey-split-raw-inputs"), state = us.split_raw ~= false, tags = { ssk_sk = "split_raw" },
       tooltip = Loc("sankey-ores-oil-water-get-one-copy-per") }
   end
-  live_toggle(line(""), us)
+  if allow_auto_update ~= false then
+    local live = live_toggle(line(""), us)
+    if us.oversized then
+      live.enabled, live.state = false, false
+      live.tooltip = Loc("sankey-size-unlimited")
+    end
+  end
   local actions = line("")
   if not full then button(actions, Loc("sankey-center"), "center_selection", Loc("sankey-center-the-selected-material")) end
   reflow_button(actions)
@@ -1487,6 +1493,7 @@ function SK.scroll_pane(c)
 end
 
 function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph)
+  if only_auto and not full and us.oversized then return end
   local hovered=storage.sk_hover and storage.sk_hover[player.index]
   if hovered and hovered.valid then
     local ancestor=hovered
@@ -1504,6 +1511,9 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   if full or not SK.scroll_pane(c) or (c.ssk_body ~= nil) ~= with_sidebar then
     c.clear()
     c.add { type = "scroll-pane", name = "ssk_bar", style = "naked_scroll_pane", horizontal_scroll_policy = "auto", vertical_scroll_policy = "auto" }
+    local notice = c.add { type = "label", name = "ssk_size_notice", visible = false }
+    notice.style.height = 24
+    notice.style.left_padding = 8
     local body = c
     if with_sidebar then
       body = c.add{type="flow", name="ssk_body", direction="horizontal"}
@@ -1529,7 +1539,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   if us.view == "focus" and not us.focus then
     if not keep_controls or #c.ssk_bar.children==0 then
       focus_toolbar(c.ssk_bar, us, player)
-      settings_panel(c, us, nil, player, W, viewH)
+      settings_panel(c, us, nil, W, viewH)
     end
     canvas.clear()
     Canvas.clear(player.index)
@@ -1538,7 +1548,24 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     place(l, 24, 40, math.max(100, W - 48), 60)
     return
   end
-  local L = View.build(player, us, chart_w, viewH, source)
+  local L = View.build(player, us, chart_w, viewH, source, only_auto and not full and #canvas.children > 0)
+  if not L then return end
+  local size_changed = us.oversized ~= (L.budget ~= nil)
+  us.oversized, us.render_fingerprint = L.budget ~= nil, L.render_fingerprint
+  local notice = c.ssk_size_notice
+  -- Saves can carry the GUI created by an older version.
+  if not notice then
+    notice = c.add { type = "label", name = "ssk_size_notice", index = 2 }
+    notice.style.height = 24
+    notice.style.left_padding = 8
+  end
+  notice.visible = us.oversized
+  if L.budget then
+    viewH = math.max(100, viewH - 24)
+    pane.style.height = viewH
+    notice.caption = Loc(L.budget.bypass and "sankey-size-unlimited" or "sankey-size-limited")
+    notice.tooltip = Loc("sankey-size-summary", L.budget.nodes, L.budget.links)
+  end
   local zoom = 1
   if scalable_chart then
     zoom = us.chart_zoom or 1
@@ -1550,11 +1577,13 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     end
     us.render_zoom = zoom
   end
-  if not source and (not keep_controls or #c.ssk_bar.children==0) then
+  if not source and (not keep_controls or size_changed or #c.ssk_bar.children==0) then
     build_toolbar(c.ssk_bar, us, L, player, W, with_sidebar)
-    settings_panel(c, us, L, player, W, viewH)
+    settings_panel(c, us, L, W, viewH)
   elseif source then
-    settings_panel(c, us, L, player, W, viewH)
+    if not keep_controls or size_changed or (us.settings_open and not c.ssk_settings) then
+      settings_panel(c, us, L, W, viewH, source.mode ~= "capacity")
+    end
   else
     local strip = c.ssk_bar.ssk_toolbar_strip
     local actions = strip and strip.ssk_toolbar_rows.ssk_toolbar_main.ssk_toolbar_actions

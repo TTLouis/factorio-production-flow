@@ -71,7 +71,7 @@ for _,renderer in ipairs({"poly","sprites"}) do
     SK.fill(player,c,us,900,360,false,automatic,nil,not automatic)
     assert(group==find(side,"move_group") and field.text=="Unsubmitted group")
     assert(preset==find(c.ssk_bar,"preset") and mark==find(c,"overview_jump",key))
-    assert(not rate.valid,"displayed rates must refresh independently of the controls")
+    assert(rate.valid == automatic, "Unchanged rates should only be rebuilt on a manual refresh")
   end
   SK.on_click(event(find(c,"zoom_in")),us)
   SK.fill(player,c,us,900,360,false)

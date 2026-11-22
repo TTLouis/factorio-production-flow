@@ -31,9 +31,10 @@ local topics={
     {Loc("help-widths-colors-and-navigation"), Loc("help-compressed-widths-use-a-square-root-scale")},
     {Loc("help-scope"), Loc("help-balance-focus-and-full-sankey-each-cover")},
   }},
-  {name=Loc("cells-tab"),sections={
+  {id="cells",name=Loc("cells-tab"),sections={
+    {Loc("help-cells-create"), Loc("help-cells-create-text"), Loc("cells-first-drag-tip"),
+      Loc("help-cells-create-rail"), Loc("help-cells-edit-text")},
     {Loc("help-cells-what"), Loc("help-cells-what-text")},
-    {Loc("help-cells-create"), Loc("help-cells-create-text")},
     {Loc("help-cells-boundary"), Loc("help-cells-boundary-text")},
     {Loc("help-cells-rates"), Loc("help-cells-rates-text")},
     {Loc("help-cells-replacements"), Loc("help-cells-replacements-text")},
@@ -50,7 +51,7 @@ function H.close(player)
   local f=player.gui.screen[NAME]
   if f then f.destroy() end
 end
-function H.open(player)
+function H.open(player, topic_id)
   H.close(player)
   local res,scale=player.display_resolution,player.display_scale
   local W=math.min(900,math.floor(res.width/scale)-60)
@@ -69,6 +70,7 @@ function H.open(player)
   inner.style.horizontally_stretchable=true;inner.style.vertically_stretchable=true
   local tabs=inner.add{type="tabbed-pane",name="ssk_help_tabs"}
   tabs.style.horizontally_stretchable=true;tabs.style.vertically_stretchable=true
+  local selected_topic=1
   for i,topic in ipairs(topics) do
     local tab=tabs.add{type="tab",caption=topic.name}
     local scroll=tabs.add{type="scroll-pane",name=Loc.join("ssk_help_topic_", i),
@@ -78,11 +80,15 @@ function H.open(player)
     body.style.vertical_spacing=10
     for _,section in ipairs(topic.sections) do
       body.add{type="label",caption=section[1],style="caption_label"}
-      local text=body.add{type="label",caption=section[2]}
-      text.style.single_line=false;text.style.width=W-70
+      for paragraph=2,#section do
+        local text=body.add{type="label",caption=section[paragraph]}
+        text.style.single_line=false;text.style.width=W-70
+      end
     end
     tabs.add_tab(tab,scroll)
+    if topic_id and topic.id == topic_id then selected_topic=i end
   end
+  tabs.selected_tab_index=selected_topic
   f.auto_center=true
   -- Keep the main frame as the opened GUI. Switching player.opened here
   -- raises on_gui_closed for it and can close both windows in the engine.
