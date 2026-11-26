@@ -308,7 +308,7 @@ end
 local ACTION_SPRITES = {
   f_back = "left_arrow", f_forward = "right_arrow", center_selection = "center",
   reflow = "refresh", chart_settings = "ssk-gear", reset_layout = "reset",
-  unpin = "pin_arrow", inputs_more = "add", overview_reset = "collapse",
+  unpin = "track_button", inputs_more = "add", overview_reset = "collapse",
   up = "indication_arrow", down = "down_arrow", hide = "filter_blacklist", expand = "expand", collapse = "collapse",
   new_group = "add", ungroup = "reset", deselect = "close", unhide_all = "grid_view",
 }
@@ -347,7 +347,7 @@ end
 -- Toolbar strip spacing, the same on every chart: 12 px at the sides, 8 px above,
 -- below and between rows. The first row is slot height (the material slot);
 -- later rows are tool-button height.
-local STRIP_PAD_X, STRIP_PAD_Y, ROW_GAP, FIRST_ROW_H, ROW_H = 12, 8, 8, 40, 28
+local STRIP_PAD_X, STRIP_PAD_Y, FIRST_ROW_H, ROW_H = 12, 8, 40, 28
 
 local function option_row(bar, name)
   local row = bar.add { type = "flow", name = name, direction = "horizontal" }
@@ -357,12 +357,14 @@ local function option_row(bar, name)
   return row
 end
 
-local function right_group(row, us)
+local function right_group(row, us, has_middle)
   row.style.width = math.max(240, (us.toolbar_width or us.canvas_w or 900) - 2 * STRIP_PAD_X)
-  local spacer = row.add { type = "empty-widget", tags = { ssk_toolbar_spacer = true } }
-  spacer.style.horizontally_stretchable = true
-  spacer.style.minimal_width = 16
-  spacer.style.height = 1
+  if not has_middle then
+    local spacer = row.add { type = "empty-widget", tags = { ssk_toolbar_spacer = true } }
+    spacer.style.horizontally_stretchable = true
+    spacer.style.minimal_width = 16
+    spacer.style.height = 1
+  end
   local right = option_row(row, "ssk_toolbar_actions")
   right.tags = { ssk_toolbar_side = "right" }
   return right
@@ -584,19 +586,18 @@ end
 
 -- Every toolbar row sits in one subheader strip across the top of the chart panel,
 -- as vanilla panels put their controls.
-local function toolbar_strip(bar, us)
+local function toolbar_strip(bar)
   bar.clear()
   local strip = bar.add { type = "frame", name = "ssk_toolbar_strip", style = "subheader_frame",
     direction = "vertical", tags = { ssk_primary_controls = true } }
-  strip.style.height = SK.toolbar_height(us)
+  strip.style.height = SK.toolbar_height()
   strip.style.horizontally_stretchable = true
   strip.style.left_padding, strip.style.right_padding = STRIP_PAD_X, STRIP_PAD_X
   strip.style.top_padding, strip.style.bottom_padding = STRIP_PAD_Y, STRIP_PAD_Y
   local rows = strip.add { type = "flow", name = "ssk_toolbar_rows", direction = "vertical" }
-  rows.style.vertical_spacing = ROW_GAP
   local first = option_row(rows, "ssk_toolbar_main")
   first.style.height = FIRST_ROW_H
-  return rows, first
+  return first
 end
 
 local function machine_action(parent, key)
@@ -605,7 +606,7 @@ local function machine_action(parent, key)
 end
 
 local function focus_toolbar(bar, us, player)
-  local _, main = toolbar_strip(bar, us)
+  local main = toolbar_strip(bar)
   if us.neighborhood then
     local heading = MaterialPicker.add_heading(main, us.toolbar_width)
     MaterialPicker.update_heading(heading, us.focus)
@@ -706,14 +707,14 @@ end
 
 local function build_toolbar(bar, us, player)
   if us.view == "focus" then return focus_toolbar(bar, us, player) end
-  local r1
-  bar, r1 = toolbar_strip(bar, us)
+  local r1 = toolbar_strip(bar)
+  local compact_filters = us.oversized and us.toolbar_width < 1000
 
   small(r1, Loc("sankey-view"))
   local view_picker = r1.add { type = "drop-down", items = { Loc("sankey-grouped-unfinished"), Loc("sankey-item-fluid-names") },
     selected_index = us.view == "overview" and 1 or 2, tags = { ssk_sk = "view" },
     tooltip = Loc("sankey-individual-item-and-fluid-names-are-the") }
-  view_picker.style.width = 160
+  view_picker.style.width = compact_filters and 88 or 160
   local presets = View.presets()
   local items, sel = {}, 1
   for i, p in ipairs(presets) do
@@ -724,16 +725,33 @@ local function build_toolbar(bar, us, player)
   for i, p in ipairs(presets) do us.preset_ids[i] = p.id end
   small(r1, Loc("sankey-preset"))
   local preset_picker = r1.add { type = "drop-down", items = items, selected_index = sel, tags = { ssk_sk = "preset" } }
-  preset_picker.style.width = 190
+  preset_picker.style.width = compact_filters and 104 or 190
 
-  local actions = right_group(r1, us)
+  local middle = r1.add { type = "flow", name = "ssk_toolbar_middle", direction = "horizontal" }
+  middle.style.minimal_width = 16
+  middle.style.horizontal_align = "center"
+  middle.style.horizontally_stretchable = true
+  middle.style.horizontally_squashable = true
+  local notice = middle.add { type = "label", name = "ssk_size_notice", visible = false }
+  notice.style.single_line = true
+  notice.style.horizontally_squashable = true
+
+  local actions = right_group(r1, us, true)
   if us.view == "overview" then button(actions, Loc("sankey-collapse-overview"), "overview_reset", Loc("sankey-unfinished-grouping-return-expanded-groups-to-the")) end
+  local nh = 0
+  for _ in pairs(us.hidden) do nh = nh + 1 end
+  if nh > 0 then button(actions, Loc("sankey-show-hidden", nh), "unhide_all") end
   zoom_buttons(actions, false, us.render_zoom or 1)
   label_toggle(actions, us)
   settings_button(actions, us)
-  local nh = 0
-  for _ in pairs(us.hidden) do nh = nh + 1 end
-  if nh > 0 then button(option_row(bar), Loc("sankey-show-hidden", nh), "unhide_all") end
+  return r1
+end
+
+local function update_size_notice(notice, budget)
+  notice.visible = budget ~= nil
+  if not budget then return end
+  notice.caption = Loc(budget.bypass and "sankey-size-unlimited" or "sankey-size-limited")
+  notice.tooltip = Loc("sankey-size-summary", budget.nodes, budget.links)
 end
 
 ---------------------------------------------------------------------------
@@ -923,7 +941,7 @@ local function draw_returns(canvas, L, late, width, show_markers, zoom)
   end
 end
 
-local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons, read_balance)
+local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons, read_balance, detailed_ribbons)
   st.ribbons = {}
   st.node_visuals = {}
   st.dim_nodes = not us.neighborhood
@@ -1006,9 +1024,11 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons, read_ba
       pieces = {}
       for _, piece in ipairs(route) do pieces[#pieces + 1] = Geometry.scaled_piece(piece, zoom) end
     end
-    if not tooltips[link] then tooltips[link] = ribbon_tooltip(link, recipe_icons) end
-    hover[#hover + 1] = { pieces = pieces, tip = tooltips[link], from = l.from, to = l.to,
-      tags=link.transport and transport_tags(link.transport) }
+    if detailed_ribbons or link.transport then
+      if not tooltips[link] then tooltips[link] = ribbon_tooltip(link, recipe_icons) end
+      hover[#hover + 1] = { pieces = pieces, tip = tooltips[link], from = l.from, to = l.to,
+        tags=link.transport and transport_tags(link.transport) }
+    end
     if POLY then
       local key = Loc.join(l.from, ">", l.to)
       if not meshes[key] then
@@ -1167,7 +1187,8 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons, read_ba
       local pin_key = not n.transport and (not us.is_cell_chart or L.details) and material_key(n)
       if pin_key then
         local docked = us.view ~= "focus" and not us.neighborhood and not us.is_cell_chart
-        tooltip[#tooltip + 1] = Loc.join("\n\n", Loc(docked and "sankey-rate-card-click" or "rate-card-alt-click"))
+        if docked then tooltip[#tooltip + 1] = Loc.join("\n\n", Loc("sankey-rate-card-click")) end
+        tooltip[#tooltip + 1] = Loc.join(docked and "\n" or "\n\n", Loc("rate-card-alt-click"))
       end
       local recipe_info
       if L.details and not n.transport and not n.is_cell then
@@ -1347,7 +1368,7 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons, read_ba
   return count, highlight(st, st.selected)
 end
 
-local function render_overview(side, L, us, paths, chain, width, height, player, managed_scroll)
+local function render_overview(side, L, us, paths, chain, width, height, player, managed_scroll, overview_bands)
   local overview = side.ssk_overview
   if not overview then
     overview = side.add{type="frame", name="ssk_overview", style="inside_deep_frame", direction="vertical"}
@@ -1387,40 +1408,55 @@ local function render_overview(side, L, us, paths, chain, width, height, player,
   local scale = math.min((map_w - 10) / math.max(1, L.content_w), (map_h - 10) / math.max(1, L.content_h))
   local ox, oy = (map_w - L.content_w * scale) / 2, (map_h - L.content_h * scale) / 2
 
-  local drawn = {}
-  local function piece(shape, color)
-    local p = Geometry.scaled_piece(shape, scale)
-    local x, y = round(ox + p.x), round(oy + p.y)
-    local sprite = ribbon_sprite(p, color)
-    local key = table.concat({sprite, x, y, p.w, p.h}, ":")
-    if drawn[key] then return end
-    drawn[key] = true
-    local e = add_sprite(ribbons, sprite)
-    -- Scaled pieces use chart coordinates. The native span correction needs
-    -- the offset inside the overview to cover the last device pixel.
-    local w = Geometry.sprite_span(x, p.w, player.display_scale)
-    local h = Geometry.sprite_span(y, p.h, player.display_scale)
-    place(e, x, y, w, h)
-  end
-  for _, active in ipairs{false, true} do
+  -- A visible but isolated selection has no bands to emphasize.
+  if chain then
+    local has_route = false
     for _, path in ipairs(paths) do
-      local related = chain ~= nil and chain_contains_link(chain, path.from, path.to)
-      if related == active then
-        local color = chain and not related and palette.DIM or palette.muted(path.color)
-        for _, shape in ipairs(path.pieces) do piece(shape, color) end
-      end
+      if chain_contains_link(chain, path.from, path.to) then has_route = true; break end
     end
+    if not has_route then chain = nil end
   end
-  for _, col in ipairs(L.cols) do
-    for _, n in ipairs(col) do
-      local color = chain and not chain_contains(chain, n.key) and palette.DIM or palette.GREY
-      if n.t_stub_in > 0 then
-        piece({kind="bar", x=n.x-View.STUB, y=n.stub_in_y, w=View.STUB, h=n.t_stub_in}, color)
-      end
-      if n.t_stub_out > 0 then
-        piece({kind="bar", x=n.x+View.NODE_W, y=n.stub_out_y, w=View.STUB, h=n.t_stub_out}, color)
+  if overview_bands then
+    local drawn = {}
+    local function piece(shape, color)
+      local p = Geometry.overview_piece(shape, scale, ox, oy, player.display_scale)
+      local x, y, w, h = p.x, p.y, p.w, p.h
+      local sprite = ribbon_sprite(p, color)
+      local key = table.concat({sprite, x, y, w, h}, ":")
+      if drawn[key] then return end
+      drawn[key] = true
+      local e = ribbons.add{type="sprite", sprite=sprite, resize_to_sprite=false, ignored_by_interaction=true}
+      local style = e.style
+      style.stretch_image_to_widget_size = true
+      style.width, style.height = w, h
+      style.left_margin, style.top_margin, style.bottom_margin = x, y, -h
+      -- Cancel the height and offset separately to keep fractional scaling aligned.
+      local reset = ribbons.add{type="empty-widget", ignored_by_interaction=true}
+      reset.style.width, reset.style.height, reset.style.top_margin = 0, 0, -y
+      reset.style.left_margin, reset.style.bottom_margin = 0, 0
+    end
+    local function draw_paths(emphasized)
+      for _, path in ipairs(paths) do
+        local related = chain ~= nil and chain_contains_link(chain, path.from, path.to)
+        if related == emphasized then
+          local color = related and path.color or chain and palette.OVERVIEW_DIM or palette.muted(path.color)
+          for _, shape in ipairs(path.pieces) do piece(shape, color) end
+        end
       end
     end
+    draw_paths(false)
+    for _, col in ipairs(L.cols) do
+      for _, n in ipairs(col) do
+        local color = palette.GREY
+        if n.t_stub_in > 0 then
+          piece({kind="bar", x=n.x-View.STUB, y=n.stub_in_y, w=View.STUB, h=n.t_stub_in}, color)
+        end
+        if n.t_stub_out > 0 then
+          piece({kind="bar", x=n.x+View.NODE_W, y=n.stub_out_y, w=View.STUB, h=n.t_stub_out}, color)
+        end
+      end
+    end
+    if chain then draw_paths(true) end
   end
   local previous = {}
   local children = nodes.children
@@ -1431,7 +1467,8 @@ local function render_overview(side, L, us, paths, chain, width, height, player,
   local function dot(n, active)
     local old = previous[n.key]
     previous[n.key] = nil
-    local color = chain and not chain_contains(chain, n.key) and palette.DIM or (n.color or n.ginfo.color)
+    local dim = chain and not chain_contains(chain, n.key)
+    local color = dim and palette.DIM or (n.color or n.ginfo.color)
     local sprite = S.bar(color)
     local e = old and old.widget or add_sprite(nodes, sprite, Loc("sankey-overview-jump", display_name(n)))
     if not old then e.tags = {ssk_sk="overview_jump", key=n.key}
@@ -1662,12 +1699,8 @@ local function rstate(pi, view)
   return storage.sk_render[k]
 end
 
-function SK.toolbar_height(us)
-  local rows = 1
-  if not us.neighborhood and us.view ~= "focus" and us.hidden and next(us.hidden) then
-    rows = 2
-  end
-  return 2 * STRIP_PAD_Y + FIRST_ROW_H + (rows - 1) * (ROW_H + ROW_GAP)
+function SK.toolbar_height()
+  return 2 * STRIP_PAD_Y + FIRST_ROW_H
 end
 
 -- c: tab content (vertical flow). full=false keeps the scroll-pane (and its scroll position).
@@ -1701,11 +1734,16 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   SK.defaults(us)
   local keep_controls = (only_auto or refresh_graph) and not full
   local full_chart = not source and us.view ~= "focus" and not us.neighborhood
+  local ribbon_setting = player.mod_settings["ssk-detailed-sankey-ribbons"]
+  local detailed_ribbons = not full_chart or (ribbon_setting ~= nil and ribbon_setting.value == true)
+  us.detailed_ribbons = detailed_ribbons
   local scalable_chart = full_chart or (source and source.chart_zoom)
   local inspector_w = math.min(INSPECTOR_W, W - 16)
   local sidebar_w = full_chart and W >= SIDEBAR_MIN_W and INSPECTOR_W or 0
   local chart_w = W - (sidebar_w > 0 and sidebar_w + 8 or 0)
   local with_sidebar = sidebar_w > 0
+  local band_setting = settings.global["ssk-sankey-overview-bands"]
+  local overview_bands = with_sidebar and (not band_setting or band_setting.value)
   local drawer_x = full_chart and not with_sidebar and W - inspector_w - 4
   local setting = player.mod_settings["ssk-live-sankey-overview"]
   local managed_scroll = with_sidebar and setting ~= nil and setting.value == true
@@ -1714,9 +1752,6 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     or (body and (body.ssk_viewport ~= nil) ~= managed_scroll) then
     c.clear()
     c.add { type = "scroll-pane", name = "ssk_bar", style = "naked_scroll_pane", horizontal_scroll_policy = "auto", vertical_scroll_policy = "auto" }
-    local notice = c.add { type = "label", name = "ssk_size_notice", visible = false }
-    notice.style.height = 24
-    notice.style.left_padding = 8
     local body = c
     if with_sidebar then
       body = c.add{type="flow", name="ssk_body", direction="horizontal"}
@@ -1748,7 +1783,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   pane.style.height = viewH
   pane.vertical_scroll_policy = managed_scroll and "never" or "auto-and-reserve-space"
   if full_chart then pane.style.width = chart_w end
-  c.ssk_bar.style.height = SK.toolbar_height(us)
+  c.ssk_bar.style.height = SK.toolbar_height()
   c.ssk_bar.style.padding = 0
   local canvas = pane.ssk_canvas
   if us.view == "focus" and not us.focus then
@@ -1767,7 +1802,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   local inspector = full_chart and (with_sidebar and c.ssk_body.ssk_sidebar or c)
   local function update_inspector(layout, read_balance, recipe_icons)
     local options = {model=model, read_balance=read_balance, recipe_rates=layout.details and layout.details.rates,
-      recipe_icons=recipe_icons, plot_height=100}
+      recipe_icons=recipe_icons, plot_height=100, recipe_tables=true, player=player}
     render_selection(inspector, layout, us, inspector_w, viewH, player, options, drawer_x)
   end
   if not L then
@@ -1783,18 +1818,19 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   local size_changed = us.oversized ~= (L.budget ~= nil)
   us.oversized, us.render_fingerprint = L.budget ~= nil, L.render_fingerprint
   local notice = c.ssk_size_notice
-  -- Saves can carry the GUI created by an older version.
-  if not notice then
-    notice = c.add { type = "label", name = "ssk_size_notice", index = 2 }
-    notice.style.height = 24
-    notice.style.left_padding = 8
-  end
-  notice.visible = us.oversized
-  if L.budget then
-    viewH = math.max(100, viewH - 24)
-    pane.style.height = viewH
-    notice.caption = Loc(L.budget.bypass and "sankey-size-unlimited" or "sankey-size-limited")
-    notice.tooltip = Loc("sankey-size-summary", L.budget.nodes, L.budget.links)
+  if full_chart then
+    if notice then notice.destroy() end
+  else
+    if not notice then
+      notice = c.add { type = "label", name = "ssk_size_notice", index = 2 }
+      notice.style.height = 24
+      notice.style.left_padding = 8
+    end
+    update_size_notice(notice, L.budget)
+    if L.budget then
+      viewH = math.max(100, viewH - 24)
+      pane.style.height = viewH
+    end
   end
   local zoom = 1
   if scalable_chart then
@@ -1807,19 +1843,27 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     end
     us.render_zoom = zoom
   end
-  if not source and (not keep_controls or size_changed or #c.ssk_bar.children==0) then
-    build_toolbar(c.ssk_bar, us, player)
+  local strip = c.ssk_bar.ssk_toolbar_strip
+  local rows = strip and strip.ssk_toolbar_rows
+  local toolbar = rows and rows.ssk_toolbar_main
+  if not source and (not keep_controls or size_changed or not toolbar or full_chart and not toolbar.ssk_toolbar_middle) then
+    toolbar = build_toolbar(c.ssk_bar, us, player)
     settings_panel(c, us, L, W, viewH)
   elseif source then
     if not keep_controls or size_changed or (us.settings_open and not c.ssk_settings) then
       settings_panel(c, us, L, W, viewH, source.mode ~= "capacity")
     end
   else
-    local strip = c.ssk_bar.ssk_toolbar_strip
-    local actions = strip and strip.ssk_toolbar_rows.ssk_toolbar_main.ssk_toolbar_actions
+    local actions = toolbar and toolbar.ssk_toolbar_actions
     if actions and actions.ssk_zoom then
       actions.ssk_zoom.caption = Loc("sankey-chart-zoom", round((scalable_chart and zoom or (us.zoom or 1)) * 100))
     end
+  end
+  if full_chart then
+    local middle = toolbar.ssk_toolbar_middle
+    local status = middle.ssk_size_notice
+    update_size_notice(status, L.budget)
+    middle.tooltip = L.budget and Loc.join(status.caption, "\n", status.tooltip) or nil
   end
   us.last_order = L.order
   us.last_lanes = L.lane_order
@@ -1868,7 +1912,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     end
     place(l, 24, 40, math.max(100, empty_width), 80)
   else
-    local _, selection = draw(canvas, L, us, st, player, CW, CH, zoom, recipe_icons, read_balance)
+    local _, selection = draw(canvas, L, us, st, player, CW, CH, zoom, recipe_icons, read_balance, detailed_ribbons)
     chain = selection
     paths = st.paths
     if not managed_scroll and (us.center_pending or (us.neighborhood and (us.centered_focus ~= us.focus or full))) then
@@ -1890,7 +1934,8 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   if with_sidebar then
     local side = c.ssk_body.ssk_sidebar
     side.style.width, side.style.height, side.style.vertical_spacing = sidebar_w, viewH, 8
-    local map_scale, map_x, map_y = render_overview(side, L, us, paths, chain, sidebar_w, viewH, player, managed_scroll)
+    local map_scale, map_x, map_y = render_overview(side, L, us, paths, chain, sidebar_w, viewH, player,
+      managed_scroll, overview_bands)
     if managed_scroll then
       local previous = us.chart_viewport
       local v = {w=inner_w, h=inner_h, zoom=zoom, max_x=CW-inner_w, max_y=CH-inner_h}

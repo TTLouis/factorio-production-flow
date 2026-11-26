@@ -6,9 +6,7 @@ local Loc = require("scripts.locale")
 local Sampler = require("scripts.sampler")
 local Tooltip = require("scripts.tooltip")
 
-local RD = {}
-
-local LIST_LIMIT = 3
+local RD = { MATERIAL_PREVIEW_LIMIT = 3 }
 local MACHINE_LIMIT = 6
 
 -- context = { rates = {[recipe] = {normal = crafts/s, bonus = productivity crafts/s}},
@@ -34,24 +32,33 @@ local function rich(key)
   return "[" .. kind .. "=" .. name .. "]"
 end
 
+function RD.material_label(key)
+  local kind, name = key:match("^(%a+)/(.+)$")
+  local prototype = prototypes[kind][name]
+  return Loc.join(rich(key), " ", prototype and prototype.localised_name or name)
+end
+
 local function rate_of(rate, part, input)
   if input then return rate.normal * part.amount end
   return rate.normal * part.amount + rate.bonus * (part.prod or part.amount)
 end
 
+local function append_side(parts, list, input, rate, fmt)
+  for i, part in ipairs(list) do
+    if i > 1 then parts[#parts + 1] = " + " end
+    parts[#parts + 1] = rich(part.key) .. " "
+    parts[#parts + 1] = rate and Loc("recipe-details-rate", fmt(rate_of(rate, part, input))) or short(part.amount)
+  end
+end
+
 -- "[a] x + [b] y → [c] z" with per-craft amounts (rate nil) or rates.
 local function recipe_line(recipe, rate, fmt)
   local parts = {}
-  local function side(list, input)
-    for i, part in ipairs(list) do
-      if i > 1 then parts[#parts + 1] = " + " end
-      parts[#parts + 1] = rich(part.key) .. " "
-      parts[#parts + 1] = rate and Loc("recipe-details-rate", fmt(rate_of(rate, part, input))) or short(part.amount)
-    end
-  end
-  side(recipe.ingredients, true)
+  append_side(parts, recipe.ingredients, true, rate, fmt)
+  if #recipe.ingredients == 0 then parts[#parts + 1] = "—" end
   parts[#parts + 1] = " → "
-  side(recipe.products, false)
+  append_side(parts, recipe.products, false, rate, fmt)
+  if #recipe.products == 0 then parts[#parts + 1] = "—" end
   return Tooltip.lines(parts)
 end
 
@@ -154,31 +161,46 @@ function RD.recipe(context, name, fmt)
   return Loc.join_list(lines, "\n")
 end
 
--- Lines for an item or fluid bar: the running recipes that make and use it.
-function RD.material(context, key, fmt, limit, recipe_icons)
+-- Observed recipes ordered by their rate for the selected material.
+function RD.material_rows(context, key, input)
   local graph = storage.graph
   local node = graph and graph.nodes[key]
-  if not (context and context.rates and node) then return nil end
-  local lines = {}
-  limit = limit or LIST_LIMIT
-  local function list(names, heading, input)
-    local found, seen = {}, {}
-    for _, name in ipairs(names) do
-      local recipe, rate = graph.recipes[name], context.rates[name]
-      if recipe and rate and not seen[name] then
-        seen[name] = true
-        local amount = 0
-        for _, part in ipairs(input and recipe.ingredients or recipe.products) do
-          if part.key == key then amount = amount + rate_of(rate, part, input) end
-        end
-        if amount > 1e-9 then found[#found + 1] = { name = name, recipe = recipe, rate = rate, amount = amount } end
+  local found, seen = {}, {}
+  if not (context and context.rates and node) then return found end
+  for _, name in ipairs(input and node.consumers or node.producers) do
+    local recipe, rate = graph.recipes[name], context.rates[name]
+    if recipe and rate and not seen[name] then
+      seen[name] = true
+      local amount = 0
+      for _, part in ipairs(input and recipe.ingredients or recipe.products) do
+        if part.key == key then amount = amount + rate_of(rate, part, input) end
       end
+      if amount > 1e-9 then found[#found + 1] = { name = name, recipe = recipe, rate = rate, amount = amount } end
     end
+  end
+  table.sort(found, function(a, b)
+    if a.amount ~= b.amount then return a.amount > b.amount end
+    return a.name < b.name
+  end)
+  return found
+end
+
+function RD.material_columns(entry, consuming, fmt)
+  local recipe, rate = entry.recipe, entry.rate
+  local items = {}
+  for _, part in ipairs(consuming and recipe.products or recipe.ingredients) do
+    items[#items + 1] = RD.material_label(part.key)
+  end
+  return #items > 0 and Loc.join_list(items, "\n") or "—", recipe_line(recipe, rate, fmt)
+end
+
+-- Lines for a material's compact hover card.
+function RD.material(context, key, fmt, limit, recipe_icons)
+  local lines = {}
+  limit = limit or RD.MATERIAL_PREVIEW_LIMIT
+  local function list(heading, input)
+    local found = RD.material_rows(context, key, input)
     if #found == 0 then return end
-    table.sort(found, function(a, b)
-      if a.amount ~= b.amount then return a.amount > b.amount end
-      return a.name < b.name
-    end)
     lines[#lines + 1] = heading
     for i, entry in ipairs(found) do
       if i > limit then
@@ -191,8 +213,8 @@ function RD.material(context, key, fmt, limit, recipe_icons)
       lines[#lines + 1] = Loc.join(recipe_icon, "  ", recipe_line(entry.recipe, entry.rate, fmt))
     end
   end
-  list(node.producers, Loc("recipe-details-made-by"), false)
-  list(node.consumers, Loc("recipe-details-used-by"), true)
+  list(Loc("recipe-details-made-by"), false)
+  list(Loc("recipe-details-used-by"), true)
   if #lines == 0 then return nil end
   return Loc.join_list(lines, "\n")
 end

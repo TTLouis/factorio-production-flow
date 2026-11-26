@@ -957,6 +957,11 @@ function T.tick(UI, Sampler)
     local case=cases[step]
     if case.name=="electronic-circuit-flow" or case.name=="focus-circuit" or case.name=="full-nauvis"
         or case.name=="full-nauvis-proportional" or case.name=="full-nauvis-sprites" then
+      local preferences=settings.get_player_settings(player)
+      if case.tab=="sankey" and not preferences["ssk-detailed-sankey-ribbons"].value then
+        preferences["ssk-detailed-sankey-ribbons"]={value=true}
+        UI.on_sankey_ribbon_setting_changed(player)
+      end
       local root=player.gui.screen.ssk_main.ssk_inner.ssk_tabs["content_"..case.tab]
       local ribbon=assert(find_action(root,"ribbon"),"Rendered Sankey has no ribbon hover target")
       assert(ribbon.raise_hover_events,"Ribbon must opt into native hover/leave events before handler tests")

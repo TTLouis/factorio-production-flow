@@ -2,6 +2,7 @@
 local Geometry = require("scripts.ribbon_geometry")
 local Sampler = require('scripts.sampler')
 local Canvas = require('scripts.canvas')
+local Mining = require('scripts.mining_details')
 local Smoke = {}
 function Smoke.run(UI, Canvas)
   local surface = game.surfaces[1]
@@ -31,6 +32,12 @@ function Smoke.run(UI, Canvas)
   assembler.destroy()
   local deleted = game.create_surface('production-flow-smoke-delete', {width=32,height=32})
   local index = deleted.index
+  local sources = Mining.sources_and_uses(index, "item/uranium-ore")
+  assert(#sources == 1 and sources[1].resource.name == "uranium-ore"
+    and sources[1].resource.input == "fluid/sulfuric-acid" and not sources[1].drills,
+    "Native resource prototype must report the required fluid without inventing a drill")
+  local _, uses = Mining.sources_and_uses(index, "fluid/sulfuric-acid")
+  assert(#uses == 0, "An empty surface must not report a mining consumer")
   local machine = assert(deleted.create_entity{name='assembling-machine-2',position={0,0},force='player'})
   Sampler.add(machine)
   local unit = machine.unit_number

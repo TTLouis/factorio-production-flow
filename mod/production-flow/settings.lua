@@ -40,6 +40,13 @@ data:extend({
     order = "c",
   },
   {
+    type = "bool-setting",
+    name = "ssk-sankey-overview-bands",
+    setting_type = "runtime-global",
+    default_value = true,
+    order = "d",
+  },
+  {
     type = "int-setting",
     name = "ssk-min-ribbon-px",
     setting_type = "runtime-per-user",
@@ -77,5 +84,12 @@ data:extend({
     setting_type = "runtime-per-user",
     default_value = true,
     order = "h",
+  },
+  {
+    type = "bool-setting",
+    name = "ssk-detailed-sankey-ribbons",
+    setting_type = "runtime-per-user",
+    default_value = false,
+    order = "i",
   },
 })

@@ -36,6 +36,10 @@ In Full Sankey, use **Shift + mouse wheel**, **wheel tilt**, or **Page Up / Page
 to scroll horizontally. The overview box is on by default. Turn off **Live Full
 Sankey overview box** in per-player mod settings to use Factorio’s native scrollbars.
 
+The Full Sankey overview shows all plotted links and highlights the selected chain. Turn off **Show Full Sankey overview bands** in map mod settings to keep the overview's clickable materials and viewport box with fewer elements to draw. Hover over a material for its rate preview. Turn on **Detailed Full Sankey ribbons** in per-player mod settings to see recipe details on ribbon hover.
+
+Click a machine icon in the Full Sankey side card to preview a matching machine or drill and jump to it in remote view. Alt-click a material in Full Sankey, Focus, Balance Flow, or a Cell chart to open its rate history. Use the pushpin to keep the flyout beside other materials and the chevron to fold it to its title bar. **Used by** lists every observed consuming recipe in the flyout's reported period.
+
 Destination/source colors, hover highlighting, pinned selections, optional labels,
 Fit and Center help you explore the charts. Automatic updates preserve selectors and
 row positions; use the **Refresh table** icon to reapply list ordering and filters. The **?**

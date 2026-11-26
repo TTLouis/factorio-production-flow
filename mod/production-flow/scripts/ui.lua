@@ -392,6 +392,7 @@ function UI.sanitize_saved_states()
 end
 
 function UI.on_player_removed(index)
+  MachineStatus.on_player_removed(index)
   if storage.chart_wheel_zoom then storage.chart_wheel_zoom[index] = nil end
   CellOutlines.clear(index)
   HistoryUI.clear_hover(index)
@@ -523,6 +524,12 @@ function UI.on_sankey_viewport_setting_changed(player)
   end
 end
 
+function UI.on_sankey_ribbon_setting_changed(player)
+  if UI.is_open(player) and ustate(player.index).tab_id == "sankey" then
+    UI.refresh(player, false, false, true, true)
+  end
+end
+
 local function scroll_chart(player)
   if not (player and UI.is_open(player)) then return end
   local us = ustate(player.index)
@@ -547,11 +554,12 @@ sync_scroll_thumbs = function(player)
     local w,h = UI.dimensions(res,scale)
     location = {x=math.floor((res.width-px(w))/2), y=math.floor((res.height-px(h))/2)}
   end
-  -- Match the Full Sankey panel inside the window and tab chrome. The tracks
-  -- start below the toolbar and the optional chart size notice.
+  -- Match the Full Sankey panel inside the window and tab chrome.
+  -- A pre-upgrade pane can still carry a separate notice before its first refresh.
   local left = location.x + px(WINDOW_SIDE_CHROME / 2)
   local top = location.y + px(112) + px(SK.toolbar_height(us))
-  if chart.ssk_size_notice.visible then top = top + px(chart.ssk_size_notice.style.minimal_height) end
+  local legacy_notice = chart.ssk_size_notice
+  if legacy_notice and legacy_notice.visible then top = top + px(legacy_notice.style.minimal_height) end
   for axis,name in pairs(THUMBS) do
     local horizontal = axis == "x"
     local travel = horizontal and viewport.travel_x or viewport.travel_y
@@ -736,7 +744,8 @@ function UI.on_click(e)
   if Cells.on_click(player, el) then return true end
   if MachineStatus.on_click(player, el, UI.close) then return true end
   local us = ustate(e.player_index)
-  if e.alt and el.tags.ssk_card_material and us.tab_id ~= "sankey" then
+  if RateCard.on_click(player, el, us) then return true end
+  if e.alt and el.tags.ssk_card_material then
     return RateCard.toggle(player, us, el.tags.ssk_card_material)
   end
   if us.tab_id == "cells" and CellsUI.rail_view(us.cells) and RailUI.on_click(el.tags, us.cells) then
@@ -1269,8 +1278,17 @@ end
 
 function UI.on_force_changed(player)
   UI.ensure_button(player)
-  if player.force~=game.forces.player then UI.close(player)
+  if player.force~=game.forces.player then
+    UI.close(player)
+    RateCard.close_scoped(player)
   elseif UI.is_open(player) then UI.open(player) end
+end
+
+function UI.on_chart_surface_deleted(index)
+  for _, player in pairs(game.players) do
+    RateCard.close_scoped(player, index)
+    MachineStatus.on_surface_deleted(player, index)
+  end
 end
 
 return UI

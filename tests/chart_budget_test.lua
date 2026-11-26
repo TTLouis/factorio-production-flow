@@ -97,13 +97,30 @@ local full = player.gui.screen.add { type = "frame", direction = "vertical" }
 local full_state = { view = "detail", split_raw = false }
 settings.global[option].value = false
 SK.fill(player, full, full_state, 1100, 600, true)
-assert(full_state.oversized and full.ssk_size_notice.caption[1] == "production-flow.sankey-size-limited")
-assert(full.ssk_size_notice.tooltip[2] <= 150 and full.ssk_size_notice.tooltip[3] <= 300)
+local function full_notice()
+  local rows = full.ssk_bar.ssk_toolbar_strip.ssk_toolbar_rows
+  local row = rows.ssk_toolbar_main
+  local middle = row.ssk_toolbar_middle
+  assert(#rows.children == 1 and not full.ssk_size_notice, "Full Sankey must not add a separate notice row")
+  assert(row.children[middle.get_index_in_parent()-1].tags.ssk_sk == "preset"
+    and middle.get_index_in_parent() < row.ssk_toolbar_actions.get_index_in_parent(),
+    "The notice must appear between the dropdowns and actions")
+  assert(SK.scroll_pane(full).style.height >= 582, "The notice must not take up chart height")
+  return middle.ssk_size_notice
+end
+local full_status = full_notice()
+assert(full_state.oversized and full_status.visible
+  and full_status.caption[1] == "production-flow.sankey-size-limited")
+assert(full_status.tooltip[2] <= 150 and full_status.tooltip[3] <= 300)
 settings.global[option].value = true
 SK.fill(player, full, full_state, 1100, 600, false)
-assert(full.ssk_size_notice.tooltip[2] == 157 and full.ssk_size_notice.tooltip[3] == 310,
+full_status = full_notice()
+assert(full_status.caption[1] == "production-flow.sankey-size-unlimited"
+  and full_status.tooltip[2] == 157 and full_status.tooltip[3] == 310,
   "Full Sankey must respect the same manual override as Cells Flow")
 Model.build = build_model
+SK.fill(player, full, full_state, 1100, 600, false)
+assert(not full_notice().visible, "The toolbar must clear the notice when the graph returns under budget")
 full.destroy()
 settings.global[option] = original_setting
 

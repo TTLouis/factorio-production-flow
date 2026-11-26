@@ -14,7 +14,8 @@ for _,scale in ipairs({1,1.25,1.5}) do
       SK.fill(player,c,us,1000,700,true)
       local canvas=assert(find(c,"ssk_canvas"))
       local result=Check.inspect(canvas,scale)
-      Check.assert_clear(result)
+      Check.assert_clear(result, tab~="sankey")
+      if tab=="sankey" then assert(result.ribbons==0,"Compact Full Sankey added ordinary ribbon hit regions") end
       local layout=TREQ("scripts.view").build(player,us,1000,700)
       local stubs=0
       for _,node in pairs(layout.nodes) do

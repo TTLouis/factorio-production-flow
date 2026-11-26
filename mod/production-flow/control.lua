@@ -77,6 +77,15 @@ script.on_event(defines.events.on_runtime_mod_setting_changed, function(e)
     local player = game.get_player(e.player_index)
     if player then UI.on_sankey_viewport_setting_changed(player) end
   end
+  if e.setting == "ssk-detailed-sankey-ribbons" and e.player_index then
+    local player = game.get_player(e.player_index)
+    if player then UI.on_sankey_ribbon_setting_changed(player) end
+  end
+  if e.setting == "ssk-sankey-overview-bands" then
+    for _, player in pairs(game.connected_players) do
+      UI.on_sankey_ribbon_setting_changed(player)
+    end
+  end
   if e.setting == "ssk-window-seconds" then Sampler.init() end
   if e.setting == "ssk-stock-scan-minutes" then Sampler.on_stock_interval_changed() end
   if e.setting == "ssk-allow-small-window" then
@@ -132,6 +141,7 @@ if track_cargo then
 end
 
 script.on_event(defines.events.on_pre_surface_deleted, function(e)
+  UI.on_chart_surface_deleted(e.surface_index)
   Sampler.on_surface_deleted(e.surface_index)
   Cells.on_surface_deleted(e.surface_index)
   if track_cargo then Transfers.on_surface_deleted(e) end

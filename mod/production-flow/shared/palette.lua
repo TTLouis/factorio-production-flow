@@ -54,6 +54,9 @@ for _, key in ipairs({ "ribbon_in_1", "ribbon_in_2", "ribbon_in_3", "ribbon_in_4
   P.ribbon[#P.ribbon + 1] = { math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5) }
 end
 P.count = P.RIBBON + #P.ribbon
+P.OVERVIEW_DIM = P.count + 1
+P.count = P.OVERVIEW_DIM
+local overview_dim = { 0x65, 0x68, 0x6C }
 local materials = {
   ["iron-ore"]=4, ["iron-plate"]=4, ["steel-plate"]=4, ["molten-iron"]=4,
   ["copper-ore"]=5, ["copper-plate"]=5, ["copper-cable"]=5, ["molten-copper"]=5,
@@ -73,6 +76,7 @@ end
 function P.rgb(i)
   if i == P.GREY then return P.grey.color end
   if i == P.DIM then return P.dim.color end
+  if i == P.OVERVIEW_DIM then return overview_dim end
   if i > P.RIBBON then return P.ribbon[i-P.RIBBON] end
   if i > P.DIM then return P.quiet[i-P.DIM] end
   return P.colors[i]

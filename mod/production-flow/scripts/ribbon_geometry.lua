@@ -67,21 +67,49 @@ end
 
 -- Transform the completed route so zoom never runs the routing algorithm at
 -- a different scale. Round shared endpoints together in viewport coordinates.
-function G.scaled_piece(piece, scale)
-  if scale == 1 then return piece end
+function G.scaled_piece(piece, scale, offset_x, offset_y)
+  if scale == 1 and not offset_x and not offset_y then return piece end
   local q = {}
   for key, value in pairs(piece) do q[key] = value end
-  q.x, q.y, q.w, q.h = G.box(piece.x * scale, piece.y * scale, piece.w * scale, piece.h * scale)
+  if offset_x or offset_y then
+    offset_x, offset_y = offset_x or 0, offset_y or 0
+    q.x, q.y = G.round(offset_x + piece.x * scale), G.round(offset_y + piece.y * scale)
+    -- Project both edges in the same order so adjacent pieces round shared
+    -- coordinates together even when a projected edge lands on a half pixel.
+    q.w = G.round(offset_x + (piece.x + piece.w) * scale) - q.x
+    q.h = G.round(offset_y + (piece.y + piece.h) * scale) - q.y
+  else
+    q.x, q.y, q.w, q.h = G.box(piece.x * scale, piece.y * scale, piece.w * scale, piece.h * scale)
+    offset_y = 0
+  end
   q.w, q.h = math.max(1, q.w), math.max(1, q.h)
   if q.kind == "curve" then
-    q.ya, q.yb = G.round(piece.ya * scale), G.round(piece.yb * scale)
-    q.t0 = math.max(1, G.round((piece.ya + piece.t0) * scale) - q.ya)
-    q.t1 = math.max(1, G.round((piece.yb + piece.t1) * scale) - q.yb)
+    q.ya, q.yb = G.round(offset_y + piece.ya * scale), G.round(offset_y + piece.yb * scale)
+    q.t0 = math.max(1, G.round(offset_y + (piece.ya + piece.t0) * scale) - q.ya)
+    q.t1 = math.max(1, G.round(offset_y + (piece.yb + piece.t1) * scale) - q.yb)
     q.h = math.max(q.ya + q.t0, q.yb + q.t1) - q.y
     q.box_h = q.h
     q.k = S.shape_index((q.t0 + q.t1) / (2 * q.h))
   end
   return q
+end
+
+function G.overview_piece(piece, scale, ox, oy, display_scale)
+  local p = G.scaled_piece(piece, scale, ox, oy)
+  local min_size = math.ceil(1 / display_scale)
+  p.w = G.sprite_span(p.x, math.max(min_size, p.w), display_scale)
+  p.h = G.sprite_span(p.y, math.max(min_size, p.h), display_scale)
+  local span = math.floor(math.min(p.w, p.h) * display_scale)
+  if span <= 2 then
+    -- At thumbnail size the transparent centre of an atlas bend can consume
+    -- every sample along its short axis. A solid stroke preserves that join.
+    p.kind = "bar"
+  elseif p.kind == "elbow" and span * S.steps.elbow_q[p.k] < 1.5 then
+    p.k = S.elbow_index(1.5 / span)
+  elseif p.kind == "curve" and math.min(p.t0, p.t1) * display_scale < 1.5 then
+    p.k = math.max(p.k, S.shape_index(1.5 / (p.h * display_scale)))
+  end
+  return p
 end
 
 local function curve(out, xa, xb, ya, yb, t)

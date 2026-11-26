@@ -5,6 +5,8 @@ local SK = require("scripts.sankey_ui")
 local Check = require("scripts.gui_interaction_checks")
 local Canvas = require("scripts.canvas")
 local Config = require("scripts.modded_gui_config")
+local Palette = require("shared.palette")
+local RibbonCheck = Config.overview_toolbar and require("scripts.gui_ribbon_checks")
 local PERIOD = Config.period or 600
 local WARM_SECONDS = Config.warm_seconds or 600
 local RESOLUTION = Config.resolution or { 2560, 1440 }
@@ -103,6 +105,119 @@ local function reset_chart(state, renderer)
   state.chart_zoom, state.chart_fit, state.chart_viewport = nil, nil, nil
 end
 
+local function drill_targets(surface, force)
+  local resources = {}
+  for _, drill in ipairs(surface.find_entities_filtered{type="mining-drill", force=force}) do
+    local target = drill.mining_target
+    if target and target.valid and target.type=="resource" then
+      local row = resources[target.name]
+      if not row then row={total=0, types={}}; resources[target.name]=row end
+      row.total = row.total + 1
+      row.types[drill.name] = (row.types[drill.name] or 0) + 1
+    end
+  end
+  return resources
+end
+
+local function mining_cases(surface, force)
+  local most, fluid_mine
+  local function survey(scope)
+    for name, row in pairs(drill_targets(scope, force)) do
+      local properties = prototypes.entity[name].mineable_properties
+      local product = properties.products and properties.products[1]
+      if product then
+        local candidate = {surface=scope.name, name=name, key=product.type.."/"..product.name, total=row.total,
+          fluid=properties.required_fluid}
+        if scope==surface and (not most or row.total>most.total or row.total==most.total and name<most.name) then
+          most=candidate
+        end
+        if candidate.fluid and (not fluid_mine or row.total>fluid_mine.total
+          or row.total==fluid_mine.total and (scope.name..name)<(fluid_mine.surface..fluid_mine.name)) then
+          fluid_mine=candidate
+        end
+      end
+    end
+  end
+  survey(surface)
+  if not fluid_mine then
+    for _, scope in pairs(game.surfaces) do
+      if scope~=surface and scope.name~="ssk-canvas" then survey(scope) end
+    end
+  end
+  assert(most or fluid_mine, "The factory needs an observed drill")
+  if not fluid_mine then
+    local resource = assert(prototypes.entity["uranium-ore"])
+    fluid_mine = {surface=surface.name,name=resource.name,key="item/uranium-ore",
+      fluid=assert(resource.mineable_properties.required_fluid),total=0}
+  end
+  local cases = {}
+  if most and (most.name~=fluid_mine.name or most.surface~=fluid_mine.surface) then cases[#cases+1]=most end
+  cases[#cases+1]=fluid_mine
+  if fluid_mine.total>0 then
+    cases[#cases+1]={surface=fluid_mine.surface,name=fluid_mine.name,key="fluid/"..fluid_mine.fluid,
+      fluid=fluid_mine.fluid, consuming=true, product=fluid_mine.key}
+  end
+  return cases
+end
+
+local function mining_step(UI, player, state)
+  state.mining_cases=state.mining_cases or mining_cases(game.surfaces[state.surface], player.force)
+  state.mining_cards=state.mining_cards or {}
+  local index = #state.mining_cards + 1
+  local case = state.mining_cases[index]
+  if not case then return false end
+  if not state.mining_capture then
+    local us=storage.ui[player.index]
+    reset_chart(us,"sprites")
+    us.tab_id,us.surface,us.sel="sankey",case.surface,case.key
+    UI.open(player)
+    local root=player.gui.screen.ssk_main
+    local inspector=assert(find(root,function(e) return e.name=="ssk_selected_material" end))
+    local pane=inspector.ssk_selected_scroll
+    local body=pane.ssk_rate_card_body
+    local grid=assert(body[case.consuming and "ssk_rate_card_used_by" or "ssk_rate_card_made_by"])
+    local expected=drill_targets(game.surfaces[case.surface],player.force)[case.name]
+    assert(expected or not case.consuming)
+    local resource=prototypes.entity[case.name]
+    local encoded_name=helpers.table_to_json({resource.localised_name})
+    local function caption(el) return helpers.table_to_json({el.caption}) end
+    local found
+    for i=6,#grid.children,3 do
+      local recipe=grid.children[i].tooltip
+      if type(recipe)=="table" and recipe[1]=="production-flow.rate-card-mining-resource"
+        and helpers.table_to_json({recipe[2]})==encoded_name then
+        assert(caption(grid.children[i]):find(" → ",1,true), "Mining recipe is missing its input/output arrow")
+        local machines, items=grid.children[i-2],grid.children[i-1]
+        if expected then
+          for name, count in pairs(expected.types) do
+            local link=find(machines,function(e) return e.tags.machine==name and e.tags.count==count end)
+            assert(link and link.type=="label" and link.caption=="[entity="..name.."]×"..count,
+              "The inline drill count must match live targets")
+          end
+        else assert(machines.caption=="0", "Resource with no assigned drills displayed a nonzero count") end
+        if case.fluid then
+          local product = case.consuming and case.product or "fluid/"..case.fluid
+          assert(caption(items):find("["..product:gsub("/", "=", 1).."]",1,true), "Mining input/output did not match the resource prototype")
+        end
+        pane.scroll_to_element(machines,"top-third")
+        found=true
+        break
+      end
+    end
+    assert(found, "The selected material card did not display the mining row")
+    state.mining_capture={key=case.key,surface=case.surface,resource=case.name,fluid=case.fluid,
+      consuming=case.consuming,drills=expected and expected.types or {},total=expected and expected.total or 0,
+      screenshot="mining-card-"..index..".png"}
+  else
+    local capture=state.mining_capture
+    game.take_screenshot{player=player,path="modded-gui/"..capture.screenshot,
+      resolution=RESOLUTION,show_gui=true,force_render=true}
+    state.mining_cards[index],state.mining_capture=capture,nil
+  end
+  state.next_tick=game.tick+25
+  return true
+end
+
 local function open_case(UI, player, state, case)
   hide_other_screen_roots(player, state)
   if not storage.ui[player.index] then UI.open(player) end
@@ -124,6 +239,56 @@ local function open_case(UI, player, state, case)
   profiler.stop()
   state.open_profile=tostring(profiler)
   player.gui.screen.ssk_main.bring_to_front()
+end
+
+local function overview_paths(panel)
+  return panel.ssk_body.ssk_sidebar.ssk_overview.ssk_overview_map.ssk_overview_paths
+end
+
+local function dominant_band_color(paths)
+  local area, color, largest = {}, nil, 0
+  for _, band in ipairs(paths.children) do
+    local index = band.type == "sprite" and tonumber(band.sprite:match("-c(%d+)$"))
+    if index and index > Palette.DIM and index <= Palette.RIBBON then
+      local style = band.style
+      area[index] = (area[index] or 0) + style.minimal_width * style.minimal_height
+      if area[index] > largest then color, largest = index, area[index] end
+    end
+  end
+  assert(color, "The overview needs a visible material band")
+  return color
+end
+
+local function overview_toolbar_step(UI, player, state)
+  local result=state.hidden_toolbar
+  if result and result.captured then return false end
+  if result then
+    game.take_screenshot{player=player,path="modded-gui/"..result.screenshot,
+      resolution=RESOLUTION,show_gui=true,force_render=true}
+    result.captured=true
+  else
+    open_case(UI, player, state, {tab="sankey", renderer="sprites"})
+    local root=player.gui.screen.ssk_main
+    local panel=root.ssk_inner.ssk_tabs.content_sankey.ssk_chart
+    local height=SK.scroll_pane(panel).style.minimal_height
+    local function click(action,key)
+      local control=assert(find(panel,function(e)
+        return e.tags.ssk_sk==action and (not key or e.tags.key==key)
+      end),"Missing Full Sankey action "..action)
+      assert(UI.on_click{element=control,player_index=player.index})
+    end
+    click("overview_jump",state.focus)
+    click("selection_actions")
+    click("hide")
+    Check.assert_show_hidden_position(panel)
+    assert(SK.scroll_pane(panel).style.minimal_height==height,"Show hidden changed the chart height")
+    local paths=overview_paths(panel)
+    assert(#paths.children>0,"K2SE overview did not draw the remaining bands")
+    state.hidden_toolbar={screenshot="sankey-hidden-toolbar.png",hidden=state.focus,band_sprites=#paths.children/2,
+      canvas_height=height,overview_witness=RibbonCheck.overview_witness(paths,{dominant_band_color(paths)})}
+  end
+  state.next_tick=game.tick+25
+  return true
 end
 
 function T.init()
@@ -230,6 +395,7 @@ function T.tick(UI, Sampler)
     state.saved_coverage=Sampler.coverage(saved_surface.index,PERIOD)
     if Config.reuse_recorded then assert(state.saved_coverage>0,"The input save has no recorded history to reuse") end
     player.opened=nil
+    if Config.mining_cards or Config.overview_toolbar then player.game_view_settings.show_quickbar=false end
     hide_other_screen_roots(player,state)
     game.tick_paused, game.speed = false, Config.warm_speed or 64
     write(player,"warmup-start",{tick=game.tick,opened_gui_type=state.opened_gui_type_at_start,
@@ -299,6 +465,8 @@ function T.tick(UI, Sampler)
       state.viewport = state.viewport or {}
       if viewport_step(UI, player, state) then return end
     end
+    if Config.mining_cards and mining_step(UI,player,state) then return end
+    if Config.overview_toolbar and overview_toolbar_step(UI,player,state) then return end
     if not state.rate_card then
       open_case(UI, player, state, {tab="sankey", renderer="sprites"})
       local root = player.gui.screen.ssk_main
@@ -314,7 +482,17 @@ function T.tick(UI, Sampler)
       local card = panel.ssk_selected_scroll.ssk_rate_card_body
       assert(panel.tags.key == key and card.ssk_card_rates_plot and card.ssk_card_net_plot,
         "The pinned material must have both plots from recorded factory history")
+      if Config.mining_cards then
+        local used = assert(card.ssk_rate_card_used_by, "The factory card needs a consuming recipe")
+        local recipe = used.children[math.min(15,#used.children)]
+        assert(helpers.table_to_json({recipe.caption}):find(" → ",1,true), "The recipe column must show the full flow")
+        panel.ssk_selected_scroll.scroll_to_element(recipe,"in-view")
+      end
       state.rate_card = {key=key, screenshot="sankey-rate-card.png"}
+      if RibbonCheck then
+        local paths = overview_paths(root.ssk_inner.ssk_tabs.content_sankey.ssk_chart)
+        state.rate_card.overview_witness = RibbonCheck.overview_witness(paths, {Palette.OVERVIEW_DIM})
+      end
       state.next_tick = game.tick + 20
       return
     end
@@ -333,6 +511,8 @@ function T.tick(UI, Sampler)
     result.warmed_save=state.warmed_save
     result.viewport=state.viewport
     result.rate_card=state.rate_card
+    result.mining_cards=state.mining_cards
+    result.hidden_toolbar=state.hidden_toolbar
     write(player, "results", result)
     state.done = true
     assert(#state.failures == 0, "Reporter native GUI checks failed; see modded-gui/results.json")
@@ -355,7 +535,7 @@ function T.tick(UI, Sampler)
   result.inspect_profile=tostring(profiler)
   result.open_profile=state.open_profile
   local function check_geometry(sample)
-    if not Config.viewport then return Check.assert_clear(sample) end
+    if not Config.viewport then return Check.assert_clear(sample, case.tab ~= "sankey") end
     -- The save's current surface can have a single isolated node or a chart
     -- zoom below the icon threshold. Check every target that is actually drawn.
     assert(sample.oversized_wrappers==0 and #sample.obstructions==0,"Chart interaction geometry is obstructed")

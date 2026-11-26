@@ -33,9 +33,8 @@ for _,renderer in ipairs({"poly","sprites"}) do
   local function overview_has_ribbon(color)
     local paths=c.ssk_body.ssk_sidebar.ssk_overview.ssk_overview_map.ssk_overview_paths
     local suffix=string.format("-c%02d",color)
-    for _,wrapper in ipairs(paths.children) do
-      local piece=wrapper.children[1]
-      if piece and piece.sprite:sub(-#suffix)==suffix then return true end
+    for _,piece in ipairs(paths.children) do
+      if piece.type=="sprite" and piece.sprite:sub(-#suffix)==suffix then return true end
     end
     return false
   end
@@ -46,9 +45,9 @@ for _,renderer in ipairs({"poly","sprites"}) do
   assert(storage.sk_render[1].selected=="item/electronic-circuit")
   assert(overview_color(upstream)==upstream_color and overview_color(unrelated)==S.bar(P.DIM),
     "The overview must keep the full upstream chain coloured and dim unrelated nodes")
-  assert(overview_has_ribbon(P.DIM) and overview_has_ribbon(P.muted(P.material(us.sel)))
-    and overview_color(us.sel)==S.bar(P.material(us.sel)),
-    "Overview ribbons must keep their darker shade and dim unrelated links")
+  assert(overview_has_ribbon(P.OVERVIEW_DIM) and overview_has_ribbon(P.material(us.sel))
+    and not overview_has_ribbon(P.DIM) and overview_color(us.sel)==S.bar(P.material(us.sel)),
+    "Overview ribbons must keep readable background links and emphasize the selected chain")
   local node=find(c,"node","item/plastic-bar")
   SK.on_hover(event(node),true)
   assert(overview_color(unrelated)==S.bar(P.DIM),"Hovering must keep the overview on the pinned selection")
@@ -62,7 +61,8 @@ for _,renderer in ipairs({"poly","sprites"}) do
   SK.on_click(event(find(c,"unpin")),us); assert(us.sel==nil)
   local colors=find(c,"balance_colors"); colors.selected_index=2
   SK.on_selection(event(colors),us); SK.fill(player,c,us,1600,850,false)
-  assert(overview_color(unrelated)==unrelated_color and not overview_has_ribbon(P.DIM),
+  assert(overview_color(unrelated)==unrelated_color and not overview_has_ribbon(P.OVERVIEW_DIM)
+    and overview_has_ribbon(P.muted(P.material(upstream))),
     "Clearing the selection must restore overview colours")
   for _,r in ipairs(storage.sk_render[1].ribbons) do assert(r.color==P.material(r.from)) end
 end

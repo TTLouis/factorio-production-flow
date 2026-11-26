@@ -24,7 +24,20 @@ for _, t in ipairs({ 1, 6, 17.4, 120.7 }) do
   end
 end
 local k, q = TREQ("shared.sprites").elbow_index(0.4)
+for _, scale in ipairs({0.75, 1, 1.25}) do
+  local elbow = G.overview_piece({kind="elbow", corner="bl", k=1, x=321, y=456, w=10, h=10},
+    0.04, 5.4, 6.6, scale)
+  assert(elbow.kind=="bar" and math.floor(elbow.w*scale)>=1 and math.floor(elbow.h*scale)>=1,
+    "A thumbnail bend must leave a solid device pixel at any GUI scale")
+  near(elbow.x, G.round(5.4+321*0.04))
+  near(elbow.y, G.round(6.6+456*0.04))
+end
 local radius = 10 * (1 - q) / q
+local overview_scale = 98 / 420
+local overview_x = (312 - 950 * overview_scale) / 2
+local left = G.scaled_piece({kind="bar",x=639,y=0,w=31,h=10}, overview_scale, overview_x, 0)
+local right = G.scaled_piece({kind="bar",x=670,y=0,w=31,h=10}, overview_scale, overview_x, 0)
+assert(left.x + left.w == right.x, "Bands that share an edge must meet after projection")
 for _, dy in ipairs({ -150, 150 }) do
   local p = G.route({ t = 10, route = "late", curve_x0 = 80, cx0 = 80,
     ortho = { k = k, R = radius, xv = 125 } }, 28, 260, 200, 200 + dy)
@@ -150,6 +163,9 @@ local function headers(us, width)
   end
   return first_hit
 end
+local ribbon_setting = "ssk-detailed-sankey-ribbons"
+local previous_ribbon_setting = player.mod_settings[ribbon_setting]
+player.mod_settings[ribbon_setting] = {value=true}
 for _, setting in ipairs({ { "detail", "clean" }, { "detail", "lanes" }, { "focus", "clean" }, { "overview", "clean" } }) do
   for _, lines in ipairs({ "curves", "metro" }) do
     local us = configuration(setting[1], setting[2], lines)
@@ -331,6 +347,7 @@ assert(not hidden.nodes["group/@oil"] and not hidden.nodes["group/@oil#fluid"], 
 us.tier_lo, us.tier_hi = 4, 5
 SK.on_selection({ element = { tags = { ssk_sk = "view" }, selected_index = 2 } }, us)
 assert(us.view == "detail" and not us.tier_lo and not us.tier_hi, "view switch must clear incompatible tier range")
+player.mod_settings[ribbon_setting] = previous_ribbon_setting
 c.destroy()
 Canvas.clear(player.index)
 print("DRAWING TESTS OK")

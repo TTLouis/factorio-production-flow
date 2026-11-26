@@ -110,10 +110,12 @@ right sound.
 2. **Use vanilla `utility/*` sprites for icons.** Useful ones that exist in 2.1:
    `close`, `search`, `refresh`, `reset`, `trash`, `add`, `copy`, `rename_icon`,
    `expand`, `collapse`, `left_arrow`, `right_arrow`, `down_arrow`,
-   `backward_arrow`, `forward_arrow`, `go_to_arrow`, `center`, `pin_arrow`,
+   `backward_arrow`, `forward_arrow`, `go_to_arrow`, `center`, `track_button`,
    `filter_blacklist`, `list_view`, `grid_view`, `questionmark`, `check_mark`,
    `play`, `pause`, `speed_up`, `speed_down`. Core utility sprites are always
    present, so do not write fallbacks to text glyphs such as `"X"` or `">"`.
+   Use the vanilla pushpin sprites `track_button_white` on dark frame buttons
+   and `track_button` on light or pressed buttons.
 3. **No text glyphs as fake icons.** Captions such as `X`, `>`, `◀`, `▲`, `▼`,
    `+` or `−` on a shrunken grey button do not match the game. Use the sprite. If
    vanilla has no fitting sprite (zoom in and out, Fit), use a `tool_button` with

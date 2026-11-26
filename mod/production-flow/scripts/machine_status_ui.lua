@@ -123,10 +123,15 @@ local function add_recipes(parent, title, names, rows, widths)
   end
 end
 
+function M.on_player_removed(index)
+  if storage.rate_card_preview then storage.rate_card_preview[index] = nil end
+end
+
 function M.close(player)
   local screen = player.gui.screen
   if screen[PREVIEW] then screen[PREVIEW].destroy() end
   if screen[STATUS] then screen[STATUS].destroy() end
+  M.on_player_removed(player.index)
 end
 
 function M.open(player, surface, material)
@@ -174,6 +179,7 @@ end
 local function close_preview(player)
   local screen = player.gui.screen
   if screen[PREVIEW] then screen[PREVIEW].destroy() end
+  M.on_player_removed(player.index)
   local status = screen[STATUS]
   if status then
     status.visible = true
@@ -190,21 +196,23 @@ local function show_unavailable(player)
   notice.visible = true
 end
 
-local function open_preview(player, status, tags)
-  local scope = status.tags
-  if player.force_index ~= scope.force then
-    M.open(player, scope.surface, scope.material)
-    return
-  end
-  local entity = Sampler.find_status_machine(scope.surface, scope.force, tags.recipe, tags.issue)
-  if not entity then show_unavailable(player); return end
+local function preview_frame(player, entity, scope, from_status)
   local width, height = dimensions(player, 560, 390)
   local f, header = frame(player, PREVIEW, width, Loc("machine-status-machine-preview"))
-  f.tags = { unit = entity.unit_number, surface = scope.surface, force = scope.force,
-    recipe = tags.recipe, issue = tags.issue }
-  header_button(header, "left_arrow", Loc("machine-status-back-to-machine-status"), "back")
+  f.tags = scope
+  if from_status then
+    header_button(header, "left_arrow", Loc("machine-status-back-to-machine-status"), "back")
+  else
+    header_button(header, "close", Loc("rate-card-close"), "back")
+  end
   local panel = f.add { type = "frame", style = "inside_deep_frame", direction = "vertical" }
   panel.style.horizontally_stretchable = true
+  if not entity then
+    local notice = panel.add{type="label", style="grey_label",
+      caption=Loc("machine-status-no-matching-machine-is-currently-available-refresh")}
+    notice.style.single_line, notice.style.maximal_width = false, width - 32
+    return
+  end
   local toolbar = panel.add { type = "frame", style = "subheader_frame", direction = "horizontal" }
   toolbar.style.horizontally_stretchable, toolbar.style.vertical_align = true, "center"
   toolbar.add { type = "label", style = "subheader_caption_label", caption = Loc("machine-status-zoom") }
@@ -217,32 +225,93 @@ local function open_preview(player, status, tags)
   local camera = panel.add { type = "camera", name = CAMERA, surface_index = scope.surface,
     position = entity.position, zoom = DEFAULT_ZOOM }
   camera.style.width, camera.style.height = width - 24, math.max(70, height - 100)
+end
+
+local function open_preview(player, status, tags)
+  local scope = status.tags
+  if player.force_index ~= scope.force then
+    M.open(player, scope.surface, scope.material)
+    return
+  end
+  local entity = Sampler.find_status_machine(scope.surface, scope.force, tags.recipe, tags.issue)
+  if not entity then show_unavailable(player); return end
+  preview_frame(player, entity, {unit=entity.unit_number, surface=scope.surface, force=scope.force,
+    recipe=tags.recipe, issue=tags.issue}, true)
   status.visible = false
+end
+
+local function matches_card(entity, scope)
+  if not (entity and entity.valid and entity.surface_index == scope.surface
+    and entity.force_index == scope.force and entity.name == scope.machine) then return false end
+  if scope.recipe then return Sampler.current_recipe(entity) == scope.recipe end
+  local target = entity.type == "mining-drill" and entity.mining_target
+  return target and target.valid and target.type == "resource" and target.name == scope.resource
+end
+
+local function find_card_machine(player, scope)
+  local surface = game.surfaces[scope.surface]
+  if not surface then return end
+  if scope.recipe then
+    for _, unit in ipairs(storage.mlist or {}) do
+      local rec = storage.machines[unit]
+      if rec and rec.r == scope.recipe and rec.s == scope.surface and matches_card(rec.e, scope) then return rec.e end
+    end
+  elseif scope.resource then
+    for _, drill in ipairs(surface.find_entities_filtered{name=scope.machine, type="mining-drill", force=player.force}) do
+      if matches_card(drill, scope) then return drill end
+    end
+  end
+end
+
+local function open_card_preview(player, tags)
+  M.close(player)
+  local scope = {card=true, surface=tags.surface, force=player.force_index, machine=tags.machine,
+    recipe=tags.recipe, resource=tags.resource}
+  local entity = find_card_machine(player, scope)
+  storage.rate_card_preview = storage.rate_card_preview or {}
+  storage.rate_card_preview[player.index] = entity
+  preview_frame(player, entity, scope, false)
 end
 
 local function preview_entity(player, preview)
   local t = preview.tags
-  if player.force_index == t.force then return Sampler.status_machine(t.unit, t.surface, t.force, t.recipe, t.issue) end
+  if player.force_index ~= t.force then return end
+  if t.card then
+    local e = storage.rate_card_preview and storage.rate_card_preview[player.index]
+    if matches_card(e, t) then return e end
+  else
+    return Sampler.status_machine(t.unit, t.surface, t.force, t.recipe, t.issue)
+  end
 end
 
 function M.on_click(player, element, close_all)
   local tags = element.tags
   local action = tags and tags.ssk_machine_status
   local status = player.gui.screen[STATUS]
-  if not action or not status then return false end
+  local preview = player.gui.screen[PREVIEW]
+  if action == "card_preview" then open_card_preview(player, tags); return true end
+  if not action or not (status or preview) then return false end
   if action == "close" then
     M.close(player)
-  elseif action == "refresh" then
+  elseif action == "refresh" and status then
     local scope = status.tags
     M.open(player, scope.surface, scope.material)
-  elseif action == "preview" then
+  elseif action == "preview" and status then
     if not player.gui.screen[PREVIEW] then open_preview(player, status, tags) end
   elseif action == "back" then
     close_preview(player)
   elseif action == "jump" then
-    local preview = player.gui.screen[PREVIEW]
     local entity = preview and preview_entity(player, preview)
-    if not entity then show_unavailable(player); return true end
+    if not entity then
+      if preview and preview.tags.card then
+        local scope = preview.tags
+        close_preview(player)
+        preview_frame(player, nil, scope, false)
+      else
+        show_unavailable(player)
+      end
+      return true
+    end
     close_all(player)
     player.centered_on = entity
   else
@@ -262,11 +331,17 @@ end
 
 function M.on_closed(player, element)
   local screen = player.gui.screen
-  if not (screen[STATUS] and element and element.valid) then return false end
+  if not ((screen[STATUS] or screen[PREVIEW]) and element and element.valid) then return false end
   if element.name ~= MAIN and element.name ~= STATUS and element.name ~= PREVIEW then return false end
   if screen[PREVIEW] then close_preview(player) else M.close(player) end
   if screen[MAIN] then player.opened = screen[MAIN] end
   return true
+end
+
+function M.on_surface_deleted(player, surface)
+  local screen = player.gui.screen
+  if (screen[STATUS] and screen[STATUS].tags.surface == surface)
+    or (screen[PREVIEW] and screen[PREVIEW].tags.surface == surface) then M.close(player) end
 end
 
 return M

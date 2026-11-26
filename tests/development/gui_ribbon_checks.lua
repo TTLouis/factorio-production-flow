@@ -42,8 +42,8 @@ local function join(a,b)
   end
 end
 
-local function mark_origin(canvas, result)
-  local marker=canvas.add{type='flow',direction='horizontal',ignored_by_interaction=true}
+local function mark_origin(canvas, result, index)
+  local marker=canvas.add{type='flow',direction='horizontal',ignored_by_interaction=true,index=index}
   marker.style.width,marker.style.height,marker.style.bottom_margin=8,4,-4
   marker.style.horizontal_spacing=0
   result.marker = {}
@@ -52,6 +52,19 @@ local function mark_origin(canvas, result)
     e.style.width,e.style.height,e.style.stretch_image_to_widget_size=4,4,true
     result.marker[#result.marker+1]=Palette.rgb(color)
   end
+end
+
+function T.overview_witness(paths, colors)
+  local result={width=paths.style.minimal_width,height=paths.style.minimal_height,colors={},nodes={}}
+  for _, color in ipairs(colors) do result.colors[#result.colors+1]=Palette.rgb(color) end
+  for _, child in ipairs(paths.parent.ssk_overview_nodes.children) do
+    if child.type=='flow' then
+      local style=child.style
+      result.nodes[#result.nodes+1]={style.left_margin,style.top_margin,style.minimal_width,style.minimal_height}
+    end
+  end
+  mark_origin(paths,result,1)
+  return result
 end
 
 function T.fit_join(canvas,player)

@@ -190,7 +190,7 @@ UI.open(player)
 local Shades,Palette=TREQ("shared.ribbon_shades"),TREQ("shared.palette")
 assert(Shades.key("in",1)=="ribbon_in_1" and Shades.key("in",5)=="ribbon_in_1" and Shades.key("out",3)=="ribbon_out_3"
   and Shades.key("made",2)=="ribbon_made" and Shades.sprite("out",2)=="ssk-plot-ribbon_out_2","Ribbon shades must cycle per side")
-assert(#Palette.colors==16 and Palette.RIBBON==Palette.DIM+16 and Palette.count==Palette.RIBBON+10
+assert(#Palette.colors==16 and Palette.RIBBON==Palette.DIM+16 and Palette.OVERVIEW_DIM>Palette.RIBBON+10
   and Palette.rgb(Palette.RIBBON+1)[3]==math.floor(Shades.color("in",1).b*255+0.5),"Ribbon shades must follow the Sankey palette")
 -- SE item colours are exact muted Sankey colours, so night-vision curves reuse
 -- the Sankey sprites; iron and copper keep their Sankey blue and orange.

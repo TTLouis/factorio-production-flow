@@ -149,6 +149,12 @@ data.raw["gui-style"].default.ssk_balance_header = {
   vertical_flow_style = { type = "vertical_flow_style", vertical_spacing = 0 },
 }
 
+-- Keep the default scroll pane's border and padding in both scrollbar states.
+data.raw["gui-style"].default.ssk_rate_card_scroll = {
+  type = "scroll_pane_style", parent = "scroll_pane",
+  always_draw_borders = true, padding = 4, extra_padding_when_activated = 0,
+}
+
 local cell_selection = require("shared.cell_selection")
 data:extend {{
   type = "selection-tool",

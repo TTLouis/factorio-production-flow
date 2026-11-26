@@ -78,7 +78,7 @@ def prepare(stage,args,scale):
     (stage/'manifest.json').write_text(json.dumps(manifest,indent=2))
     return manifest
 
-def ribbon_pixels(path, checks, scale, required=('straight','curve','elbow')):
+def marked_image(path, checks, scale):
     from PIL import Image
 
     def distance(a, b):
@@ -98,7 +98,34 @@ def ribbon_pixels(path, checks, scale, required=('straight','curve','elbow')):
                 and (not y or distance(pixels[x,y-1],first)>5)):
                 origins.append((x,y))
     if len(origins)!=1: raise RuntimeError(f'Expected one chart origin in {path.name}, found {origins}')
-    ox,oy=origins[0]
+    return img, origins[0], size
+
+
+def overview_pixels(path, checks, scale):
+    from PIL import ImageDraw
+
+    img, (ox, oy), marker_size = marked_image(path, checks, scale)
+    region = img.crop((ox, oy + marker_size, ox + int(checks['width']*scale), oy + int(checks['height']*scale)))
+    mask = ImageDraw.Draw(region)
+    for x, y, w, h in checks['nodes']:
+        left, top = int(x*scale), int(y*scale) - marker_size
+        mask.rectangle((left-1, top-1, left+int(w*scale)+1, top+int(h*scale)+1), fill=(0, 0, 0))
+    seen = region.getcolors(region.width*region.height)
+    counts = []
+    for expected in checks['colors']:
+        count = sum(n for n, color in seen if max(abs(a-b) for a, b in zip(expected, color)) <= 4)
+        if count < 6:
+            raise RuntimeError(f'Missing visible overview pixels for {expected} in {path.name}')
+        counts.append(count)
+    return counts
+
+
+def ribbon_pixels(path, checks, scale, required=('straight','curve','elbow')):
+    def distance(a, b):
+        return max(abs(x-y) for x,y in zip(a,b))
+
+    img, (ox, oy), size = marked_image(path, checks, scale)
+    pixels = img.load()
     background=pixels[ox+size*3,oy+size*2]
     # Use the empty strip below the tier labels to find the start of the scrollbar.
     # The screenshot can include a scrollable chart wider than its viewport.
@@ -180,11 +207,26 @@ def run(stage,args):
                         results['night_vision_ribbon_colors_matched']=len(shared)
                     for filename in results.get('viewport_modes', {}).values():
                         captures[filename]=digest(stage/'script-output/gui-interaction'/filename)
+                    for filename in results.get('ribbon_modes', {}).values():
+                        screenshot=stage/'script-output/gui-interaction'/filename
+                        if not screenshot.is_file() or screenshot.stat().st_size<10000:
+                            raise RuntimeError(f'Missing Full Sankey ribbon mode screenshot {screenshot}')
+                        captures[filename]=digest(screenshot)
+                    for filename, witness in results.get('overview_witnesses', {}).items():
+                        witness['visible_pixels']=overview_pixels(stage/'script-output/gui-interaction'/filename,
+                            witness,results['scale'])
                     for filename in results.get('rate_card', {}).values():
                         card=stage/'script-output/gui-interaction'/filename
                         if not card.is_file() or card.stat().st_size<10000:
                             raise RuntimeError(f'Missing Full Sankey rate-card screenshot {card}')
                         captures[filename]=digest(card)
+                    if not args.expect_obstruction:
+                        for key in ('toolbar_screenshot','toolbar_minimum_screenshot','flyouts_screenshot',
+                                    'preview_screenshot','folded_screenshot'):
+                            status=stage/'script-output/gui-interaction'/results[key]
+                            if not status.is_file() or status.stat().st_size<10000:
+                                raise RuntimeError(f'Missing toolbar screenshot {status}')
+                            captures[status.name]=digest(status)
                     results['screenshots_sha256']=captures
                     (stage/'evidence.json').write_text(json.dumps(results,indent=2))
                     print(f'PASS native contracts at {results["scale"]:.0%}: {stage}',flush=True)

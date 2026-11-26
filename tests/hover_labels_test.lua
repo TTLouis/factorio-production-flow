@@ -174,9 +174,12 @@ assert(RateCard.toggle(player, state, "item/" .. key) and not player.gui.screen[
 assert(RateCard.toggle(player, state, "item/" .. key))
 RateCard.refresh(player, {sidx = state.sidx + 1, tab_id = "focus"})
 assert(not player.gui.screen[RateCard.NAME], "surface changes must close a card from the old scope")
-assert(RateCard.toggle(player, state, "item/" .. key))
-RateCard.refresh(player, {sidx = state.sidx, tab_id = "sankey"})
-assert(not player.gui.screen[RateCard.NAME], "Full Sankey uses a docked card instead of the floating window")
+local full = {sidx=state.sidx, tab_id="sankey", period=60}
+assert(RateCard.toggle(player, full, "item/" .. key))
+local full_card = assert(player.gui.screen[RateCard.NAME], "Full Sankey must allow an Alt-click flyout")
+RateCard.refresh(player, full)
+assert(player.gui.screen[RateCard.NAME] == full_card, "A Full Sankey refresh must keep its flyout")
+RateCard.close(player)
 local original_scale = player.display_scale
 player.display_scale = 1.5
 assert(RateCard.toggle(player, state, "item/" .. key))
@@ -186,6 +189,29 @@ assert(card.location[1] == math.floor(math.max(12, screen_w - math.min(430, scre
   "Floating card location must be in screen pixels")
 RateCard.close(player)
 player.display_scale = original_scale
+
+assert(RateCard.toggle(player, state, "item/" .. key))
+local first_card = player.gui.screen[RateCard.NAME]
+assert(RateCard.on_click(player, first_card.children[1].ssk_rate_card_pin))
+assert(not player.gui.screen[RateCard.NAME] and first_card.valid)
+assert(RateCard.toggle(player, state, "item/iron-ore"))
+local second_card = player.gui.screen[RateCard.NAME]
+assert(RateCard.on_click(player, second_card.children[1].ssk_rate_card_pin))
+RateCard.refresh(player, {sidx=state.sidx, tab_id="sankey"})
+assert(first_card.valid and second_card.valid and first_card.name~=second_card.name,
+  "Two pins must survive chart navigation independently")
+local fold = first_card.children[1].ssk_rate_card_fold
+assert(RateCard.on_click(player, fold, state) and not first_card.ssk_rate_card_scroll.visible)
+assert(first_card.tags.folded and fold.sprite == "utility/expand"
+  and first_card.children[1].ssk_rate_card_pin.toggled and second_card.ssk_rate_card_scroll.visible ~= false,
+  "Folding a card must keep its pin without changing its neighbor")
+assert(RateCard.on_click(player, fold, state) and first_card.ssk_rate_card_scroll.visible)
+assert(not first_card.tags.folded and first_card.children[1].ssk_rate_card_pin.toggled)
+local actions = first_card.children[1].children
+assert(RateCard.on_click(player, actions[#actions]))
+assert(not first_card.valid and second_card.valid, "Close must affect only its owning flyout")
+RateCard.close_scoped(player, state.sidx)
+assert(not second_card.valid)
 
 local Sampler = TREQ("scripts.sampler")
 local original_cell_rates = Sampler.cell_rates

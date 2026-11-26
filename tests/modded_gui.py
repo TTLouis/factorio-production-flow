@@ -64,11 +64,15 @@ def prepare(args):
     (mods/'mod-list.json').write_text(json.dumps({'mods':entries}))
     hooks=[('cells_rail_native.lua','modded_gui.lua')] if rail else [
         ('modded_gui.lua','modded_gui.lua'),('development/gui_interaction_checks.lua','gui_interaction_checks.lua')]
+    if getattr(args, 'overview_toolbar', False):
+        hooks.append(('development/gui_ribbon_checks.lua','gui_ribbon_checks.lua'))
     for a,b in hooks:
         shutil.copyfile(TESTS/a,target/'scripts'/b)
     (target/'scripts/modded_gui_config.lua').write_text(
         f'return {{warm_seconds={args.warm_seconds},resolution={{{args.width},{args.height}}},'
         f' viewport={str(args.viewport).lower()},reuse_recorded={str(args.reuse_recorded_history).lower()},'
+        f' mining_cards={str(getattr(args, "mining_cards", False)).lower()},'
+        f' overview_toolbar={str(getattr(args, "overview_toolbar", False)).lower()},'
         f'persist_warmed={str(not (args.viewport or args.reuse_recorded_history)).lower()}}}\n')
     if rail:
         # Verify the actual data-stage selection prototype, not only injected area events.
@@ -169,6 +173,22 @@ def run(stage,manifest,args):
                             time.sleep(.5)
                             continue
                         shots[card.name]=digest(card)
+                    if getattr(args, 'mining_cards', False):
+                        for case in evidence['mining_cards']:
+                            shot=stage/'script-output/modded-gui'/case['screenshot']
+                            if not shot.is_file() or shot.stat().st_size<10000:
+                                raise RuntimeError(f'Missing resource card screenshot: {shot}')
+                            shots[shot.name]=digest(shot)
+                    if getattr(args, 'overview_toolbar', False):
+                        from gui_interaction import overview_pixels
+                        shot=stage/'script-output/modded-gui'/evidence['hidden_toolbar']['screenshot']
+                        if not shot.is_file() or shot.stat().st_size<10000:
+                            raise RuntimeError(f'Missing overview and toolbar screenshot: {shot}')
+                        shots[shot.name]=digest(shot)
+                        for case in (evidence['hidden_toolbar'], evidence['rate_card']):
+                            witness=case['overview_witness']
+                            witness['visible_pixels']=overview_pixels(shot.with_name(case['screenshot']),
+                                witness,evidence['display_scale'])
                     if rail:evidence['playtest_sha256']=digest(playtest)
                     evidence['camera_pixel_witnesses']=witnesses
                     (stage/'evidence.json').write_text(json.dumps(evidence,indent=2))
@@ -193,11 +213,15 @@ def main():
     parser.add_argument('--height',type=int,default=1440)
     parser.add_argument('--warm-seconds',type=int,default=600)
     parser.add_argument('--timeout',type=int,default=1200)
+    parser.add_argument('--mining-cards',action='store_true',help='Capture mining drill counts and required fluid from the factory')
+    parser.add_argument('--overview-toolbar',action='store_true',help='Capture the overview and Show hidden on the zoom toolbar')
     mode=parser.add_mutually_exclusive_group()
     mode.add_argument('--cells-rail',action='store_true',help='Capture Cells rail UI and save an isolated playable copy')
     mode.add_argument('--viewport',action='store_true',help='Check Full Sankey viewport navigation on the warmed save')
     mode.add_argument('--reuse-recorded-history',action='store_true',help='Allow a shorter warm-up on an existing save with recorded production history')
     args=parser.parse_args();args.save=args.save.resolve();args.mods=args.mods.resolve()
+    if (args.mining_cards or args.overview_toolbar) and args.cells_rail:
+        raise ValueError('Mining card and overview captures require the standard factory capture')
     minimum=60 if args.cells_rail or args.viewport or args.reuse_recorded_history else 600
     if args.warm_seconds<minimum:raise ValueError(f'Collect at least {minimum} game seconds of real production history')
     stage,manifest=prepare(args)

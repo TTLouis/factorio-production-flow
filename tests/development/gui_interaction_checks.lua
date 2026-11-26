@@ -113,11 +113,26 @@ function T.inspect(canvas,scale)
   end
   return out
 end
-function T.assert_clear(result)
+function T.assert_clear(result, expect_ribbons)
   assert(result.icons>0 and result.bars>0,"Empty chart interaction fixture")
   assert(result.oversized_wrappers==0,"Absolute-position wrapper can intercept earlier chart rows")
   assert(#result.obstructions==0,"Chart node is covered by another interactive element")
-  assert(result.ribbons>0 and result.ribbons==result.hover_enabled,"Ribbon hover/leave events are not enabled")
+  assert((expect_ribbons==false or result.ribbons>0) and result.ribbons==result.hover_enabled,
+    "Ribbon hover/leave events are not enabled")
   assert(#result.label_alignment_errors==0,"Material label is displaced from or overlaps its item icon")
+end
+
+function T.assert_show_hidden_position(panel)
+  local rows=panel.ssk_bar.ssk_toolbar_strip.ssk_toolbar_rows
+  assert(#rows.children==1,"Show hidden added a toolbar row")
+  local controls=rows.ssk_toolbar_main.ssk_toolbar_actions.children
+  for index, control in ipairs(controls) do
+    if control.tags.ssk_sk=="unhide_all" then
+      assert(controls[index+1] and controls[index+1].tags.ssk_sk=="zoom_out",
+        "Show hidden must be immediately left of zoom out")
+      return control
+    end
+  end
+  error("Show hidden is missing from the zoom controls")
 end
 return T

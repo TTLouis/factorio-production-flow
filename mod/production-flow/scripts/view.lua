@@ -870,8 +870,9 @@ function V.build(player, us, W, viewH, source, automatic)
   if hi < lo then hi = lo end
   drop_nodes(nodes, links, function(k) local t = nodes[k].tier; return t >= lo and t <= hi end)
   local returns = visible_returns(nodes, kmap, reversing, source and source.fuel_returns, source and source.cell_returns)
+  local full_chart = not source and us.view ~= "focus" and not us.neighborhood
   local budget
-  if us.is_cell_chart or (not source and us.view ~= "focus" and not us.neighborhood) then
+  if us.is_cell_chart or full_chart then
     budget, returns = Budget.apply(nodes, links, returns, us, kmap, ff, automatic)
   end
 
@@ -1081,7 +1082,7 @@ function V.build(player, us, W, viewH, source, automatic)
   L.returns = returns
   if budget and budget.oversized then
     L.budget = budget
-    viewH = math.max(100, viewH - 24)
+    if not full_chart then viewH = math.max(100, viewH - 24) end
   end
   for _, route in ipairs(returns) do
     local origin = route.sources[1]
@@ -1117,7 +1118,7 @@ function V.build(player, us, W, viewH, source, automatic)
     L.render_fingerprint = Budget.fingerprint(signature, L, {
       minimum_evidence, source and source.empty, L.column_labels, L.all_tiers, L.details and L.details.rates,
       L.details and RecipeDetails.machine_counts(L.details), us.sel, us.pinned, us.show_labels,
-      us.chart_zoom, us.chart_fit, us.renderer, us.color_mode, player.display_scale,
+      us.chart_zoom, us.chart_fit, us.renderer, us.color_mode, player.display_scale, us.detailed_ribbons,
       player.mod_settings["ssk-return-direction-markers"] and player.mod_settings["ssk-return-direction-markers"].value,
     })
     if automatic and us.render_fingerprint == L.render_fingerprint then return nil, m, L end
