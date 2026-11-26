@@ -22,7 +22,8 @@ the layout of dense charts are still being refined.
   or fluid. Switch from Flow to History to compare production, use, net rate
   and chest stock on the same timeline.
 - **Transfers.** Follow confirmed Space Age cargo deliveries by platform, or
-  browse observed Space Exploration cargo rocket routes, items and shipment history.
+  browse Space Exploration cargo rocket and delivery cannon routes, items and
+  shipment history.
 - **Focus.** Trace upstream and downstream recipe connections for one material.
 - **Cells.** Group machines into production cells, compare measured throughput
   with capacity, and follow linked train stops and their cargo history.
@@ -38,7 +39,7 @@ Sankey overview box** in per-player mod settings to use Factorio’s native scro
 
 The Full Sankey overview shows all plotted links and highlights the selected chain. Turn off **Show Full Sankey overview bands** in map mod settings to keep the overview's clickable materials and viewport box with fewer elements to draw. Hover over a material for its rate preview. Turn on **Detailed Full Sankey ribbons** in per-player mod settings to see recipe details on ribbon hover.
 
-Click a machine icon in the Full Sankey side card to preview a matching machine or drill and jump to it in remote view. Alt-click a material in Full Sankey, Focus, Balance Flow, or a Cell chart to open its rate history. Use the pushpin to keep the flyout beside other materials and the chevron to fold it to its title bar. **Used by** lists every observed consuming recipe in the flyout's reported period.
+Click a machine icon in the Full Sankey side card to preview a matching machine or drill and jump to it in remote view. Alt-click a material in Full Sankey, Focus, Balance Flow, or the Flow chart of an individual cell without subcells to open its rate history. Use the pushpin to keep the flyout beside other materials and the chevron to fold it to its title bar. **Used by** lists every observed consuming recipe in the flyout's reported period.
 
 Destination/source colors, hover highlighting, pinned selections, optional labels,
 Fit and Center help you explore the charts. Automatic updates preserve selectors and
@@ -68,12 +69,15 @@ In Focus, use the magnifier in the toolbar to search for an item or fluid.
 ## What the charts measure
 
 Production charts show recipe relationships based on observed crafting and
-production statistics. Transfers records confirmed Space Age cargo deliveries
-and observed Space Exploration launches. Space Exploration received quantities
-and cannon manifests remain unknown until measured.
-Stock covers ordinary and logistic chests on the selected surface, including
-requester and buffer chests, across all qualities. Chests outside a logistic
-network count too. Production measurements work independently of chest storage.
+production statistics. In Space Exploration, Transfers records dispatched cargo
+and confirms receipts when a rocket unloads fully into a landing pad or a
+delivery chest catches a cannon package. Unverified receipts stay unknown.
+Balance History marks confirmed imports from either integration on the stock chart.
+
+Stock counts items across all qualities in ordinary and logistic chests on the
+selected surface, including chests outside a logistic network. It also counts
+cargo stored in landing pads, platform hubs and loaded rocket silos, along with
+eligible cargo pods. Production measurements work independently of storage.
 Player/vehicle inventories, machine buffers, belts, ground items, linked/infinity
 chests and fluid tanks are excluded. Empty-time values are estimates. Large maps
 use staggered inventory scans, publishing only completed results. Each scan is

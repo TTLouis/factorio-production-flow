@@ -65,8 +65,9 @@ material and metric changes, shared time axes, and measured and estimated stock)
 and `portal` (Mod Portal gallery images 30–37 from real save data: it records another 20 game
 minutes, then picks the busiest real platforms and writes the choice to `portal-platforms.json`).
 Phase-specific evidence records native image hashes and the clean archive hash.
-Release packages contain Balance with Flow and History, Focus, Full Sankey and
-Transfers (when Space Age and its cargo events are available). Local diagnostic and render fixtures live under `tests/development/`.
+Release packages contain Balance with Flow and History, Focus, Cells and Full
+Sankey. Transfers is available with a supported Space Age or Space Exploration
+installation. Local diagnostic and render fixtures live under `tests/development/`.
 The native harness
 injects its diagnostic helper into an isolated test copy after creating the clean
 candidate archive. These helpers and test hooks are excluded from release ZIPs.

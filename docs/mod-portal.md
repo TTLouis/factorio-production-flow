@@ -47,7 +47,7 @@ The Underproducing, OK and Overproducing summaries help you scan the factory at 
 
 Click the material slot to search for an item or fluid. Browse familiar item categories or jump straight to the Fluids section.
 
-Switch to **History** to compare Made, Used, Net, estimated use by product and chest stock for the same material. Hover to line up the charts at one point in time. Choose a production period from one minute to 1,000 hours.
+Switch to **History** to compare Made, Used, Net, estimated use by product and chest stock for the same material. Green markers on the stock chart show confirmed imports from Space Age or Space Exploration. Hover to line up the charts at one point in time. Choose a production period from one minute to 1,000 hours.
 
 ![Balance History aligns production rates, net rate and chest stock](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/31-balance-history.png)
 
@@ -79,9 +79,13 @@ Use **Back**, **Forward** or **Last visits** to revisit materials in Focus. Zoom
 
 **Full Sankey** shows recipe flows across one surface. Click a material bar to pin its rate card, or click it in the chart overview to jump to it. The card shows Made, Used and Net history and the recipes making and using the material. Recent history stays visible if the bar drops out of the chart. Open **Focus**, **Balance** or **Machines** from the card, or use its three-dot menu for chart edits.
 
+Alt-click a material to open its rate history in a flyout. Pin multiple flyouts to compare materials and fold them when you need more chart space. Click a machine or drill icon in the Full Sankey rate card to preview it and jump to it in remote view.
+
+The chart overview shows the visible area as you pan and zoom. Scroll horizontally with Shift and the mouse wheel, wheel tilt, or Page Up and Page Down. For fewer elements to draw, turn off **Show Full Sankey overview bands** in map mod settings. The materials stay clickable and the viewport box stays visible. Use **Live Full Sankey overview box** in per-player mod settings to switch between the live box and native scrollbars.
+
 Large **Cells Flow** and **Full Sankey** charts show up to 150 nodes and 300 links. Use **Refresh** to update an oversized chart. Enable **Bypass Sankey size limit** in the save’s map mod settings to draw the full chart on refresh.
 
-Hover a recipe bar to see recipe amounts, rates and the machines running it. Thin return arrows show flows that loop back, such as recycling or circulating catalysts.
+Hover a material bar to preview its rates. Enable **Detailed Full Sankey ribbons** in per-player mod settings to see recipe details when hovering over a ribbon. Thin return arrows show flows that loop back, such as recycling or circulating catalysts.
 
 ![Full Sankey shows the chart overview and a pinned material rate card](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/42-full-sankey-breakdown.png)
 
@@ -91,7 +95,7 @@ Hover a recipe bar to see recipe amounts, rates and the machines running it. Thi
 - **Recipe connections.** Production Flow samples completed crafts on tracked machines. It uses ingredient amounts and expected product yields to estimate rates for each recipe link, accounting for productivity and the expected yield of probabilistic outputs. Recipe estimates can differ from the measured totals.
 - **Selected-material usage.** The **Uses** side shows how much of the selected material each recipe consumes. A recipe running at ten normal crafts per second and using two iron plates per craft consumes twenty iron plates per second.
 - **Utilisation and status.** The mod compares observed normal craft rates with the capacity of the current machines, based on crafting speed and recipe time. A net difference within 5% of the larger Made or Used rate counts as roughly balanced. Machine, recipe or module changes can affect comparisons with historical activity. Treat utilisation warnings as clues about where to look.
-- **Stock and Empty in.** Stock counts physical items in ordinary and logistic chests on the selected surface, including requester and buffer chests, across all qualities. Chests outside a logistic network count too. Items stored without recent activity appear as **Stock only**. Production rates refresh every five seconds. Chest reads are spread across ticks, with a configurable wait after each completed scan of one game minute minimum and five by default. A dash means stock is unavailable, and zero means measured empty. **Empty in** uses the recent drain from up to seven completed scans, or the net production deficit when no drain is measured. Seven scans span about 30 game minutes at the default interval or six at the minimum, with longer spans on large maps. Empty time assumes the current drain continues. Items moving between chests during a scan can affect the sample.
+- **Stock and Empty in.** Stock counts items of all qualities in ordinary and logistic chests on the selected surface, including chests outside a logistic network. Cargo in landing pads, platform hubs, loaded silos and eligible cargo pods also counts. Items stored without recent activity appear as **Stock only**. Production rates refresh every five seconds. Inventory reads are spread across ticks, with a configurable wait after each completed scan of one game minute minimum and five by default. A dash means stock is unavailable, and zero means measured empty. **Empty in** uses the recent drain from up to seven completed scans, or the net production deficit when no drain is measured. Seven scans span about 30 game minutes at the default interval or six at the minimum, with longer spans on large maps. Empty time assumes the current drain continues. Items moving between inventories during a scan can affect the sample.
 - **Ribbon widths.** Proportional mode scales widths by rate, while compressed mode uses the square root of the rate. Thin flows have a minimum visible width and fluids use a separate scale. Compare widths within the same material because different materials can use different units.
 
 Open the **?** button in-game for help with controls, measurements and chart limits. See [how the calculations work](https://github.com/TTLouis/factorio-production-flow/blob/main/docs/calculations.md) for more detail.

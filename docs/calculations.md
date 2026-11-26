@@ -51,10 +51,13 @@ cases have separate handling when machine or stock data is unavailable.
 
 ## Stock, trend and time to empty
 
-Stock sums physical item counts from ordinary (`container`) and logistic
-(`logistic-container`) chest inventories belonging to the player force on the
-selected surface. Requester and buffer chests are included, even without a
-logistic network. Each chest is counted once and all qualities are combined.
+Stock sums physical item counts in inventories belonging to the player force on
+the selected surface. It includes ordinary, logistic and temporary containers,
+cargo landing pads, platform hubs, and the cargo inventory of loaded rocket
+silos. It also includes pods awaiting launch from a hub or landing pad and
+Space Exploration cargo containers left by off-pad landings. Requester and
+buffer chests count even without a logistic network. Each eligible inventory
+is visited once per scan and all qualities are combined.
 No network availability or robot reservations are added or subtracted.
 Player/vehicle inventories, machine buffers, belts, ground items, linked/infinity
 chests and fluid tanks are excluded. Selection and production statistics do not
@@ -92,14 +95,17 @@ tracked crafting go into Other uses. The bands add up to measured Used.
 
 Solid stock bars show the counts from completed chest scans. Between adjacent
 scans, estimated bars follow the accumulated Made minus Used rate on that
-surface. The estimate distributes the difference needed to reach the next
-measured count across the interval. After the latest completed scan, the chart
-uses the recorded net rates to estimate current stock until another scan
-completes. Estimates require rate history for the interval.
+surface and include observed cargo transfers when the mod can establish that
+Factorio's production counters exclude those transfers. The estimate distributes
+the difference needed to reach the next measured count across the interval.
+After the latest completed scan, the chart uses recorded net rates and eligible
+transfers to estimate current stock until another scan completes. Estimates
+require rate history for the interval. Green markers show confirmed imports for
+the selected material independently of the stock estimate.
 
 ## Transfers
 
-Transfers totals confirmed cargo pod deliveries for the player's force by
+**Space Age.** Transfers totals confirmed cargo pod deliveries for the player's force by
 origin, destination and item. Each arrival is recorded once and combines item
 qualities. Loading a platform and unloading it later are separate deliveries.
 The view counts items delivered to the destination surface, including overflow
@@ -107,6 +113,15 @@ spilled there by a successful delivery. A station delivery whose manifest could
 have changed through spoilage is skipped. The ledger starts collecting when
 tracking is installed and retains up to 1,000 game hours or 32,768 confirmed
 arrivals, whichever limit it reaches first.
+
+**Space Exploration.** Transfers tracks cargo rocket and delivery cannon
+dispatches. The received manifest for a rocket comes from its post-loss cargo
+when the landing is matched to a pad and a full unload can be verified. For
+delivery cannons, tracking requires Space Exploration 0.7.64 and records a receipt
+when a matched package lands in a delivery chest without spilling. Full-pad and
+off-pad rocket landings, spilled packages and unmatched deliveries leave the
+receipt unknown. Cargo recovered from an off-pad landing can still appear in a
+later physical stock scan.
 
 ## Widths, names and grouping
 
