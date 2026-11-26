@@ -11,8 +11,7 @@ and what needs improving. Report bugs or suggest improvements on
 [GitHub Issues](https://github.com/TTLouis/factorio-production-flow/issues) or the
 [Mod Portal discussion](https://mods.factorio.com/mod/production-flow/discussion).
 
-The beta includes Balance History and Transfers for Space Age and Space Exploration.
-See [the changelog](CHANGELOG.md).
+See [the changelog](CHANGELOG.md) for release history.
 
 ## Views
 
@@ -25,7 +24,15 @@ the layout of dense charts are still being refined.
 - **Transfers.** Follow confirmed Space Age cargo deliveries by platform, or
   browse observed Space Exploration cargo rocket routes, items and shipment history.
 - **Focus.** Trace upstream and downstream recipe connections for one material.
-- **Full Sankey.** Explore the broader recipe network on the selected surface.
+- **Cells.** Group machines into production cells, compare measured throughput
+  with capacity, and follow linked train stops and their cargo history.
+- **Full Sankey.** Explore the recipe network on the selected surface. The Chart
+  overview outlines the visible area as you pan and zoom. Click a material in
+  the overview to jump to it. Selecting a node dims unrelated nodes and flows.
+
+In Full Sankey, use **Shift + mouse wheel**, **wheel tilt**, or **Page Up / Page Down**
+to scroll horizontally. The overview box is on by default. Turn off **Live Full
+Sankey overview box** in per-player mod settings to use Factorio’s native scrollbars.
 
 Destination/source colors, hover highlighting, pinned selections, optional labels,
 Fit and Center help you explore the charts. Automatic updates preserve selectors and
@@ -77,9 +84,8 @@ multiplayer and large-factory performance need broader testing.
 
 ## Development
 
-The [Base / Space Age / Space Exploration feature matrix](docs/feature-matrix.md)
-tracks the current development scope, provider limitations and packaging work.
-It distinguishes unpublished changes from published-release claims.
+The [validation notes](docs/validation.md) record past compatibility tests,
+performance measurements, and engineering decisions.
 
 Python 3.11+ is sufficient for the offline test and packaging commands:
 
