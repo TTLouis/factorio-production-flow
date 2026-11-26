@@ -111,6 +111,82 @@ function T.unpause()
   if state and not state.done then game.tick_paused=false end
 end
 
+local viewport_steps = {"initial", "pan", "zoom", "edge", "fit"}
+local function viewport_step(UI, player, state)
+  local index = #state.viewport + 1
+  local name = viewport_steps[index]
+  if not name then return false end
+  local us = storage.ui[player.index]
+  if name == "initial" and not state.viewport_prepared then
+    settings.get_player_settings(player)["ssk-live-sankey-overview"] = {value=true}
+    open_case(UI, player, state, {tab="sankey", renderer="sprites"})
+    us = storage.ui[player.index]
+    us.chart_fit, us.chart_zoom, us.chart_viewport = false, 1.5, nil
+    UI.refresh(player, false, false, true, true)
+    state.viewport_prepared, state.next_tick = true, game.tick + 20
+    return true
+  end
+  local root = assert(player.gui.screen.ssk_main)
+  local overview = assert(find(root,function(e) return e.name=="ssk_overview" end))
+  local canvas = assert(find(root,function(e) return e.name=="ssk_canvas" end))
+  local pane = canvas.parent
+  local chart = pane.parent.parent.parent.parent
+  local function click(action)
+    local e = assert(find(root,function(el) return el.tags.ssk_sk==action end))
+    assert(UI.on_click{player_index=player.index,element=e})
+  end
+  local v = assert(us.chart_viewport)
+  if not state.viewport_positioned then
+    if name == "pan" then
+      local x, y = math.floor(v.max_x * .35), math.floor(v.max_y * .35)
+      assert(x>0 and y>0,"Real factory must overflow both viewport axes")
+      assert(SK.pan_to(player,chart,us,x,y))
+      UI.on_chart_wheel({player_index=player.index,element=pane},48,48)
+      assert(v.x==x+48 and v.y==y+48)
+    elseif name == "zoom" then
+      local x, y, zoom = (v.x + v.w/2)/v.zoom, (v.y + v.h/2)/v.zoom, v.zoom
+      for _=1,3 do click("zoom_in") end
+      v = us.chart_viewport
+      assert(v.zoom>zoom)
+      assert(math.abs((v.x+v.w/2)/v.zoom-x)<2 and math.abs((v.y+v.h/2)/v.zoom-y)<2,
+        "Zoom should preserve the panned center")
+    elseif name == "edge" then
+      local visual
+      for _, candidate in pairs(storage.sk_render[player.index].node_visuals) do
+        local b=candidate.icon_bounds
+        if b and b[1]>8 and b[1]<v.max_x and b[2]>8 and b[2]<v.max_y then visual=candidate; break end
+      end
+      assert(visual,"Fixture needs an icon that can cross the viewport edge")
+      local b = visual.icon_bounds
+      local y = math.max(0, math.floor(b[2] - v.h/4))
+      assert(SK.pan_to(player,chart,us,b[1]-8,y))
+      assert(visual.icon.visible, "Unclipped icon should remain available")
+      assert(SK.pan_to(player,chart,us,math.floor((b[1]+b[3])/2),y))
+      assert(not visual.icon.visible and visual.icon.parent.ignored_by_interaction,
+        "Clipped icon chrome must be hidden and click-through")
+    elseif name == "fit" then
+      click("zoom_fit")
+      v=us.chart_viewport
+      assert(v.x==0 and v.y==0 and v.max_x==0 and v.max_y==0,"Fit should display the entire chart")
+    end
+    state.viewport_positioned, state.next_tick = true, game.tick + 20
+    return true
+  end
+  assert(canvas.style.left_margin==-v.x and canvas.style.top_margin==-v.y,"Native chart pan and viewport state diverged")
+  local outline = overview.ssk_overview_map.ssk_viewport_outline
+  local s = outline.children[1].style
+  assert(outline.visible and outline.ignored_by_interaction)
+  local previous = state.viewport[index-1]
+  if name == "pan" then assert(s.left_margin>previous.outline_x and s.top_margin>previous.outline_y) end
+  if name == "zoom" then assert(s.minimal_width<previous.outline_width,"Viewport outline should shrink on zoom") end
+  state.viewport[index] = {name=name,x=v.x,y=v.y,zoom=v.zoom,
+    outline_x=s.left_margin,outline_y=s.top_margin,outline_width=s.minimal_width}
+  game.take_screenshot{player=player,path="modded-gui/viewport-"..name..".png",
+    resolution=RESOLUTION,show_gui=true,force_render=true}
+  state.viewport_positioned, state.next_tick = false, game.tick + 20
+  return true
+end
+
 function T.tick(UI, Sampler)
   local player = first_player()
   if not player then return end
@@ -143,7 +219,8 @@ function T.tick(UI, Sampler)
     state.warm_ticks = game.tick - state.start_tick
     state.surface, state.surface_index = player.surface.name, player.surface.index
     state.coverage = Sampler.coverage(state.surface_index, PERIOD)
-    assert(state.coverage >= WARM_SECONDS, "Reporter factory did not acquire the required real production-history coverage")
+    assert(state.coverage >= (Config.viewport and PERIOD or WARM_SECONDS),
+      "Reporter factory did not acquire the required real production-history coverage")
     local rates, recorded = Sampler.rates(state.surface_index, PERIOD)
     state.focus, state.recorded_seconds = choose_material(rates), recorded
     state.focus_rates_at_warmup = rates.nodes[state.focus]
@@ -185,6 +262,10 @@ function T.tick(UI, Sampler)
     return
   end
   if not case then
+    if Config.viewport then
+      state.viewport = state.viewport or {}
+      if viewport_step(UI, player, state) then return end
+    end
     local actual_mods = {}
     for name, version in pairs(script.active_mods) do actual_mods[name] = version end
     local result = { cases=state.cases, coverage=state.coverage, warm_ticks=state.warm_ticks,
@@ -196,6 +277,7 @@ function T.tick(UI, Sampler)
     result.forced_unpause=true
     result.controller_at_start=state.controller_at_start
     result.warmed_save=state.warmed_save
+    result.viewport=state.viewport
     write(player, "results", result)
     state.done = true
     assert(#state.failures == 0, "Reporter native GUI checks failed; see modded-gui/results.json")
@@ -217,13 +299,22 @@ function T.tick(UI, Sampler)
   profiler.stop()
   result.inspect_profile=tostring(profiler)
   result.open_profile=state.open_profile
-  local ok, error_message = pcall(Check.assert_clear, result)
+  local function check_geometry(sample)
+    if not Config.viewport then return Check.assert_clear(sample) end
+    -- The save's current surface can have a single isolated node or a chart
+    -- zoom below the icon threshold. Check every target that is actually drawn.
+    assert(sample.oversized_wrappers==0 and #sample.obstructions==0,"Chart interaction geometry is obstructed")
+    assert(sample.ribbons==sample.hover_enabled,"Ribbon hover/leave events are not enabled")
+    assert(#sample.label_alignment_errors==0,"Material label is displaced from its icon")
+  end
+  local ok, error_message = pcall(check_geometry, result)
   result.name, result.tab, result.renderer, result.passed = case.name, case.tab, case.renderer, ok
   result.tick, result.focus, result.surface = game.tick, state.focus, state.surface
   result.coverage, result.engine_mouse_input = Sampler.coverage(state.surface_index, PERIOD), false
   result.display_scale, result.display_resolution = player.display_scale, player.display_resolution
   result.controller_type,result.render_mode=player.controller_type,player.render_mode
   local camera=find(canvas,function(e)return e.type=="camera" end)
+  result.actual_renderer=camera and "poly" or "sprites"
   if camera then
     result.camera={surface_index=camera.surface_index,position=camera.position,zoom=camera.zoom,
       width=camera.style.minimal_width,height=camera.style.minimal_height,

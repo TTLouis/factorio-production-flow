@@ -10,6 +10,24 @@ for name,color in pairs(require("shared.plot_colors")) do
   protos[#protos+1]={type="sprite",name="ssk-plot-"..name,filename="__core__/graphics/white-square.png",
     width=10,height=10,tint=color,flags={"gui"}}
 end
+-- Centre strips from the vanilla horizontal and vertical scrollbar thumbs.
+for _, thumb in ipairs({{"x",232,48,8,20},{"y",0,55,20,8}}) do
+  protos[#protos+1] = {type="sprite", name="ssk-scroll-thumb-"..thumb[1], filename="__core__/graphics/gui-new.png",
+    x=thumb[2],y=thumb[3],width=thumb[4],height=thumb[5],flags={"gui"}}
+end
+for _, wheel in ipairs({{"up","mouse-wheel-up"},{"down","mouse-wheel-down"},
+    {"left","SHIFT + mouse-wheel-up","mouse-wheel-left"},
+    {"right","SHIFT + mouse-wheel-down","mouse-wheel-right"}}) do
+  protos[#protos+1] = {type="custom-input", name="ssk-sankey-scroll-"..wheel[1], key_sequence=wheel[2],
+    alternative_key_sequence=wheel[3],
+    localised_name={"", {"production-flow.ui-full-sankey"}, " · ", {"production-flow.sankey-pan-"..wheel[1]}},
+    consuming="none"}
+end
+for _, page in ipairs({{"left","PAGEUP"},{"right","PAGEDOWN"}}) do
+  protos[#protos+1] = {type="custom-input", name="ssk-sankey-page-"..page[1], key_sequence=page[2],
+    localised_name={"", {"production-flow.ui-full-sankey"}, " · ", {"production-flow.sankey-page-"..page[1]}},
+    block_modifiers=true, consuming="none"}
+end
 -- Thin returns need a lighter version of the source hue against the chart.
 for color = 1, palette.count do
   local rgb = palette.rgb(color)

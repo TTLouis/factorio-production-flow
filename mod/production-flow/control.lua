@@ -73,6 +73,10 @@ end)
 script.on_event(defines.events.on_force_created, function(e) Canvas.on_force_created(e.force) end)
 
 script.on_event(defines.events.on_runtime_mod_setting_changed, function(e)
+  if e.setting == "ssk-live-sankey-overview" and e.player_index then
+    local player = game.get_player(e.player_index)
+    if player then UI.on_sankey_viewport_setting_changed(player) end
+  end
   if e.setting == "ssk-window-seconds" then Sampler.init() end
   if e.setting == "ssk-stock-scan-minutes" then Sampler.on_stock_interval_changed() end
   if e.setting == "ssk-allow-small-window" then
@@ -144,6 +148,7 @@ local se_cannons_active = SECannons.available()
 script.on_event(defines.events.on_train_changed_state, CellRail.on_state)
 script.on_event(defines.events.on_train_created, CellRail.on_train_created)
 script.on_event(defines.events.on_tick, function(e)
+  UI.release_chart_zoom(e.tick)
   Sampler.on_tick(e.tick)
   CellRail.on_tick(e.tick)
   local cells = storage.production_cells
@@ -177,6 +182,7 @@ script.on_event(defines.events.on_string_translated, function(e) Cells.on_string
 script.on_event(defines.events.on_gui_selected_tab_changed, function(e) UI.on_tab_changed(e) end)
 script.on_event(defines.events.on_gui_selection_state_changed, function(e) UI.on_selection(e) end)
 script.on_event(defines.events.on_gui_value_changed, function(e) UI.on_value_changed(e) end)
+script.on_event(defines.events.on_gui_location_changed, UI.on_chart_location_changed)
 script.on_event(defines.events.on_gui_hover, function(e)
   if UI.on_hover(e, true) then return end
 end)
@@ -196,6 +202,11 @@ script.on_event(defines.events.on_player_display_resolution_changed, display_cha
 script.on_event(defines.events.on_player_display_scale_changed, display_changed)
 script.on_event(defines.events.on_player_selected_area, Cells.on_selected)
 script.on_event(require("shared.cell_selection").click, Cells.on_click_anywhere)
+for _, wheel in ipairs({{"up",0,-48},{"down",0,48},{"left",-48,0},{"right",48,0}}) do
+  script.on_event("ssk-sankey-scroll-"..wheel[1], function(e) UI.on_chart_wheel(e,wheel[2],wheel[3]) end)
+end
+script.on_event("ssk-sankey-page-left", function(e) UI.on_chart_page(e,-1) end)
+script.on_event("ssk-sankey-page-right", function(e) UI.on_chart_page(e,1) end)
 script.on_event(defines.events.on_player_cursor_stack_changed, function(e)
   Cells.on_cursor_changed(game.get_player(e.player_index))
 end)

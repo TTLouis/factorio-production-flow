@@ -141,6 +141,9 @@ def raw_text_errors(source, name="source"):
             continue
         if "^" in value:
             continue
+        if name == "data.lua" and (value in ("PAGEUP", "PAGEDOWN") or
+                                   re.fullmatch(r"SHIFT \+ mouse-wheel-(?:up|down)", value)):
+            continue
         visible = re.sub(r'%%|%[-+ #0]*\d*(?:\.\d+)?[cdiouxXeEfgGqs]', '', value)
         visible = re.sub(r"\[[^\]]*\]", "", visible)
         if re.search(r"[A-Z]|[a-z][ ,:;\n][a-zA-Z]", visible):

@@ -204,11 +204,56 @@ local function navigation_test(UI,p,result)
     result.sidebar_made_by=true
   end
 end
+local function capture_viewport_modes(UI,p,s)
+  local setting='ssk-live-sankey-overview'
+  local preferences=settings.get_player_settings(p)
+  if not preferences[setting] or s.viewport_stage=='done' then return false end
+  if not s.viewport_stage then
+    local us=open(UI,p,'sankey','sprites')
+    us.chart_fit,us.chart_zoom=false,2.5
+    UI.refresh(p,false,false,true,true)
+    s.viewport_stage='off'
+  elseif s.viewport_stage=='enable' or s.viewport_stage=='disable' then
+    local enabled=s.viewport_stage=='enable'
+    preferences[setting]={value=enabled}
+    local handler=script.get_event_handler(defines.events.on_runtime_mod_setting_changed)
+    handler{player_index=p.index,setting=setting,setting_type='runtime-per-user'}
+    if enabled then
+      local panel=p.gui.screen.ssk_main.ssk_inner.ssk_tabs.content_sankey.ssk_chart
+      local us=storage.ui[p.index]
+      local v=assert(us.chart_viewport)
+      assert(SK.pan_to(p,panel,us,v.max_x*.3,v.max_y*.3))
+    end
+    s.viewport_stage=enabled and 'on' or 'done'
+  elseif s.viewport_stage=='select' then
+    local key='item/electronic-circuit'
+    local target=chart_control(p,'overview_jump',key)
+    assert(UI.on_click{element=target,player_index=p.index})
+    assert(storage.ui[p.index].sel==key)
+    s.viewport_stage='selected'
+  else
+    local mode=s.viewport_stage
+    local viewport=storage.ui[p.index].chart_viewport
+    assert((viewport~=nil)==(mode~='off'),'Captured chart does not match the player preference')
+    local filename='sankey-viewport-'..mode..'.png'
+    game.take_screenshot{player=p,path='gui-interaction/'..filename,resolution={1920,1080},show_gui=true,force_render=true}
+    s.viewport_modes=s.viewport_modes or {}
+    s.viewport_modes[mode]=filename
+    s.viewport_stage=mode=='off' and 'enable' or mode=='on' and 'select' or 'disable'
+  end
+  s.next_tick=game.tick+20
+  return true
+end
+
 function T.tick(UI)
   local p=game.get_player(1)
   if not p or not p.connected then return end
-  if RibbonCheck and p.controller_type==defines.controllers.cutscene then p.exit_cutscene();return end
+  if p.controller_type==defines.controllers.cutscene then p.exit_cutscene();return end
   if not storage.gui_interaction then
+    local preferences=settings.get_player_settings(p)
+    if preferences['ssk-live-sankey-overview'] then
+      preferences['ssk-live-sankey-overview']={value=false}
+    end
     -- Native insertion/lifetime contracts used by retained Transfer targets.
     local root=p.gui.screen.add{type='flow',name='gui_api_smoke'}
     local hit=root.add{type='sprite',name='hit',sprite='item/iron-plate'}
@@ -232,6 +277,7 @@ function T.tick(UI)
   if s.done or game.tick<s.next_tick then return end
   local c=cases[s.step]
   if not c then
+    if not broken and capture_viewport_modes(UI,p,s) then return end
     if not broken then
       local us=storage.ui[p.index]
       for _,field in ipairs({'fx','bal_fx'}) do
@@ -248,7 +294,8 @@ function T.tick(UI)
       end
     end
     local evidence={cases=s.results,scale=p.display_scale,resolution=p.display_resolution,
-      expected_obstruction=broken,engine_mouse_input=false,removed_material_check=not broken,fixture='vanilla synthetic rates'}
+      expected_obstruction=broken,engine_mouse_input=false,removed_material_check=not broken,fixture='vanilla synthetic rates',
+      viewport_modes=s.viewport_modes}
     helpers.write_file('gui-interaction/results.json',helpers.table_to_json(evidence),false,p.index)
     s.done=true;log('GUI INTERACTION NATIVE PASS '..helpers.table_to_json{cases=#s.results,scale=p.display_scale})
     return

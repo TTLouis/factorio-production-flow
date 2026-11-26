@@ -6,6 +6,15 @@ Release history is maintained in the [Factorio changelog](mod/production-flow/ch
 Run `python tools/changelog.py --write` after editing it.
 See [validation and engineering notes](docs/validation.md) for historical test details.
 
+## 0.4.13 — 2026-11-26
+
+### Gui
+
+- Show the visible Full Sankey area in the chart overview as you pan and zoom. Thanks to HorizonBeta for suggesting this in issue #4. (https://github.com/TTLouis/factorio-production-flow/issues/4)
+- Dim unrelated nodes and flows in the overview when you select a node.
+- Scroll horizontally with Shift and the mouse wheel, mouse wheel tilt, or Page Up / Page Down. Dragging a scrollbar keeps the window in place, and scrolling keeps the world camera steady.
+- The live overview box is on by default. Turn it off in per-player mod settings to use Factorio's native scrollbars.
+
 ## 0.4.12 — 2026-11-21
 
 ### Gui

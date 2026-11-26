@@ -287,10 +287,10 @@ local function place(e, x, y, w, h, reset)
   return reset
 end
 
-local function add_sprite(parent, sprite, tooltip)
-  local f = parent.add { type = "flow", direction = "horizontal", tags = { ssk_wrap = true } }
+local function add_sprite(parent, sprite, tooltip, direction)
+  local f = parent.add { type = "flow", direction = direction or "horizontal", tags = { ssk_wrap = true } }
   f.style.padding = 0
-  f.style.horizontal_spacing = 0
+  if direction == "vertical" then f.style.vertical_spacing = 0 else f.style.horizontal_spacing = 0 end
   local e = f.add { type = "sprite", sprite = sprite, tooltip = tooltip, resize_to_sprite = false }
   e.style.stretch_image_to_widget_size = true
   return e
@@ -761,34 +761,47 @@ local function ribbon_sprite(r, color)
   return S.pick(r.dir, r.k, color, r.box_h)
 end
 
-local function highlight(st, key)
-  -- Balance is already scoped to the selected material. Keep its colours
-  -- visible while hovering or pinning a neighbour.
-  if not st.dim_nodes then key = nil end
+local function selected_chain(paths, key)
   local upstream, downstream = {}, {}
   local function walk(set, reverse)
-    if not key then return end
     set[key] = true
     local changed = true
     while changed do
       changed = false
-      for _, path in ipairs(st.paths or {}) do
+      for _, path in ipairs(paths or {}) do
         local a, b = reverse and path.to or path.from, reverse and path.from or path.to
         if set[a] and not set[b] then set[b] = true; changed = true end
       end
     end
   end
   walk(upstream, true); walk(downstream, false)
+  return {upstream=upstream, downstream=downstream}
+end
+
+local function chain_contains(chain, key)
+  return chain.upstream[key] or chain.downstream[key]
+end
+
+local function chain_contains_link(chain, from, to)
+  return (chain.upstream[from] and chain.upstream[to]
+    or chain.downstream[from] and chain.downstream[to]) == true
+end
+
+local function highlight(st, key)
+  -- Balance is already scoped to the selected material. Keep its colours
+  -- visible while hovering or pinning a neighbour.
+  if not st.dim_nodes then key = nil end
+  local chain = key and selected_chain(st.paths, key)
   local shade = st.shade_ribbons or (not key and st.quiet)
   for _, r in ipairs(st.ribbons) do
-    local related = upstream[r.from] and upstream[r.to] or downstream[r.from] and downstream[r.to]
-    local c = key and not related and palette.DIM or (shade and palette.muted(r.color) or r.color)
+    local c = chain and not chain_contains_link(chain, r.from, r.to) and palette.DIM
+      or (shade and palette.muted(r.color) or r.color)
     if r.ro then
       if r.ro.valid then r.ro.color = Canvas.col(c) end
     elseif r.elem and r.elem.valid then r.elem.sprite = ribbon_sprite(r, c) end
   end
   for node_key, node in pairs(st.node_visuals or {}) do
-    local dim = st.dim_nodes and key ~= nil and not (upstream[node_key] or downstream[node_key])
+    local dim = chain ~= nil and not chain_contains(chain, node_key)
     if node.dimmed ~= dim then
       node.dimmed = dim
       for _, sprite in ipairs(node.sprites) do
@@ -806,6 +819,7 @@ local function highlight(st, key)
       end
     end
   end
+  return chain
 end
 
 local RETURN_MARKER_SIZE = 12
@@ -1298,6 +1312,7 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons)
       if d.node_icon then
         local visual = st.node_visuals[d.node_icon]
         visual.icon, visual.grayscale = e, e.style.draw_grayscale_picture == true
+        visual.icon_bounds = {x, y, x + w, y + h}
       elseif d.node_label then
         local visual = st.node_visuals[d.node_label]
         visual.labels[#visual.labels + 1] = { element=e, original=e.style.font_color or {1, 1, 1} }
@@ -1305,11 +1320,10 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons)
       count = count + 1
     end
   end
-  highlight(st, st.selected)
-  return count
+  return count, highlight(st, st.selected)
 end
 
-local function render_overview(side, L, us, paths, width, height, player)
+local function render_overview(side, L, us, paths, chain, width, height, player, managed_scroll)
   local overview = side.ssk_overview
   if not overview then
     overview = side.add{type="frame", name="ssk_overview", style="inside_deep_frame", direction="vertical"}
@@ -1327,9 +1341,20 @@ local function render_overview(side, L, us, paths, width, height, player)
   map.style.width, map.style.height = map_w, map_h
   ribbons.style.width, ribbons.style.height, ribbons.style.bottom_margin = map_w, map_h, -map_h
   nodes.style.width, nodes.style.height = map_w, map_h
+  if managed_scroll then
+    nodes.style.bottom_margin = -map_h
+    local outline = map.ssk_viewport_outline
+    if not outline then
+      outline = map.add{type="flow", name="ssk_viewport_outline", direction="vertical", ignored_by_interaction=true}
+      outline.style.vertical_spacing = 0
+      for _ = 1, 4 do place(add_sprite(outline, "ssk-plot-measured"), 0, 0, 1, 1) end
+    end
+    outline.style.width, outline.style.height = map_w, map_h
+  end
   ribbons.clear()
   local selected = L.nodes[us.sel]
   local selected_key = selected and selected.key
+  if not selected then chain = nil end
   if nodes.tags.key ~= selected_key then
     nodes.clear()
     nodes.tags = {key=selected_key}
@@ -1352,21 +1377,23 @@ local function render_overview(side, L, us, paths, width, height, player)
     local h = Geometry.sprite_span(y, p.h, player.display_scale)
     place(e, x, y, w, h)
   end
-  for _, selected in ipairs{false, true} do
+  for _, active in ipairs{false, true} do
     for _, path in ipairs(paths) do
-      if (path.from == us.sel or path.to == us.sel) == selected then
-        local color = selected and path.color or palette.muted(path.color)
+      local related = chain ~= nil and chain_contains_link(chain, path.from, path.to)
+      if related == active then
+        local color = related and path.color or chain and palette.DIM or palette.muted(path.color)
         for _, shape in ipairs(path.pieces) do piece(shape, color) end
       end
     end
   end
   for _, col in ipairs(L.cols) do
     for _, n in ipairs(col) do
+      local color = chain and not chain_contains(chain, n.key) and palette.DIM or palette.GREY
       if n.t_stub_in > 0 then
-        piece({kind="bar", x=n.x-View.STUB, y=n.stub_in_y, w=View.STUB, h=n.t_stub_in}, palette.GREY)
+        piece({kind="bar", x=n.x-View.STUB, y=n.stub_in_y, w=View.STUB, h=n.t_stub_in}, color)
       end
       if n.t_stub_out > 0 then
-        piece({kind="bar", x=n.x+View.NODE_W, y=n.stub_out_y, w=View.STUB, h=n.t_stub_out}, palette.GREY)
+        piece({kind="bar", x=n.x+View.NODE_W, y=n.stub_out_y, w=View.STUB, h=n.t_stub_out}, color)
       end
     end
   end
@@ -1379,7 +1406,8 @@ local function render_overview(side, L, us, paths, width, height, player)
   local function dot(n, active)
     local old = previous[n.key]
     previous[n.key] = nil
-    local sprite = S.bar(n.color or n.ginfo.color)
+    local color = chain and not chain_contains(chain, n.key) and palette.DIM or (n.color or n.ginfo.color)
+    local sprite = S.bar(color)
     local e = old and old.widget or add_sprite(nodes, sprite, Loc("sankey-overview-jump", display_name(n)))
     if not old then e.tags = {ssk_sk="overview_jump", key=n.key}
     elseif e.sprite ~= sprite then e.sprite = sprite end
@@ -1397,6 +1425,89 @@ local function render_overview(side, L, us, paths, width, height, player)
     obsolete.widget.parent.destroy()
     obsolete.reset.destroy()
   end
+  return scale, ox, oy
+end
+
+local function clamp_pan(value, maximum)
+  return math.max(0, math.min(round(value), maximum))
+end
+
+local SCROLLBAR = 12
+
+local function scroll_track(parent, axis)
+  local track = parent.add{type="flow", name="ssk_scroll_"..axis, direction="vertical"}
+  track.style.vertical_spacing = 0
+  for _, part in ipairs({"before", "after", "thumb"}) do
+    local thumb = part == "thumb"
+    local sprite = add_sprite(track, thumb and "ssk-scroll-thumb-"..axis or "ssk-plot-background")
+    if thumb then
+      sprite.raise_hover_events = true
+      sprite.tags = {ssk_scroll_visual=axis}
+    else sprite.tags = {ssk_scroll_axis=axis, ssk_scroll_page=part == "before" and -1 or 1} end
+    place(sprite,0,0,1,1)
+  end
+end
+
+local function update_track(track, axis, length, position, maximum)
+  if not track then return end
+  local horizontal = axis=="x"
+  local style = track.style
+  style.width, style.height = horizontal and length or SCROLLBAR, horizontal and SCROLLBAR or length
+  local thumb_length = math.min(length, math.max(18, round(length * length / (length + maximum))))
+  local travel = length - thumb_length
+  local start = maximum > 0 and round(travel * position / maximum) or 0
+  local children = track.children
+  local function segment(index, offset, extent, inset)
+    local wrapper, reset = children[index], children[index+1]
+    local shown = maximum > 0 and extent > 0
+    wrapper.visible, reset.visible = shown, shown
+    local thickness = SCROLLBAR - 2 * inset
+    if shown then
+      local x, y = horizontal and offset or inset, horizontal and inset or offset
+      local w, h = horizontal and extent or thickness, horizontal and thickness or extent
+      place(wrapper.children[1],x,y,w,h,reset)
+    end
+  end
+  segment(1,0,start,0)
+  segment(3,start+thumb_length,travel-start,0)
+  segment(5,start,thumb_length,1)
+  return travel, start, thumb_length
+end
+
+local function render_viewport(c, st)
+  local v = st.viewport
+  local x, y = v.x, v.y
+  local canvas = SK.scroll_pane(c).ssk_canvas
+  canvas.style.left_margin, canvas.style.top_margin = -x, -y
+  -- Slot button chrome can draw outside the pane. Bars and ribbons clip normally.
+  for _, visual in pairs(v.has_nodes and st.node_visuals or {}) do
+    local icon = visual.icon
+    if icon then
+      local bounds, guard = visual.icon_bounds, 8
+      local inside = bounds[1] >= x + guard and bounds[2] >= y + guard
+        and bounds[3] <= x + v.w - guard and bounds[4] <= y + v.h - guard
+      if icon.visible ~= inside then
+        icon.visible = inside
+        icon.parent.ignored_by_interaction = not inside
+      end
+    end
+  end
+  local overview = c.ssk_body.ssk_sidebar.ssk_overview
+  local outline = overview.ssk_overview_map.ssk_viewport_outline
+  local scale, ox, oy = v.map_scale, v.map_x, v.map_y
+  local left, top = round(ox + x / v.zoom * scale), round(oy + y / v.zoom * scale)
+  local right = round(ox + math.min(v.content_w, (x + v.w) / v.zoom) * scale)
+  local bottom = round(oy + math.min(v.content_h, (y + v.h) / v.zoom) * scale)
+  local w, h = math.max(1, right - left), math.max(1, bottom - top)
+  local t = math.min(2, w, h)
+  local el = outline.children
+  place(el[1].children[1], left, top, w, t, el[2])
+  place(el[3].children[1], left, top + h - t, w, t, el[4])
+  place(el[5].children[1], left, top, t, h, el[6])
+  place(el[7].children[1], left + w - t, top, t, h, el[8])
+  local chart = c.ssk_body.ssk_viewport
+  v.travel_x, v.thumb_x, v.thumb_w = update_track(chart.ssk_scroll_x, "x", v.w, x, v.max_x)
+  v.travel_y, v.thumb_y, v.thumb_h = update_track(chart.ssk_viewport_row.ssk_scroll_y, "y", v.h, y, v.max_y)
 end
 
 local function render_selection(side, L, us, width, player, recipe_icons, keep_controls)
@@ -1489,7 +1600,21 @@ end
 
 -- c: tab content (vertical flow). full=false keeps the scroll-pane (and its scroll position).
 function SK.scroll_pane(c)
-  return c.ssk_body and c.ssk_body.ssk_sp or c.ssk_sp
+  local body = c.ssk_body
+  local chart = body and body.ssk_viewport
+  return chart and chart.ssk_viewport_row.ssk_sp or body and body.ssk_sp or c.ssk_sp
+end
+
+function SK.pan_to(player, c, us, x, y)
+  local st = rstate(player.index, us.view)
+  local v = st.viewport
+  if not (v and c and c.valid and c.ssk_body and c.ssk_body.ssk_sidebar) then return false end
+  x, y = clamp_pan(x, v.max_x), clamp_pan(y, v.max_y)
+  if x == v.x and y == v.y then return true end
+  SK.clear_hover(player.index)
+  v.x, v.y = x, y
+  render_viewport(c, st)
+  return true
 end
 
 function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph)
@@ -1508,7 +1633,11 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   local sidebar_w = full_chart and W >= SIDEBAR_MIN_W and 208 or 0
   local chart_w = W - (sidebar_w > 0 and sidebar_w + 8 or 0)
   local with_sidebar = sidebar_w > 0
-  if full or not SK.scroll_pane(c) or (c.ssk_body ~= nil) ~= with_sidebar then
+  local setting = player.mod_settings["ssk-live-sankey-overview"]
+  local managed_scroll = with_sidebar and setting ~= nil and setting.value == true
+  local body = c.ssk_body
+  if full or not SK.scroll_pane(c) or (body ~= nil) ~= with_sidebar
+    or (body and (body.ssk_viewport ~= nil) ~= managed_scroll) then
     c.clear()
     c.add { type = "scroll-pane", name = "ssk_bar", style = "naked_scroll_pane", horizontal_scroll_policy = "auto", vertical_scroll_policy = "auto" }
     local notice = c.add { type = "label", name = "ssk_size_notice", visible = false }
@@ -1519,12 +1648,23 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
       body = c.add{type="flow", name="ssk_body", direction="horizontal"}
       body.style.horizontal_spacing = 8
     end
-    local sp = body.add { type = "scroll-pane", name = "ssk_sp", style = "naked_scroll_pane",
+    local chart, row = body, body
+    if managed_scroll then
+      chart = body.add{type="flow", name="ssk_viewport", direction="vertical"}
+      chart.style.vertical_spacing = 0
+      row = chart.add{type="flow", name="ssk_viewport_row", direction="horizontal"}
+      row.style.horizontal_spacing = 0
+    end
+    local sp = row.add { type = "scroll-pane", name = "ssk_sp", style = "naked_scroll_pane",
                        horizontal_scroll_policy = "never", vertical_scroll_policy = "auto-and-reserve-space" }
     sp.style.horizontally_stretchable = not full_chart
     sp.style.height = viewH
     local canvas = sp.add { type = "flow", name = "ssk_canvas", direction = "vertical" }
     canvas.style.vertical_spacing = 0
+    if managed_scroll then
+      scroll_track(row,"y")
+      scroll_track(chart,"x")
+    end
     if with_sidebar then body.add{type="flow", name="ssk_sidebar", direction="vertical"} end
   end
   c.ssk_bar.visible = not source
@@ -1532,6 +1672,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   us.toolbar_width = W
   local pane = SK.scroll_pane(c)
   pane.style.height = viewH
+  pane.vertical_scroll_policy = managed_scroll and "never" or "auto-and-reserve-space"
   if full_chart then pane.style.width = chart_w end
   c.ssk_bar.style.height = SK.toolbar_height(us, W)
   c.ssk_bar.style.padding = 0
@@ -1603,16 +1744,25 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   canvas.clear()
   local width = math.ceil(L.content_w * zoom)
   local height = math.ceil(L.content_h * zoom)
-  local inner_w = scalable_chart and chart_w - 18 or chart_w
+  local inner_w = managed_scroll and chart_w - SCROLLBAR or scalable_chart and chart_w - 18 or chart_w
+  local inner_h = managed_scroll and viewH - (width > inner_w and SCROLLBAR or 0) or viewH - 4
   local CW = math.max(inner_w, width)
-  local CH = math.max(viewH - 4, height)
+  local CH = math.max(inner_h, height)
   canvas.style.width = CW
   canvas.style.height = CH
-  pane.horizontal_scroll_policy = (CW > inner_w) and "auto" or "never"
+  pane.horizontal_scroll_policy = (not managed_scroll and CW > inner_w) and "auto" or "never"
+  if managed_scroll then
+    pane.style.width, pane.style.height = inner_w, inner_h
+    c.ssk_body.ssk_viewport.ssk_scroll_x.visible = width > inner_w
+  end
   local nn = 0
   for _ in pairs(L.nodes) do nn = nn + 1 end
   local recipe_icons = full_chart and nn > 0 and observed_recipe_icons(player, us)
   local paths = {}
+  local chain
+  local st = rstate(player.index, us.view)
+  st.viewport = nil
+  if full_chart and not managed_scroll then us.chart_viewport = nil end
   if nn == 0 then
     Canvas.clear(player.index)
     local caption = (L.seconds < 2)
@@ -1625,10 +1775,10 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     l.style.single_line = false
     place(l, 24, 40, math.max(100, W - 48), 80)
   else
-    local st = rstate(player.index, us.view)
-    draw(canvas, L, us, st, player, CW, CH, zoom, recipe_icons)
+    local _, selection = draw(canvas, L, us, st, player, CW, CH, zoom, recipe_icons)
+    chain = selection
     paths = st.paths
-    if us.center_pending or (us.neighborhood and (us.centered_focus ~= us.focus or full)) then
+    if not managed_scroll and (us.center_pending or (us.neighborhood and (us.centered_focus ~= us.focus or full))) then
       local n=L.nodes[us.view=="focus" and us.focus or us.sel]
       do
         local aw, ah=math.min(chart_w-26,CW), math.min(viewH-24,CH)
@@ -1647,9 +1797,33 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   if with_sidebar then
     local side = c.ssk_body.ssk_sidebar
     side.style.width, side.style.height = sidebar_w, viewH
-    render_overview(side, L, us, paths, sidebar_w, viewH, player)
+    local map_scale, map_x, map_y = render_overview(side, L, us, paths, chain, sidebar_w, viewH, player, managed_scroll)
+    if managed_scroll then
+      local previous = us.chart_viewport
+      local v = {w=inner_w, h=inner_h, zoom=zoom, max_x=CW-inner_w, max_y=CH-inner_h}
+      local x, y = previous and previous.x or 0, previous and previous.y or 0
+      if us.fit_pending or nn == 0 then
+        x, y = 0, 0
+      elseif us.center_pending and not us.zoom_pending then
+        local n = L.nodes[us.sel]
+        x = (n and (n.x + View.NODE_W / 2) * zoom or width / 2) - v.w / 2
+        y = (n and (n.y + n.h / 2) * zoom or height / 2) - v.h / 2
+      elseif previous and previous.zoom ~= zoom then
+        x = (x + previous.w / 2) * zoom / previous.zoom - v.w / 2
+        y = (y + previous.h / 2) * zoom / previous.zoom - v.h / 2
+      end
+      v.x, v.y = clamp_pan(x, v.max_x), clamp_pan(y, v.max_y)
+      st.viewport, us.chart_viewport = v, v
+      v.content_w, v.content_h, v.has_nodes = L.content_w, L.content_h, nn > 0
+      v.map_scale, v.map_x, v.map_y = map_scale, map_x, map_y
+      local overview = side.ssk_overview
+      overview.ssk_overview_map.ssk_viewport_outline.visible = nn > 0
+      render_viewport(c, st)
+      us.center_pending, us.fit_pending = nil, nil
+    end
     render_selection(side, L, us, sidebar_w, player, recipe_icons, keep_controls)
   end
+  us.zoom_pending = nil
 end
 
 ---------------------------------------------------------------------------
@@ -1762,7 +1936,7 @@ function SK.on_click(e, us)
       local tenth = round(zoom * 100) / 10
       local next_step = a == "zoom_in" and math.floor(tenth) + 1 or math.ceil(tenth) - 1
       us.chart_zoom = math.max(math.min(0.02, zoom), math.min(2.5, next_step / 10))
-      us.chart_fit, us.center_pending = false, true
+      us.chart_fit, us.center_pending, us.zoom_pending = false, true, true
     end
   elseif a == "zoom_fit" then
     if us.view == "focus" or us.neighborhood then

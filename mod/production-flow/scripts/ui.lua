@@ -27,6 +27,15 @@ local TransferPanels = require("scripts.se_transfer_panels")
 local UI = {}
 local TAB_CAPTIONS = { balance = Loc("ui-balance"), focus = Loc("ui-focus"), cells = Loc("cells-tab"), sankey = Loc("ui-full-sankey"), transfers = Loc("help-transfers") }
 local WIN = "ssk_main"
+local THUMBS = {x="ssk_scroll_thumb_x", y="ssk_scroll_thumb_y"}
+local sync_scroll_thumbs
+
+local function clear_scroll_thumbs(player)
+  for _,name in pairs(THUMBS) do
+    local thumb = player.gui.screen[name]
+    if thumb then thumb.destroy() end
+  end
+end
 -- The native window uses 12 px per side around the tab pane, and each tab keeps
 -- 12 px between its panels and the pane's border on every side (TAB_PAD_X here,
 -- TAB_PAD_Y above and below), so lists and charts never touch the outer border.
@@ -41,6 +50,27 @@ local function visible_tabs()
   local list = { "balance", "focus", "cells", "sankey" }
   if Transfers.available() or SERockets.available() then list[#list + 1] = "transfers" end
   return list
+end
+
+local function release_chart_zoom(player)
+  local guards = storage.chart_wheel_zoom
+  local guard = guards and guards[player.index]
+  if not guard then return end
+  player.set_zoom_limits(guard.controller, guard.limits)
+  guards[player.index] = nil
+  if not next(guards) then storage.chart_wheel_zoom = nil end
+end
+
+function UI.release_chart_zoom(tick)
+  local guards = storage.chart_wheel_zoom
+  if not guards then return end
+  for index, guard in pairs(guards) do
+    if guard.tick < tick then
+      local player = game.get_player(index)
+      if player then release_chart_zoom(player) else guards[index] = nil end
+    end
+  end
+  if not next(guards) then storage.chart_wheel_zoom = nil end
 end
 
 local function ustate(pi)
@@ -284,6 +314,7 @@ end
 function UI.refresh(player, only_auto, full, keep_balance_rows, refresh_graph)
   local us = ustate(player.index)
   local id = us.tab_id
+  if id ~= "sankey" then clear_scroll_thumbs(player) end
   if id ~= "cells" then CellOutlines.clear(player.index, "map") end
   local c = content(player, id)
   if not c then return end
@@ -313,6 +344,7 @@ function UI.refresh(player, only_auto, full, keep_balance_rows, refresh_graph)
     SK.defaults(us)
     if only_auto and not us.live then return end
     SK.fill(player, chart_panel(c), us, us.canvas_w, math.max(100, tab_pane_height(us) - SK.toolbar_height(us)), full, only_auto, nil, refresh_graph)
+    sync_scroll_thumbs(player)
     return
   end
   fill[id](player, c, us, only_auto, keep_balance_rows, refresh_graph)
@@ -328,6 +360,8 @@ local function close_chart_settings(us)
 end
 
 function UI.close(player)
+  release_chart_zoom(player)
+  clear_scroll_thumbs(player)
   CellOutlines.on_window_closed(player.index)
   close_inspectors(player)
   MaterialPicker.close(player)
@@ -351,6 +385,7 @@ function UI.sanitize_saved_states()
 end
 
 function UI.on_player_removed(index)
+  if storage.chart_wheel_zoom then storage.chart_wheel_zoom[index] = nil end
   CellOutlines.clear(index)
   HistoryUI.clear_hover(index)
   SK.clear_hover(index)
@@ -475,6 +510,138 @@ end
 
 function UI.is_open(player) return player.gui.screen[WIN] ~= nil end
 
+function UI.on_sankey_viewport_setting_changed(player)
+  if UI.is_open(player) and ustate(player.index).tab_id == "sankey" then
+    UI.refresh(player, false, true)
+  end
+end
+
+local function scroll_chart(player)
+  if not (player and UI.is_open(player)) then return end
+  local us = ustate(player.index)
+  local tab = us.tab_id == "sankey" and content(player, "sankey")
+  local chart = tab and tab.ssk_chart
+  local viewport = chart and chart.ssk_body and chart.ssk_body.ssk_viewport
+  if viewport and us.chart_viewport then return chart, us, us.chart_viewport end
+end
+
+sync_scroll_thumbs = function(player)
+  local chart, us, viewport = scroll_chart(player)
+  if not chart then
+    clear_scroll_thumbs(player)
+    return
+  end
+  local frame = player.gui.screen[WIN]
+  local scale = player.display_scale
+  local function px(size) return math.floor(size * scale) end
+  local location = frame.location
+  if not location then
+    local res = player.display_resolution
+    local w,h = UI.dimensions(res,scale)
+    location = {x=math.floor((res.width-px(w))/2), y=math.floor((res.height-px(h))/2)}
+  end
+  -- Match the Full Sankey panel inside the window and tab chrome. The tracks
+  -- start below the toolbar and the optional chart size notice.
+  local left = location.x + px(WINDOW_SIDE_CHROME / 2)
+  local top = location.y + px(112) + px(SK.toolbar_height(us))
+  if chart.ssk_size_notice.visible then top = top + px(chart.ssk_size_notice.style.minimal_height) end
+  for axis,name in pairs(THUMBS) do
+    local horizontal = axis == "x"
+    local travel = horizontal and viewport.travel_x or viewport.travel_y
+    local maximum = horizontal and viewport.max_x or viewport.max_y
+    local thumb = player.gui.screen[name]
+    if travel > 0 and maximum > 0 then
+      if not thumb then
+        -- Factorio moves its drag target immediately. Give each scrollbar a
+        -- transparent screen frame so it can never move the Production Flow window.
+        thumb = player.gui.screen.add{type="frame", name=name, style="invisible_frame"}
+        local grip = thumb.add{type="label", name="grip", tags={ssk_scroll_thumb=axis}}
+        grip.drag_target = thumb
+      end
+      local grip = thumb.grip.style
+      grip.width, grip.height = horizontal and viewport.thumb_w or 12, horizontal and 12 or viewport.thumb_h
+      local x = left + px(horizontal and viewport.thumb_x or viewport.w)
+      local y = top + px(horizontal and viewport.h or viewport.thumb_y)
+      thumb.tags = {ssk_scroll_thumb=axis, x=x, y=y}
+      thumb.location = {x=x,y=y}
+      if player.opened == frame then thumb.bring_to_front() end
+    elseif thumb then
+      thumb.destroy()
+    end
+  end
+end
+
+local function pan_chart(player, chart, us, x, y)
+  if not SK.pan_to(player, chart, us, x, y) then return false end
+  sync_scroll_thumbs(player)
+  return true
+end
+
+function UI.on_chart_location_changed(e)
+  local element = e.element
+  if not (element and element.valid) then return end
+  local player = game.get_player(e.player_index)
+  if element.name == WIN then
+    sync_scroll_thumbs(player)
+    return
+  end
+  local origin = element.tags
+  local axis = origin.ssk_scroll_thumb
+  if not axis or element.name ~= THUMBS[axis] or not element.location then return end
+  local chart, us, viewport = scroll_chart(player)
+  if not chart then return end
+  local movement = element.location[axis] - origin[axis]
+  local horizontal = axis == "x"
+  local travel = horizontal and viewport.travel_x or viewport.travel_y
+  local maximum = horizontal and viewport.max_x or viewport.max_y
+  local delta = travel > 0 and movement * maximum / (travel * player.display_scale) or 0
+  pan_chart(player, chart, us, viewport.x + (horizontal and delta or 0), viewport.y + (horizontal and 0 or delta))
+end
+
+function UI.on_chart_wheel(e, dx, dy)
+  local player = game.get_player(e.player_index)
+  local chart, us, viewport = scroll_chart(player)
+  if not player then return end
+  local target = chart and chart.ssk_body.ssk_viewport
+  local ancestor = target and e.element
+  while ancestor and ancestor.valid and ancestor ~= target and not ancestor.tags.ssk_scroll_thumb do
+    ancestor = ancestor.parent
+  end
+  if not (ancestor and ancestor.valid) then
+    release_chart_zoom(player)
+    return
+  end
+
+  -- Non-consuming custom wheel inputs arrive before the game's zoom action.
+  -- Hold the current zoom until that action has passed, without blocking wheel
+  -- bindings elsewhere or changing the chart's clipping and drag surfaces.
+  local index, controller = player.index, player.controller_type
+  local guards = storage.chart_wheel_zoom
+  local guard = guards and guards[index]
+  if guard and guard.controller ~= controller then
+    release_chart_zoom(player)
+    guard = nil
+  end
+  if not guard then
+    local zoom, limits = player.zoom, player.zoom_limits
+    guard = {controller=controller, limits=limits}
+    storage.chart_wheel_zoom = storage.chart_wheel_zoom or {}
+    storage.chart_wheel_zoom[index] = guard
+    player.zoom_limits = {closest={zoom=zoom}, furthest={zoom=zoom}, furthest_game_view=limits.furthest_game_view}
+  end
+  guard.tick = game.tick
+  pan_chart(player, chart, us, viewport.x + dx, viewport.y + dy)
+end
+
+function UI.on_chart_page(e, direction)
+  local player = game.get_player(e.player_index)
+  local chart, us, viewport = scroll_chart(player)
+  if not chart or player.opened ~= player.gui.screen[WIN] then return end
+  local el = e.element
+  if el and el.valid and (el.type == "textfield" or el.type == "text-box") then return end
+  pan_chart(player, chart, us, viewport.x + direction*viewport.w, viewport.y)
+end
+
 ---------------------------------------------------------------------------
 -- event handlers (return true when handled)
 ---------------------------------------------------------------------------
@@ -523,6 +690,14 @@ end
 function UI.on_click(e)
   local el = e.element
   local player = game.get_player(e.player_index)
+  local page = el.tags.ssk_scroll_page
+  if page then
+    local chart, us, viewport = scroll_chart(player)
+    if not chart then return end
+    local axis = el.tags.ssk_scroll_axis
+    return pan_chart(player, chart, us, viewport.x + (axis=="x" and page*viewport.w or 0),
+      viewport.y + (axis=="y" and page*viewport.h or 0))
+  end
   if el.tags and el.tags.ssk_picker == "open" and el.tags.target == "cell" then
     Cells.open_display_picker(player)
     return true
@@ -821,6 +996,18 @@ function UI.on_selection(e)
 end
 
 function UI.on_hover(e, entering)
+  local element = e.element
+  local axis = element.valid and element.tags.ssk_scroll_visual
+  if axis then
+    -- Clicking the main window can cover sibling frames. Expose the grip when
+    -- the pointer next reaches the visible thumb, even without a title-bar drag.
+    if entering then
+      local player = game.get_player(e.player_index)
+      local thumb = player.gui.screen[THUMBS[axis]]
+      if thumb and player.opened == player.gui.screen[WIN] then thumb.bring_to_front() end
+    end
+    return true
+  end
   return RailUI.on_hover(e.element, entering) or HistoryUI.on_hover(e, entering) or SK.on_hover(e, entering)
 end
 
@@ -1005,6 +1192,7 @@ end
 function UI.on_value_changed(e)
   local el = e.element
   if not (el and el.valid) then return end
+  local player = game.get_player(e.player_index)
   if el.tags.ssk_ui == "cell_map_zoom" then
     local state = ustate(e.player_index).cells
     local view = state and CellsUI.zoom(state, el.slider_value)
@@ -1022,7 +1210,7 @@ function UI.on_value_changed(e)
     end
     return true
   end
-  return MachineStatus.on_value_changed(game.get_player(e.player_index), el)
+  return MachineStatus.on_value_changed(player, el)
 end
 
 function UI.on_text_changed(e)

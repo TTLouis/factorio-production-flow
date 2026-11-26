@@ -71,4 +71,11 @@ data:extend({
     default_value = false,
     order = "g",
   },
+  {
+    type = "bool-setting",
+    name = "ssk-live-sankey-overview",
+    setting_type = "runtime-per-user",
+    default_value = true,
+    order = "h",
+  },
 })

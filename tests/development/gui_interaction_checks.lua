@@ -80,7 +80,7 @@ function T.inspect(canvas,scale)
       if e.tags.ssk_sk=="ribbon" then
         out.ribbons=out.ribbons+1
         if e.raise_hover_events then out.hover_enabled=out.hover_enabled+1 end
-      elseif e.tags.ssk_sk=="node" then
+      elseif e.tags.ssk_sk=="node" and e.visible then
         local b=e.box
         local kind=e.type=="sprite-button" and "icon" or "bar"
         out[kind=="icon" and "icons" or "bars"]=out[kind=="icon" and "icons" or "bars"]+1

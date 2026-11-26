@@ -178,6 +178,8 @@ def run(stage,args):
                         if not shared or any(normal[key]!=equipped[key] for key in shared):
                             raise RuntimeError('Night vision changed the colour of a matched sprite ribbon')
                         results['night_vision_ribbon_colors_matched']=len(shared)
+                    for filename in results.get('viewport_modes', {}).values():
+                        captures[filename]=digest(stage/'script-output/gui-interaction'/filename)
                     results['screenshots_sha256']=captures
                     (stage/'evidence.json').write_text(json.dumps(results,indent=2))
                     print(f'PASS native contracts at {results["scale"]:.0%}: {stage}',flush=True)

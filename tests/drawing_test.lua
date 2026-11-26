@@ -89,7 +89,8 @@ local c = player.gui.screen.add { type = "flow", name = "ssk_drawing_test", dire
 local thick_header_checked = false
 local grouped_detail_checked = false
 local function headers(us, width)
-  local layout = View.build(player, us, SK.scroll_pane(c).style.width or width, 900)
+  local pane_width = SK.scroll_pane(c).style.width
+  local layout = View.build(player, us, pane_width and (pane_width + (us.chart_viewport and 12 or 0)) or width, 900)
   local function find(el, name)
     if el.name == name then return el end
     for _, child in ipairs(el.children) do local hit = find(child, name); if hit then return hit end end

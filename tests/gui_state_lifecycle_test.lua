@@ -54,6 +54,50 @@ return function(handlers)
   new_history.clear_hover(p.index);history.destroy()
 
   UI.close(p)
+  local overview_setting='ssk-live-sankey-overview'
+  local previous_overview=p.mod_settings[overview_setting]
+  p.mod_settings[overview_setting]={value=true}
+  local scroll={tab_id='sankey',view='detail',preset='all',period=600,renderer='sprites',chart_zoom=2.5,live=true}
+  storage.ui[p.index]=scroll
+  UI.open(p)
+  local frame=p.gui.screen.ssk_main
+  local origin={x=180,y=90}
+  frame.location=origin
+  handlers.on_gui_location_changed({element=frame,player_index=p.index})
+  local thumb=assert(p.gui.screen.ssk_scroll_thumb_x)
+  assert(thumb.grip.drag_target==thumb and frame.ssk_window_bar.drag_target==frame)
+  local move={element=thumb,player_index=p.index}
+  local first_location=thumb.tags
+  thumb.location={x=first_location.x+16,y=first_location.y+20}
+  handlers.on_gui_location_changed(move)
+  local first_x=scroll.chart_viewport.x
+  assert(frame.location==origin and first_x>0,'Moving the thumb must pan without moving the window')
+  local before_refresh=scroll.chart_viewport
+  UI.refresh(p,false,false,true,true)
+  assert(scroll.chart_viewport~=before_refresh,'Fixture must replace the viewport during a held drag')
+  local refreshed_location=thumb.tags
+  thumb.location={x=refreshed_location.x+16,y=refreshed_location.y+20}
+  handlers.on_gui_location_changed(move)
+  local viewport=scroll.chart_viewport
+  assert(frame.location==origin and math.abs(viewport.x-2*first_x)<=1 and viewport.y==0,
+    'A held thumb must keep the window and initial scroll origin through chart refresh')
+  local previous_x,previous_y=viewport.x,viewport.y
+  handlers['ssk-sankey-page-right']({player_index=p.index})
+  assert(viewport.x==math.min(previous_x+viewport.w,viewport.max_x) and viewport.y==previous_y)
+  local paged_x=viewport.x
+  handlers['ssk-sankey-page-left']({player_index=p.index})
+  assert(viewport.x==math.max(0,paged_x-viewport.w) and viewport.y==previous_y)
+  local title_location={x=origin.x+25,y=origin.y}
+  local previous_thumb_x=thumb.tags.x
+  frame.location=title_location
+  handlers.on_gui_location_changed({element=frame,player_index=p.index})
+  assert(frame.location==title_location and thumb.tags.x==previous_thumb_x+25,
+    'The main window and both scrollbars must move together on a title-bar drag')
+  UI.close(p)
+  assert(not thumb.valid and not p.gui.screen.ssk_scroll_thumb_y,'Closing the window must remove scrollbar targets')
+  p.mod_settings[overview_setting]=previous_overview
+  storage.ui[p.index]=us
+
   local original_item,original_fluid=prototypes.item,prototypes.fluid
   local function without_removed(original)
     return setmetatable({},{__index=function(_,key)

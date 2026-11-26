@@ -27,6 +27,7 @@ local function new_elem(spec, parent)
   e.destroy = function() Elem.destroy(e) end
   e.add_tab = function() end
   e.focus = function() e.focused = true end
+  e.bring_to_front = function() end
   return e
 end
 Elem.__index = function(t, k)

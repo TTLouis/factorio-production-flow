@@ -1,5 +1,7 @@
-local SK,V,P=TREQ("scripts.sankey_ui"),TREQ("scripts.view"),TREQ("shared.palette")
+local SK,V,P,S=TREQ("scripts.sankey_ui"),TREQ("scripts.view"),TREQ("shared.palette"),TREQ("shared.sprites")
 local player=game.players[1]
+local previous_mode=player.mod_settings["ssk-live-sankey-overview"]
+player.mod_settings["ssk-live-sankey-overview"]={value=true}
 local c=player.gui.screen.add{type="flow",name="full_readability_test"}
 local function find(e,action,key)
   if e.tags.ssk_sk==action and (not key or e.tags.key==key) then return e end
@@ -15,7 +17,7 @@ for _,renderer in ipairs({"poly","sprites"}) do
     period=600,canvas_w=1600,settings_open=true} -- Unpin and Colors live in Chart settings
   SK.fill(player,c,us,1600,850,true)
   assert(#c.ssk_bar.ssk_toolbar_strip.ssk_toolbar_rows.children==1,"Full Sankey must reclaim the hint row")
-  local L=V.build(player,us,SK.scroll_pane(c).style.width,850)
+  local L=V.build(player,us,SK.scroll_pane(c).style.width+12,850)
   local before={}
   for k,n in pairs(L.nodes) do before[k]={n.top,n.x} end
   local segments=0
@@ -25,20 +27,42 @@ for _,renderer in ipairs({"poly","sprites"}) do
     assert(r.color==P.material(r.to),"every segment must use the logical destination color")
     if r.ro then assert(math.abs(r.ro.color.r-P.tint(P.muted(r.color)).r)<1e-8) end
   end
+  local function overview_color(key)
+    return assert(find(c,"overview_jump",key)).sprite
+  end
+  local function overview_has_ribbon(color)
+    local paths=c.ssk_body.ssk_sidebar.ssk_overview.ssk_overview_map.ssk_overview_paths
+    local suffix=string.format("-c%02d",color)
+    for _,wrapper in ipairs(paths.children) do
+      local piece=wrapper.children[1]
+      if piece and piece.sprite:sub(-#suffix)==suffix then return true end
+    end
+    return false
+  end
+  local upstream, unrelated="item/copper-ore","item/plastic-bar"
+  local upstream_color, unrelated_color=overview_color(upstream),overview_color(unrelated)
   assert(SK.on_click(event(find(c,"node","item/electronic-circuit")),us)=="rebuild")
   SK.fill(player,c,us,1600,850,false)
   assert(storage.sk_render[1].selected=="item/electronic-circuit")
+  assert(overview_color(upstream)==upstream_color and overview_color(unrelated)==S.bar(P.DIM),
+    "The overview must keep the full upstream chain coloured and dim unrelated nodes")
+  assert(overview_has_ribbon(P.DIM) and overview_has_ribbon(P.material(us.sel)),
+    "Overview ribbons must distinguish unrelated links from the selected chain")
   local node=find(c,"node","item/plastic-bar")
-  SK.on_hover(event(node),true); SK.on_hover(event(node),false)
+  SK.on_hover(event(node),true)
+  assert(overview_color(unrelated)==S.bar(P.DIM),"Hovering must keep the overview on the pinned selection")
+  SK.on_hover(event(node),false)
   assert(storage.sk_render[1].selected==us.sel)
   SK.on_click(event(find(c,"center_selection")),us)
   SK.fill(player,c,us,1600,850,false)
-  assert(SK.scroll_pane(c).last_scroll_target and not us.center_pending)
-  L=V.build(player,us,SK.scroll_pane(c).style.width,850)
+  assert(us.chart_viewport and not us.center_pending)
+  L=V.build(player,us,SK.scroll_pane(c).style.width+12,850)
   for k,n in pairs(L.nodes) do assert(n.top==before[k][1] and n.x==before[k][2],"pin/center must not reflow") end
   SK.on_click(event(find(c,"unpin")),us); assert(us.sel==nil)
   local colors=find(c,"balance_colors"); colors.selected_index=2
   SK.on_selection(event(colors),us); SK.fill(player,c,us,1600,850,false)
+  assert(overview_color(unrelated)==unrelated_color and not overview_has_ribbon(P.DIM),
+    "Clearing the selection must restore overview colours")
   for _,r in ipairs(storage.sk_render[1].ribbons) do assert(r.color==P.material(r.from)) end
 end
 
@@ -48,14 +72,14 @@ for _,renderer in ipairs({"poly","sprites"}) do
   local key="item/iron-plate"
   SK.fill(player,c,us,900,360,true)
   local pane=SK.scroll_pane(c)
-  local layout=V.build(player,us,pane.style.width,360)
+  local layout=V.build(player,us,pane.style.width+12,360)
   local tip=LOC(assert(find(pane,"node",key)).tooltip)
   assert(tip:find("Made by",1,true) and tip:find("Used by",1,true) and tip:find("items/s",1,true))
   local masked=assert(tip:find("Masked from the chart",1,true))
   assert(tip:find("transport belt",masked,true),tip)
   assert(SK.on_click(event(assert(find(c,"overview_jump",key))),us)=="rebuild")
   SK.fill(player,c,us,900,360,false)
-  assert(us.sel==key and pane.last_scroll_target,"overview node must select and center")
+  assert(us.sel==key and not us.center_pending,"overview node must select and center")
   local side=c.ssk_body.ssk_sidebar.ssk_selected_material
   assert(find(side,"hide") and find(side,"move_group") and find(side,"new_group") and find(side,"deselect"),
     "selection controls must live with the selected material")
@@ -76,15 +100,25 @@ for _,renderer in ipairs({"poly","sprites"}) do
   SK.on_click(event(find(c,"zoom_in")),us)
   SK.fill(player,c,us,900,360,false)
   assert(us.render_zoom==1.1 and pane.ssk_canvas.style.width>layout.content_w and pane.ssk_canvas.style.height>layout.content_h)
+  local viewport = us.chart_viewport
+  local map = c.ssk_body.ssk_sidebar.ssk_overview.ssk_overview_map
+  local outline = map.ssk_viewport_outline
+  local left = outline.children[1]
+  SK.pan_to(player,c,us,0,0)
+  local initial_top = left.style.top_margin
+  assert(viewport.max_y>0 and SK.pan_to(player,c,us,viewport.max_x,viewport.max_y))
+  assert(pane.ssk_canvas.style.top_margin==-viewport.max_y and left.style.top_margin>initial_top)
+  assert(outline.children[1]==left and outline.ignored_by_interaction,"viewport outline must be retained and click-through")
   SK.on_click(event(find(c,"zoom_out")),us)
   SK.fill(player,c,us,900,360,false)
   assert(math.abs(us.render_zoom-1)<1e-8)
   SK.on_click(event(find(c,"zoom_fit")),us)
   SK.fill(player,c,us,900,360,false)
   assert(us.render_zoom<0.8 and us.sel==key and pane.horizontal_scroll_policy=="never")
+  assert(us.chart_viewport.x==0 and us.chart_viewport.y==0 and us.chart_viewport.max_x==0 and us.chart_viewport.max_y==0)
   assert(pane.ssk_canvas.style.height<=360 and find(pane,"node",key).tags.part=="bar")
-  local fitted=V.build(player,us,pane.style.width,360)
-  local limit=math.min(1,(pane.style.width-26)/fitted.content_w,(360-12)/fitted.content_h)
+  local fitted=V.build(player,us,pane.style.width+12,360)
+  local limit=math.min(1,(pane.style.width+12-26)/fitted.content_w,(360-12)/fitted.content_h)
   assert(us.render_zoom==math.floor(limit*10)/10,"Fit must round down to the largest fitting 10% step")
   for k,n in pairs(fitted.nodes) do
     assert(n.x==layout.nodes[k].x and n.y==layout.nodes[k].y,"zoom must preserve the routing layout")
@@ -205,4 +239,5 @@ end
 assert(checked>0)
 end
 c.destroy(); TREQ("scripts.canvas").clear(player.index)
+player.mod_settings["ssk-live-sankey-overview"]=previous_mode
 print("FULL READABILITY OK: logical ribbon colors, fit bounds, stable pin/center and selected-material usage")

@@ -67,7 +67,8 @@ def prepare(args):
     for a,b in hooks:
         shutil.copyfile(TESTS/a,target/'scripts'/b)
     (target/'scripts/modded_gui_config.lua').write_text(
-        f'return {{warm_seconds={args.warm_seconds},resolution={{{args.width},{args.height}}}}}\n')
+        f'return {{warm_seconds={args.warm_seconds},resolution={{{args.width},{args.height}}},'
+        f' viewport={str(args.viewport).lower()},persist_warmed={str(not args.viewport).lower()}}}\n')
     if rail:
         # Verify the actual data-stage selection prototype, not only injected area events.
         with (target/'data-final-fixes.lua').open('a', encoding='utf-8') as data:
@@ -148,7 +149,7 @@ def run(stage,manifest,args):
                         shot=stage/'script-output/modded-gui'/f"{case['name']}.png"
                         if not shot.is_file() or shot.stat().st_size<10000:raise RuntimeError(f'Missing native screenshot: {shot}')
                         shots[shot.name]=digest(shot)
-                        if case['renderer']=='poly':
+                        if case['renderer']=='poly' and (not args.viewport or case.get('camera')):
                             from PIL import Image
                             witness=stage/'script-output/modded-gui'/f"{case['name']}-camera-witness.png"
                             with Image.open(witness) as img:
@@ -156,6 +157,11 @@ def run(stage,manifest,args):
                             if count<100:raise RuntimeError(f'Native camera failed visible-pixel witness: {witness} ({count} pixels)')
                             witnesses[witness.name]={'magenta_pixels':count,'sha256':digest(witness)}
                     evidence.update(candidate_sha256=manifest['candidate_sha256'],screenshots_sha256=shots)
+                    if args.viewport:
+                        if len(evidence.get('viewport', [])) != 5:raise RuntimeError('Incomplete Sankey viewport matrix')
+                        for case in evidence['viewport']:
+                            shot=stage/'script-output/modded-gui'/f"viewport-{case['name']}.png"
+                            shots[shot.name]=digest(shot)
                     if rail:evidence['playtest_sha256']=digest(playtest)
                     evidence['camera_pixel_witnesses']=witnesses
                     (stage/'evidence.json').write_text(json.dumps(evidence,indent=2))
@@ -180,9 +186,11 @@ def main():
     parser.add_argument('--height',type=int,default=1440)
     parser.add_argument('--warm-seconds',type=int,default=600)
     parser.add_argument('--timeout',type=int,default=1200)
-    parser.add_argument('--cells-rail',action='store_true',help='Capture Cells rail UI and save an isolated playable copy')
+    mode=parser.add_mutually_exclusive_group()
+    mode.add_argument('--cells-rail',action='store_true',help='Capture Cells rail UI and save an isolated playable copy')
+    mode.add_argument('--viewport',action='store_true',help='Check Full Sankey viewport navigation on the warmed save')
     args=parser.parse_args();args.save=args.save.resolve();args.mods=args.mods.resolve()
-    minimum=60 if args.cells_rail else 600
+    minimum=60 if args.cells_rail or args.viewport else 600
     if args.warm_seconds<minimum:raise ValueError(f'Collect at least {minimum} game seconds of real production history')
     stage,manifest=prepare(args)
     try:run(stage,manifest,args)

@@ -51,10 +51,22 @@ def prepare(stage,args,scale):
     control=target/'control.lua'
     control.write_text(control.read_text(encoding='utf-8')+
         '\nrequire("scripts.gui_simulation").install()\n',encoding='utf-8')
+    if scale != 1:
+        # Virtual players always report 1. Use the actual configured renderer
+        # scale for window sizing and screen coordinates in this private copy.
+        ui=target/'scripts/ui.lua'
+        ui.write_text(ui.read_text(encoding='utf-8').replace('player.display_scale',str(scale)),encoding='utf-8')
     # This definition belongs only to the isolated test copy and clean archives
     # above are created before any runtime/data-stage instrumentation is added.
     with (target/'data-final-fixes.lua').open('a',encoding='utf-8') as stream:
         stream.write('''
+data:extend{{type="custom-input",name="ssk-fixture-hold-shift",key_sequence="LSHIFT",consuming="none"}}
+local inputs=data.raw["custom-input"]
+for _,axis in ipairs({"left","right"}) do
+ local wheel=inputs["ssk-sankey-scroll-"..axis]
+ assert(not wheel.block_modifiers and wheel.alternative_key_sequence=="mouse-wheel-"..axis,
+  "Horizontal Sankey scrolling must keep Shift held and accept wheel tilt")
+end
 data.raw["utility-constants"].default.main_menu_simulations={
  gui_input={generate_map=true,checkboard=false,length=36000,mods={"production-flow"},
  init=[[local p=game.simulation.create_test_player{name="gui-input"};game.simulation.camera_player=p;
@@ -75,7 +87,7 @@ data.raw["utility-constants"].default.main_menu_simulations={
         'test_sha256':{'gui_simulation.lua':digest(TESTS/'gui_simulation.lua'),
                       'gui_simulation.py':digest(TESTS/'gui_simulation.py')},
         'input_method':'Engine-native LuaSimulation cursor/mouse events; no OS input or direct handlers',
-        'scale_note':'Virtual player reports1; fixed chart geometry is rendered at configured GUI scale.'}
+        'scale_note':'The private fixture supplies the configured scale for window layout; virtual players report 1.'}
     (stage/'manifest.json').write_text(json.dumps(manifest,indent=2))
     return manifest
 
@@ -96,6 +108,13 @@ def run(stage,args):
                 if 'GUI SIMULATION NATIVE PASS' in log:
                     result=json.loads((stage/'script-output/gui-simulation/results.json').read_text(encoding='utf-8'))
                     if len(result['cases'])!=18:raise RuntimeError('Incomplete engine-input case matrix')
+                    scroll=result.get('scroll', {})
+                    if scroll.get('main_window_move_events') != 0 or not all(
+                        scroll.get(k) for k in ('window_held','default_on','restored_native','per_player',
+                                               'drag_survived_refresh','horizontal_paging','title_drag_preserved',
+                                               'repeated_horizontal_wheel','world_zoom_isolated')
+                    ):
+                        raise RuntimeError('Incomplete native scrollbar and per-player setting checks')
                     manifest=json.loads((stage/'manifest.json').read_text())
                     result['configured_scale']=manifest['configured_scale']
                     result['candidate_sha256']=manifest['candidate_sha256']

@@ -26,7 +26,7 @@ assert(c.children[#c.children] == c.ssk_settings, "Chart settings must be drawn 
 for _, lines in ipairs({ "curves", "metro" }) do
   local cfg = { view = "detail", layout = "clean", lines = lines, renderer = "poly", period = 600, canvas_w = 1200 }
   SK.fill(player, c, cfg, 1200, 800, true)
-  local L = V.build(player, cfg, SK.scroll_pane(c).style.width, 800)
+  local L = V.build(player, cfg, SK.scroll_pane(c).style.width + (cfg.chart_viewport and 12 or 0), 800)
   local st, paths = storage.sk_render[1], {}
   for _, path in ipairs(st.paths) do
     paths[path.from .. ">" .. path.to] = true
