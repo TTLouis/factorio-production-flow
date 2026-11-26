@@ -77,13 +77,13 @@ Use **Back**, **Forward** or **Last visits** to revisit materials in Focus. Zoom
 
 ![Focus traces the recipes connected to electronic circuits](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/35-focus-circuit.png)
 
-**Full Sankey** shows recipe flows across one surface. Click a material in the chart overview to jump to it. Zoom in for detail or use **Fit** to bring the chart into view. In **Selected material**, the **Breakdown** lists recipes that make or use the material, including active recipes hidden from the chart. Open **Focus**, **Balance**, or **Machine status** from there to investigate further.
+**Full Sankey** shows recipe flows across one surface. Click a material bar to pin its rate card, or click it in the chart overview to jump to it. The card shows Made, Used and Net history and the recipes making and using the material. Recent history stays visible if the bar drops out of the chart. Open **Focus**, **Balance** or **Machines** from the card, or use its three-dot menu for chart edits.
 
 Large **Cells Flow** and **Full Sankey** charts show up to 150 nodes and 300 links. Use **Refresh** to update an oversized chart. Enable **Bypass Sankey size limit** in the save’s map mod settings to draw the full chart on refresh.
 
 Hover a recipe bar to see recipe amounts, rates and the machines running it. Thin return arrows show flows that loop back, such as recycling or circulating catalysts.
 
-![Full Sankey shows the chart overview and the selected-material Breakdown for iron gear wheels](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/42-full-sankey-breakdown.png)
+![Full Sankey shows the chart overview and a pinned material rate card](https://raw.githubusercontent.com/TTLouis/factorio-production-flow/main/docs/screenshots/42-full-sankey-breakdown.png)
 
 ### How the calculations work
 

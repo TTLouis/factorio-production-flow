@@ -46,8 +46,9 @@ for _,renderer in ipairs({"poly","sprites"}) do
   assert(storage.sk_render[1].selected=="item/electronic-circuit")
   assert(overview_color(upstream)==upstream_color and overview_color(unrelated)==S.bar(P.DIM),
     "The overview must keep the full upstream chain coloured and dim unrelated nodes")
-  assert(overview_has_ribbon(P.DIM) and overview_has_ribbon(P.material(us.sel)),
-    "Overview ribbons must distinguish unrelated links from the selected chain")
+  assert(overview_has_ribbon(P.DIM) and overview_has_ribbon(P.muted(P.material(us.sel)))
+    and overview_color(us.sel)==S.bar(P.material(us.sel)),
+    "Overview ribbons must keep their darker shade and dim unrelated links")
   local node=find(c,"node","item/plastic-bar")
   SK.on_hover(event(node),true)
   assert(overview_color(unrelated)==S.bar(P.DIM),"Hovering must keep the overview on the pinned selection")
@@ -75,23 +76,33 @@ for _,renderer in ipairs({"poly","sprites"}) do
   local layout=V.build(player,us,pane.style.width+12,360)
   local tip=LOC(assert(find(pane,"node",key)).tooltip)
   assert(tip:find("Made by",1,true) and tip:find("Used by",1,true) and tip:find("items/s",1,true))
-  local masked=assert(tip:find("Masked from the chart",1,true))
-  assert(tip:find("transport belt",masked,true),tip)
   assert(SK.on_click(event(assert(find(c,"overview_jump",key))),us)=="rebuild")
   SK.fill(player,c,us,900,360,false)
   assert(us.sel==key and not us.center_pending,"overview node must select and center")
   local side=c.ssk_body.ssk_sidebar.ssk_selected_material
-  assert(find(side,"hide") and find(side,"move_group") and find(side,"new_group") and find(side,"deselect"),
-    "selection controls must live with the selected material")
+  local scroll=side.ssk_selected_scroll
+  local card=scroll.ssk_rate_card_body
+  local breakdown={}
+  for _, row in ipairs(card.children) do
+    if row.caption then breakdown[#breakdown+1]=LOC(row.caption) end
+  end
+  local selected_rates=table.concat(breakdown,"\n")
+  local masked=assert(selected_rates:find("Masked from the chart",1,true))
+  assert(selected_rates:find("transport belt",masked,true),selected_rates)
+  local more=assert(find(side,"selection_actions"))
+  assert(not more.toggled and not find(side,"hide") and find(side,"deselect"))
+  SK.on_click(event(more),us)
+  SK.fill(player,c,us,900,360,false)
+  assert(more.toggled and scroll.ssk_selection_menu.visible and find(side,"hide") and find(side,"move_group") and find(side,"new_group"),
+    "chart edits must open from the selected material")
   assert(not find(c.ssk_bar,"hide") and not find(c.ssk_bar,"move_group"))
-  assert(SK.toolbar_height(us,900)<SK.toolbar_height(us,600),"toolbar must only allocate selection space for narrow windows")
   local group=find(side,"move_group")
   local field=find(side,"new_group").parent.ssk_newgroup
   local preset=find(c.ssk_bar,"preset")
   local mark=find(c,"overview_jump",key)
   field.text="Unsubmitted group"
   for _,automatic in ipairs{true,false} do
-    local rate=side.ssk_selected_scroll.ssk_selected_rates.children[1]
+    local rate=card.children[1]
     SK.fill(player,c,us,900,360,false,automatic,nil,not automatic)
     assert(group==find(side,"move_group") and field.text=="Unsubmitted group")
     assert(preset==find(c.ssk_bar,"preset") and mark==find(c,"overview_jump",key))
@@ -145,6 +156,14 @@ for _,renderer in ipairs({"poly","sprites"}) do
   labels=overview_labels()
   local name=next(labels)
   assert(name==key and next(labels,name)==nil,"Show labels off must keep only the selected material name")
+  local toolbar_height=SK.toolbar_height(us)
+  SK.fill(player,c,us,600,360,false)
+  local drawer=assert(c.ssk_selected_material)
+  assert(drawer.tags.key==key and SK.scroll_pane(c).style.width==600
+    and c.ssk_bar.style.height==toolbar_height,"narrow selection must overlay the chart without resizing it")
+  SK.on_click(event(find(drawer,"deselect")),us)
+  SK.fill(player,c,us,600,360,false)
+  assert(not c.ssk_selected_material and not us.sel,"closing the drawer must clear the selection")
 end
 -- Native GUI lengths are rounded separately after scaling. Each tight wrapper
 -- and its following Y-reset must return to the canvas origin.

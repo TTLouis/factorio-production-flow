@@ -1,4 +1,4 @@
-"""Render the 512px thumbnail from the toolbar curves; --toolbar also rebuilds the 64px icon."""
+"""Regenerate the toolbar icon. The Mod Portal thumbnail is a separate screenshot asset."""
 import argparse
 import os
 import numpy as np
@@ -48,10 +48,10 @@ def render(size):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--toolbar", action="store_true")
-    if parser.parse_args().toolbar:
-        render(64).save(os.path.join(ROOT, "graphics", "icon.png"))
-    render(512).save(os.path.join(ROOT, "thumbnail.png"))
+    parser.add_argument("--toolbar", action="store_true", required=True,
+                        help="Regenerate the 64px graphics/icon.png")
+    parser.parse_args()
+    render(64).save(os.path.join(ROOT, "graphics", "icon.png"))
 
 
 if __name__ == "__main__":

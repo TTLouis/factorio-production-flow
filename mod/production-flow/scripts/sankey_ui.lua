@@ -4,6 +4,8 @@ local Loc = require("scripts.locale")
 
 local S = require("shared.sprites")
 local palette = require("shared.palette")
+local Balance = require("scripts.balance")
+local BalanceUI = require("scripts.balance_ui")
 local View = require("scripts.view")
 local Graph = require("scripts.graph")
 local Sampler = require("scripts.sampler")
@@ -14,11 +16,13 @@ local MaterialPicker = require("scripts.material_picker")
 local Watch = require("scripts.watch")
 local Tooltip = require("scripts.tooltip")
 local RecipeDetails = require("scripts.recipe_details")
+local RateCard = require("scripts.rate_card_ui")
 local GuiPlot = require("scripts.gui_plot")
 
 local SK = {}
 local ZOOM_STEP = 1.25
 local SIDEBAR_MIN_W = 690
+local INSPECTOR_W = 328
 
 local function round(v) return math.floor(v + 0.5) end
 
@@ -218,7 +222,7 @@ local function recipe_lines(node, rows, limit, recipe_icons)
   return lines
 end
 
-local function recipe_summary(node, limit, recipe_icons)
+local function recipe_summary(node, limit, recipe_icons, masked_only)
   local r, lines = node.recipe_rows, {}
   if not r then return lines end
   local function add(title, rows)
@@ -226,8 +230,10 @@ local function recipe_summary(node, limit, recipe_icons)
     lines[#lines + 1] = title
     for _, line in ipairs(recipe_lines(node, rows, limit, recipe_icons)) do lines[#lines + 1] = line end
   end
-  add(Loc("sankey-made-by"), r.made)
-  add(Loc("sankey-used-by"), r.used)
+  if not masked_only then
+    add(Loc("sankey-made-by"), r.made)
+    add(Loc("sankey-used-by"), r.used)
+  end
   if #r.masked_made + #r.masked_used > 0 then
     lines[#lines + 1] = Loc("sankey-masked-recipes")
     add(Loc("sankey-made-by"), r.masked_made)
@@ -582,7 +588,7 @@ local function toolbar_strip(bar, us)
   bar.clear()
   local strip = bar.add { type = "frame", name = "ssk_toolbar_strip", style = "subheader_frame",
     direction = "vertical", tags = { ssk_primary_controls = true } }
-  strip.style.height = SK.toolbar_height(us, us.toolbar_width)
+  strip.style.height = SK.toolbar_height(us)
   strip.style.horizontally_stretchable = true
   strip.style.left_padding, strip.style.right_padding = STRIP_PAD_X, STRIP_PAD_X
   strip.style.top_padding, strip.style.bottom_padding = STRIP_PAD_Y, STRIP_PAD_Y
@@ -614,6 +620,8 @@ local function focus_toolbar(bar, us, player)
       tags = { ssk_ui = "watch" }, tooltip = Loc("sankey-configure-this-material-s-watch") }
   end
   machine_action(actions).enabled = us.focus ~= nil
+  actions.add{type = "sprite-button", name = "ssk_rate_card_action", style = "tool_button", sprite = "utility/clock",
+    enabled = us.focus ~= nil, tags = {ssk_ui = "rate_card"}, tooltip = Loc("rate-card-open")}
   zoom_buttons(actions, true, us.zoom or 1)
   label_toggle(actions, us)
   settings_button(actions, us)
@@ -630,21 +638,37 @@ function SK.update_balance_actions(panel, us, key, player_index)
   watch.tooltip = watch.enabled and Loc("sankey-configure-this-material-s-watch-on-the")
     or Loc("sankey-star-this-material-or-its-group-to")
   machines.enabled = key ~= nil
+  if actions.ssk_rate_card_action then actions.ssk_rate_card_action.enabled = key ~= nil end
 end
 
-local function selection_links(row, n)
-  local key = material_key(n)
-  if not key then return end
-  row.add{type="sprite-button", style="tool_button", sprite="utility/right_arrow",
+local function selection_links(row, key)
+  local function pair(name)
+    local flow = row.add{type="flow", name=name, direction="horizontal"}
+    flow.style.horizontal_spacing, flow.style.vertical_align = 4, "center"
+    return flow
+  end
+  local focus = pair("ssk_selection_focus")
+  focus.add{type="sprite-button", style="tool_button", sprite="utility/right_arrow",
     tooltip=Loc("sankey-open-material-in-focus"), tags={ssk_ui="sankey_material_tab", target="focus", key=key}}
-  small(row, Loc("ui-focus"))
-  row.add{type="sprite-button", style="tool_button", sprite="utility/list_view",
+  small(focus, Loc("ui-focus")).style.font = "default-small"
+  local balance = pair("ssk_selection_balance")
+  balance.add{type="sprite-button", style="tool_button", sprite="utility/list_view",
     tooltip=Loc("sankey-open-material-in-balance"), tags={ssk_ui="sankey_material_tab", target="balance", key=key}}
-  small(row, Loc("ui-balance"))
+  small(balance, Loc("ui-balance")).style.font = "default-small"
+  local machines = pair("ssk_selection_machines")
+  machine_action(machines, key)
+  small(machines, Loc("sankey-selection-machines")).style.font = "default-small"
 end
 
 local function selection_controls(parent, n, us, player, width)
-  local row = option_row(parent)
+  local function section(name, caption)
+    local flow = parent.add{type="flow", name=name, direction="vertical"}
+    flow.style.vertical_spacing = 4
+    flow.add{type="label", style="caption_label", caption=caption}
+    return flow
+  end
+  local layout = section("ssk_selection_layout", Loc("sankey-selection-layout"))
+  local row = option_row(layout)
   if us.layout == "lanes" then
     button(row, "▲", "up", Loc("sankey-move-up-shift-to-top-at-the"))
     button(row, "▼", "down", Loc("sankey-move-down-shift-to-bottom-at-the"))
@@ -655,18 +679,13 @@ local function selection_controls(parent, n, us, player, width)
   elseif not n.base then
     button(row, Loc("sankey-collapse-group"), "collapse", Loc("sankey-merge-all-visible-members-of-this-group"), { gid = n.group })
   end
-  if width then button(row, Loc("sankey-deselect"), "deselect") end
-
   if n.base then
-    local tip = Loc("sankey-raw-input-split-per-lane-untick-split")
-    if width then
-      local label = parent.add{type="label", caption=tip, style="grey_label"}
-      label.style.width, label.style.single_line = width, false
-    else hint(row, tip, 400) end
+    hint(layout, Loc("sankey-raw-input-split-per-lane-untick-split"), width)
   elseif n.kind ~= "group" then
-    if width then row = option_row(parent) end
-    small(row, Loc("sankey-move-to"))
-    if width then row = option_row(parent) end
+    local divider = parent.add{type="line", name="ssk_selection_group_divider"}
+    divider.style.width, divider.style.top_margin, divider.style.bottom_margin = width, 2, 2
+    local grouping = section("ssk_selection_grouping", Loc("sankey-selection-grouping"))
+    row = option_row(grouping)
     local gitems, gsel = {}, 1
     us.group_ids = {}
     for i, g in ipairs(Gr.list(player.index)) do
@@ -674,18 +693,18 @@ local function selection_controls(parent, n, us, player, width)
       us.group_ids[i] = g.id
       if g.id == n.group then gsel = i end
     end
-    local picker = row.add{type="drop-down", items=gitems, selected_index=gsel, tags={ssk_sk="move_group"}}
-    picker.style.width = width or 180
-    if width then row = option_row(parent) end
+    local picker = row.add{type="drop-down", items=gitems, selected_index=gsel, tags={ssk_sk="move_group"},
+      tooltip=Loc("sankey-move-to")}
+    picker.style.width = width
+    row = option_row(grouping)
     local tf = row.add{type="textfield", name="ssk_newgroup", tooltip=Loc("sankey-new-group-name")}
-    tf.style.width = width and width - 64 or 140
+    tf.style.width = width - 72
     button(row, Loc("sankey-new-group"), "new_group", Loc("sankey-create-a-group-with-this-name-and"))
     button(row, Loc("sankey-default-group"), "ungroup", Loc("sankey-remove-your-override-for-this-item"))
   end
-  if not width then button(row, Loc("sankey-deselect"), "deselect") end
 end
 
-local function build_toolbar(bar, us, L, player, width, with_sidebar)
+local function build_toolbar(bar, us, player)
   if us.view == "focus" then return focus_toolbar(bar, us, player) end
   local r1
   bar, r1 = toolbar_strip(bar, us)
@@ -709,26 +728,12 @@ local function build_toolbar(bar, us, L, player, width, with_sidebar)
 
   local actions = right_group(r1, us)
   if us.view == "overview" then button(actions, Loc("sankey-collapse-overview"), "overview_reset", Loc("sankey-unfinished-grouping-return-expanded-groups-to-the")) end
-  local sel_material = us.sel and L.nodes[us.sel] and material_key(L.nodes[us.sel])
-  machine_action(actions, sel_material).enabled = sel_material ~= nil
   zoom_buttons(actions, false, us.render_zoom or 1)
   label_toggle(actions, us)
   settings_button(actions, us)
-  local n = us.sel and L.nodes[us.sel]
   local nh = 0
   for _ in pairs(us.hidden) do nh = nh + 1 end
-  if nh == 0 and (not n or with_sidebar) then return end
-  local r2 = option_row(bar)
-  if nh > 0 then button(r2, Loc("sankey-show-hidden", nh), "unhide_all") end
-  if n and not with_sidebar then
-    local material = material_key(n)
-    local selected = small(r2, Loc("sankey-selected-group", rt(sprite_for(n)), display_name(n), n.ginfo.super_name, n.ginfo.name))
-    selected.style.width = width - 24 - (material and 200 or 0) - (nh > 0 and 34 or 0)
-    selected.style.single_line = true
-    selection_links(r2, n)
-    if material then machine_action(r2, material) end
-    selection_controls(bar, n, us, player)
-  end
+  if nh > 0 then button(option_row(bar), Loc("sankey-show-hidden", nh), "unhide_all") end
 end
 
 ---------------------------------------------------------------------------
@@ -792,10 +797,9 @@ local function highlight(st, key)
   -- visible while hovering or pinning a neighbour.
   if not st.dim_nodes then key = nil end
   local chain = key and selected_chain(st.paths, key)
-  local shade = st.shade_ribbons or (not key and st.quiet)
   for _, r in ipairs(st.ribbons) do
-    local c = chain and not chain_contains_link(chain, r.from, r.to) and palette.DIM
-      or (shade and palette.muted(r.color) or r.color)
+    -- Keep the darker flow shade at joins so highlighted material bars stay distinct.
+    local c = chain and not chain_contains_link(chain, r.from, r.to) and palette.DIM or palette.muted(r.color)
     if r.ro then
       if r.ro.valid then r.ro.color = Canvas.col(c) end
     elseif r.elem and r.elem.valid then r.elem.sprite = ribbon_sprite(r, c) end
@@ -919,17 +923,16 @@ local function draw_returns(canvas, L, late, width, show_markers, zoom)
   end
 end
 
-local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons)
+local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons, read_balance)
   st.ribbons = {}
   st.node_visuals = {}
   st.dim_nodes = not us.neighborhood
-  st.quiet = not us.neighborhood
-  st.shade_ribbons = us.view == "focus"
   st.selected = us.view == "focus" and us.focus or us.sel
   if us.neighborhood then st.selected=us.pinned end
   local count = 0
   local cx = L.col_x
   local late = {} -- deferred labels / buttons
+  local balance_tooltips = {}
   local detailed = zoom >= 0.8
   st.display_zoom = zoom
   local function put(e, x, y, w, h)
@@ -1144,11 +1147,40 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons)
         tooltip[#tooltip+1]=Loc.join(" ", Loc("selected-material-consumed", localised_name(L.nodes[us.focus])))
         if n.kind~="recipe" then tooltip[#tooltip+1]=Loc("sankey-consumer-production", fmt(n.prod), units(n)) end
       end
+      if not n.transport then
+        if read_balance and (n.kind == "item" or n.kind == "fluid") then
+          local key = material_key(n)
+          if not balance_tooltips[key] then
+            local row = read_balance(key)
+            balance_tooltips[key] = BalanceUI.hover_details(row.prod, row.cons, units(n), row)
+          end
+          tooltip[#tooltip + 1] = Loc.join("\n\n", balance_tooltips[key])
+        elseif n.kind == "item" or n.kind == "fluid" or n.kind == "group" then
+          local rates = BalanceUI.hover_details(n.total_prod or n.prod, n.total_cons or n.cons, units(n))
+          if n.kind == "group" then
+            rates = Loc.join(rates, "\n", Loc("sankey-totals-across-these-members-expand-the-group"))
+          end
+          tooltip[#tooltip + 1] = Loc.join("\n\n", rates)
+        end
+      end
       if lab_tip then tooltip[#tooltip + 1] = Loc.join("\n", lab_tip) end
+      local pin_key = not n.transport and (not us.is_cell_chart or L.details) and material_key(n)
+      if pin_key then
+        local docked = us.view ~= "focus" and not us.neighborhood and not us.is_cell_chart
+        tooltip[#tooltip + 1] = Loc.join("\n\n", Loc(docked and "sankey-rate-card-click" or "rate-card-alt-click"))
+      end
+      local recipe_info
+      if L.details and not n.transport and not n.is_cell then
+        if n.kind == "recipe" then
+          recipe_info = RecipeDetails.recipe(L.details, base_key(n.key):sub(8), fmt)
+        elseif n.kind == "item" or n.kind == "fluid" then
+          recipe_info = RecipeDetails.material(L.details, base_key(n.key), fmt, 2, recipe_icons)
+        end
+      end
       local breakdown = recipe_summary(n, 3, recipe_icons)
       if #breakdown > 0 then
         breakdown = Loc.join("\n\n", Loc.join_list(breakdown, "\n"))
-        tooltip[#tooltip + 1] = breakdown
+        if not recipe_info then tooltip[#tooltip + 1] = breakdown end
         details = Loc.join(details, breakdown)
       end
       local imports=external_supply(n)
@@ -1157,16 +1189,6 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons)
         tooltip[#tooltip + 1] = "\n\n"
         tooltip[#tooltip + 1] = imports
         details=Tooltip.lines({details,"\n\n",imports})
-      end
-      -- Recipe bars list their recipe, rates and machines; material bars the
-      -- recipes making and using them.
-      local recipe_info
-      if L.details and not n.transport and not n.is_cell then
-        if n.kind == "recipe" then
-          recipe_info = RecipeDetails.recipe(L.details, base_key(n.key):sub(8), fmt)
-        elseif n.kind == "item" or n.kind == "fluid" then
-          recipe_info = RecipeDetails.material(L.details, base_key(n.key), fmt)
-        end
       end
       if recipe_info then
         tooltip[#tooltip+1]="\n\n"
@@ -1194,7 +1216,7 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons)
         count = count + 1
       end
       local bar_tags = n.transport and transport_tags(n.transport,n,us)
-        or { ssk_sk = "node", key = n.key, fx = (us.view == "focus"), part = "bar" }
+        or { ssk_sk = "node", key = n.key, fx = (us.view == "focus"), part = "bar", ssk_card_material = pin_key or nil }
       if n.is_cell then
         local half = n.width / 2
         local function stack(segments, side, x)
@@ -1253,7 +1275,9 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons)
         stem.ignored_by_interaction = true
         late[#late + 1] = { n.x, iy, View.NODE_W, View.NODE_W,
           { type = "sprite-button", sprite = sprite_for(n), tooltip = tooltip, style = "slot_button",
-            raise_hover_events = true, tags = n.transport and transport_tags(n.transport,n,us) or { ssk_sk = "node", key = n.key, fx = (us.view == "focus") } }, toggled = (us.sel == n.key), fill = true, node_icon=n.key }
+            raise_hover_events = true, tags = n.transport and transport_tags(n.transport,n,us) or
+              { ssk_sk = "node", key = n.key, fx = (us.view == "focus"), ssk_card_material = pin_key or nil } },
+          toggled = (us.sel == n.key), fill = true, node_icon=n.key }
       end
       local show_label = us.show_labels or n.key == us.sel or n.key == us.pinned
         or n.kind == "group" or n.transport~=nil
@@ -1327,7 +1351,6 @@ local function render_overview(side, L, us, paths, chain, width, height, player,
   local overview = side.ssk_overview
   if not overview then
     overview = side.add{type="frame", name="ssk_overview", style="inside_deep_frame", direction="vertical"}
-    overview.style.width = width
     overview.style.padding = 8
     overview.add{type="label", style="caption_label", caption=Loc("sankey-chart-overview")}
     local map = overview.add{type="flow", name="ssk_overview_map", direction="vertical"}
@@ -1335,9 +1358,11 @@ local function render_overview(side, L, us, paths, chain, width, height, player,
     map.add{type="flow", name="ssk_overview_paths", direction="vertical", ignored_by_interaction=true}.style.vertical_spacing = 0
     map.add{type="flow", name="ssk_overview_nodes", direction="vertical"}.style.vertical_spacing = 0
   end
+  overview.style.width = width
+  overview.visible = next(L.nodes) ~= nil
   local map = overview.ssk_overview_map
   local ribbons, nodes = map.ssk_overview_paths, map.ssk_overview_nodes
-  local map_w, map_h = width - 16, math.max(42, math.min(146, math.floor(height * 0.32)))
+  local map_w, map_h = width - 16, math.max(42, math.min(108, math.floor(height * 0.32)))
   map.style.width, map.style.height = map_w, map_h
   ribbons.style.width, ribbons.style.height, ribbons.style.bottom_margin = map_w, map_h, -map_h
   nodes.style.width, nodes.style.height = map_w, map_h
@@ -1381,7 +1406,7 @@ local function render_overview(side, L, us, paths, chain, width, height, player,
     for _, path in ipairs(paths) do
       local related = chain ~= nil and chain_contains_link(chain, path.from, path.to)
       if related == active then
-        local color = related and path.color or chain and palette.DIM or palette.muted(path.color)
+        local color = chain and not related and palette.DIM or palette.muted(path.color)
         for _, shape in ipairs(path.pieces) do piece(shape, color) end
       end
     end
@@ -1510,72 +1535,123 @@ local function render_viewport(c, st)
   v.travel_y, v.thumb_y, v.thumb_h = update_track(chart.ssk_viewport_row.ssk_scroll_y, "y", v.h, y, v.max_y)
 end
 
-local function render_selection(side, L, us, width, player, recipe_icons, keep_controls)
-  local summary = side.ssk_selected_material
+local function render_selection(parent, L, us, width, height, player, options, drawer_x)
+  local key, sidx = us.sel, us.sidx or player.surface.index
+  local selected = L.nodes[key]
+  local material = key and material_key(selected or {key=key})
+  if material then
+    local kind, name = material:match("^(%a+)/(.+)$")
+    if not prototypes[kind][name] then material = nil end
+  end
+  local summary = parent.ssk_selected_material
+  local has_bars = next(L.nodes) ~= nil
+  if summary and (summary.tags.key ~= key or summary.tags.width ~= width or not key and summary.tags.has_bars ~= has_bars) then
+    summary.destroy()
+    summary = nil
+  end
+  if not selected or us.selection_actions ~= key then us.selection_actions = nil end
+  if drawer_x and not key then return end
+  local text_width = width - 36
   if not summary then
-    summary = side.add{type="frame", name="ssk_selected_material", style="inside_deep_frame", direction="vertical"}
-    summary.style.width = width
-    summary.style.padding = 8
-    summary.style.vertically_stretchable = true
-    summary.add{type="label", style="caption_label", caption=Loc("sankey-selected-material-2")}
-  end
-  local text_width = width - 32
-  local function row(parent, text, style, name)
-    local e = parent.add{type="label", name=name, style=style, caption=text}
-    if not style then e.style.font = "default-small" end
-    e.style.width, e.style.single_line = text_width, false
-    return e
-  end
-  local selected = L.nodes[us.sel]
-  local pane = summary.ssk_selected_scroll
-  local key = selected and selected.key
-  -- Keep the active editor even if its material has no further sampled flow.
-  if not pane or not keep_controls or (key and pane.tags.key ~= key) then
-    if pane then pane.destroy() end
-    pane = summary.add{type="scroll-pane", name="ssk_selected_scroll", style="naked_scroll_pane",
-      horizontal_scroll_policy="never", tags={key=key}}
+    summary = parent.add{type="frame", name="ssk_selected_material", style="inside_deep_frame", direction="vertical",
+      tags={key=key, width=width, has_bars=has_bars}}
+    summary.style.width, summary.style.padding = width, 8
+    summary.style.vertically_stretchable = key ~= nil and not drawer_x
+    if key then
+      local node = selected or {key=key}
+      local title = Loc.join(rt(sprite_for(node)), " ", display_name(node))
+      local header = summary.add{type="flow", direction="horizontal", style="frame_header_flow"}
+      header.style.vertical_align = "center"
+      local label = header.add{type="label", style="caption_label", caption=title, tooltip=title}
+      label.style.maximal_width = text_width - 16
+      header.add{type="empty-widget", ignored_by_interaction=true}.style.horizontally_stretchable = true
+      header.add{type="sprite-button", style="frame_action_button", sprite="utility/close",
+        tooltip=Loc("sankey-deselect"), tags={ssk_sk="deselect"}}
+      local row = option_row(summary, "ssk_selection_actions")
+      row.style.top_margin = 2
+      if material then selection_links(row, material) end
+      row.add{type="empty-widget", ignored_by_interaction=true}.style.horizontally_stretchable = true
+      row.add{type="sprite-button", name="ssk_selection_more", style="tool_button", sprite="utility/expand_dots",
+        tags={ssk_sk="selection_actions"}}
+      local divider = summary.add{type="line", name="ssk_selection_header_divider"}
+      divider.style.width, divider.style.top_margin, divider.style.bottom_margin = text_width, 2, 2
+    else
+      summary.add{type="label", name="ssk_selection_empty", style="caption_label", caption=Loc("sankey-selection-empty")}
+      if has_bars then
+        local prompt = summary.add{type="label", name="ssk_selection_prompt", style="grey_label", caption=Loc("sankey-overview-empty")}
+        prompt.style.single_line, prompt.style.maximal_width = false, text_width
+        prompt.style.top_margin = 2
+      end
+      return
+    end
+    local pane = summary.add{type="scroll-pane", name="ssk_selected_scroll", style="naked_scroll_pane",
+      horizontal_scroll_policy="never", vertical_scroll_policy="auto-and-reserve-space"}
     pane.style.vertically_stretchable = true
-    if selected then
-      row(pane, Loc.join(rt(sprite_for(selected)), " ", display_name(selected)), "caption_label")
-      if material_key(selected) then selection_links(option_row(pane), selected) end
-      if not selected.transport and selected.kind ~= "recipe" then
-        row(pane, "", nil, "ssk_selected_totals")
-      end
-      row(pane, Loc.join(selected.ginfo.super_name, " › ", selected.ginfo.name), "grey_label")
-      selection_controls(pane, selected, us, player, text_width)
-      local breakdown
-      if not selected.transport and selected.kind ~= "recipe" then
-        breakdown = option_row(pane, "ssk_selected_breakdown")
-        breakdown.add{type="label", style="caption_label", caption=Loc("sankey-breakdown")}
-      end
-      local material = material_key(selected)
-      if material then machine_action(breakdown or option_row(pane), material) end
-    end
-    pane.add{type="flow", name="ssk_selected_rates", direction="vertical"}
+    pane.add{type="flow", name="ssk_rate_card_body", direction="vertical"}.style.vertical_spacing = 6
   end
-  local rates = pane.ssk_selected_rates
-  rates.clear()
-  local totals = pane.ssk_selected_totals
-  if totals then
-    totals.visible = selected ~= nil
-    if selected then
-      totals.caption = Loc("sankey-produced-consumed", fmt(selected.prod), units(selected), fmt(selected.cons), units(selected))
-    end
+  if not key then return end
+  if drawer_x then
+    -- Cancel the drawer's height so opening a selection leaves the chart in place.
+    local top, drawer_height = -height + 4, height - 8
+    summary.style.height, summary.style.left_margin = drawer_height, drawer_x
+    summary.style.top_margin, summary.style.bottom_margin = top, -(top + drawer_height)
+    summary.visible = not us.settings_open
   end
-  if selected then
-    if selected.transport then
-      row(rates, transport_tooltip(selected.transport, false))
+
+  local more = summary.ssk_selection_actions.ssk_selection_more
+  local menu_open = selected ~= nil and us.selection_actions == key
+  local newly_opened = menu_open and not more.toggled
+  more.enabled, more.toggled = selected ~= nil, menu_open
+  more.tooltip = Loc(selected and "sankey-selection-actions" or "sankey-selection-actions-unavailable")
+  local pane = summary.ssk_selected_scroll
+  local menu = pane.ssk_selection_menu
+  if menu and (not selected or menu.tags.group ~= selected.group or menu.tags.layout ~= us.layout) then
+    menu.destroy()
+    menu = nil
+  end
+  if menu_open and not menu then
+    menu = pane.add{type="frame", name="ssk_selection_menu", index=1, style="inside_shallow_frame", direction="vertical",
+      tags={group=selected.group, layout=us.layout}}
+    menu.style.padding, menu.style.width = 8, text_width
+    menu.style.bottom_margin = 4
+    selection_controls(menu, selected, us, player, text_width - 16)
+  end
+  if menu then menu.visible = menu_open end
+
+  local body = pane.ssk_rate_card_body
+  body.tags = {tick=math.floor(game.tick / 300)}
+  local function row(caption, style, index)
+    local label = body.add{type="label", caption=caption, style=style, index=index}
+    label.style.width, label.style.single_line = text_width, false
+    return label
+  end
+  if material then
+    RateCard.render_body(body, sidx, material, us.period or Sampler.DEFAULT_PERIOD, text_width, options)
+    if selected then
+      local masked = recipe_summary(selected, 3, options.recipe_icons, true)
+      if #masked > 0 then
+        body.add{type="line"}
+        for _, line in ipairs(masked) do row(line, "grey_label") end
+      end
+    else
+      row(Loc("sankey-selection-no-bar"), "grey_label", 2)
+    end
+  else
+    body.clear()
+    if not selected then
+      row(Loc("sankey-selection-no-bar"), "grey_label")
+    elseif selected.transport then
+      row(transport_tooltip(selected.transport, false))
     elseif selected.kind == "recipe" then
       local rate = L.recipe_rates[selected.key:sub(8)]
-      if rate then row(rates, Loc.join(fmt(rate.cps or 0), " ", units(selected))) end
+      if rate then row(Loc.join(fmt(rate.cps or 0), " ", units(selected))) end
     else
-      for _, line in ipairs(recipe_summary(selected, nil, recipe_icons)) do row(rates, line) end
+      row(Loc.join(selected.ginfo.super_name, " › ", selected.ginfo.name), "grey_label")
+      row(Loc("sankey-produced-consumed", fmt(selected.prod), units(selected), fmt(selected.cons), units(selected)))
+      for _, line in ipairs(recipe_summary(selected, nil, options.recipe_icons)) do row(line) end
     end
-  elseif pane.tags.key then
-    row(rates, Loc("no-recorded-material-flow", localised_name({key=pane.tags.key})), "grey_label")
-  else
-    row(rates, Loc("sankey-overview-empty"), "grey_label")
   end
+  if newly_opened then pane.scroll_to_element(menu, "in-view") end
 end
 
 -- st: runtime per-player render state (ribbon element refs for hover)
@@ -1586,14 +1662,10 @@ local function rstate(pi, view)
   return storage.sk_render[k]
 end
 
-function SK.toolbar_height(us, width)
+function SK.toolbar_height(us)
   local rows = 1
-  if not us.neighborhood and us.view ~= "focus" then
-    if us.sel and (width or us.canvas_w or SIDEBAR_MIN_W) < SIDEBAR_MIN_W then
-      rows = 3
-    elseif us.hidden and next(us.hidden) then
-      rows = 2
-    end
+  if not us.neighborhood and us.view ~= "focus" and us.hidden and next(us.hidden) then
+    rows = 2
   end
   return 2 * STRIP_PAD_Y + FIRST_ROW_H + (rows - 1) * (ROW_H + ROW_GAP)
 end
@@ -1630,9 +1702,11 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   local keep_controls = (only_auto or refresh_graph) and not full
   local full_chart = not source and us.view ~= "focus" and not us.neighborhood
   local scalable_chart = full_chart or (source and source.chart_zoom)
-  local sidebar_w = full_chart and W >= SIDEBAR_MIN_W and 208 or 0
+  local inspector_w = math.min(INSPECTOR_W, W - 16)
+  local sidebar_w = full_chart and W >= SIDEBAR_MIN_W and INSPECTOR_W or 0
   local chart_w = W - (sidebar_w > 0 and sidebar_w + 8 or 0)
   local with_sidebar = sidebar_w > 0
+  local drawer_x = full_chart and not with_sidebar and W - inspector_w - 4
   local setting = player.mod_settings["ssk-live-sankey-overview"]
   local managed_scroll = with_sidebar and setting ~= nil and setting.value == true
   local body = c.ssk_body
@@ -1674,7 +1748,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   pane.style.height = viewH
   pane.vertical_scroll_policy = managed_scroll and "never" or "auto-and-reserve-space"
   if full_chart then pane.style.width = chart_w end
-  c.ssk_bar.style.height = SK.toolbar_height(us, W)
+  c.ssk_bar.style.height = SK.toolbar_height(us)
   c.ssk_bar.style.padding = 0
   local canvas = pane.ssk_canvas
   if us.view == "focus" and not us.focus then
@@ -1689,8 +1763,23 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     place(l, 24, 40, math.max(100, W - 48), 60)
     return
   end
-  local L = View.build(player, us, chart_w, viewH, source, only_auto and not full and #canvas.children > 0)
-  if not L then return end
+  local L, model, unchanged = View.build(player, us, chart_w, viewH, source, only_auto and not full and #canvas.children > 0)
+  local inspector = full_chart and (with_sidebar and c.ssk_body.ssk_sidebar or c)
+  local function update_inspector(layout, read_balance, recipe_icons)
+    local options = {model=model, read_balance=read_balance, recipe_rates=layout.details and layout.details.rates,
+      recipe_icons=recipe_icons, plot_height=100}
+    render_selection(inspector, layout, us, inspector_w, viewH, player, options, drawer_x)
+  end
+  if not L then
+    -- The history clock advances even when every rate and ribbon on the chart is unchanged.
+    local summary = inspector and inspector.ssk_selected_material
+    local scroll = summary and summary.ssk_selected_scroll
+    local body = scroll and scroll.ssk_rate_card_body
+    if unchanged and body and body.tags.tick ~= math.floor(game.tick / 300) then
+      update_inspector(unchanged, nil, observed_recipe_icons(player, us))
+    end
+    return
+  end
   local size_changed = us.oversized ~= (L.budget ~= nil)
   us.oversized, us.render_fingerprint = L.budget ~= nil, L.render_fingerprint
   local notice = c.ssk_size_notice
@@ -1719,7 +1808,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     us.render_zoom = zoom
   end
   if not source and (not keep_controls or size_changed or #c.ssk_bar.children==0) then
-    build_toolbar(c.ssk_bar, us, L, player, W, with_sidebar)
+    build_toolbar(c.ssk_bar, us, player)
     settings_panel(c, us, L, W, viewH)
   elseif source then
     if not keep_controls or size_changed or (us.settings_open and not c.ssk_settings) then
@@ -1730,11 +1819,6 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     local actions = strip and strip.ssk_toolbar_rows.ssk_toolbar_main.ssk_toolbar_actions
     if actions and actions.ssk_zoom then
       actions.ssk_zoom.caption = Loc("sankey-chart-zoom", round((scalable_chart and zoom or (us.zoom or 1)) * 100))
-    end
-    if full_chart and actions and actions.ssk_machine_action then
-      local sel_material = us.sel and L.nodes[us.sel] and material_key(L.nodes[us.sel])
-      actions.ssk_machine_action.enabled = sel_material ~= nil
-      actions.ssk_machine_action.tags = { ssk_ui = "machine_status", key = sel_material }
     end
   end
   us.last_order = L.order
@@ -1763,6 +1847,10 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   local st = rstate(player.index, us.view)
   st.viewport = nil
   if full_chart and not managed_scroll then us.chart_viewport = nil end
+  local read_balance
+  if not source and model and model.used and model.rates and (nn > 0 or (full_chart and us.sel)) then
+    read_balance = Balance.material_reader(us.sidx or player.surface.index, model, true)
+  end
   if nn == 0 then
     Canvas.clear(player.index)
     local caption = (L.seconds < 2)
@@ -1773,9 +1861,14 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     end
     local l = canvas.add { type = "label", caption = source and source.empty or caption }
     l.style.single_line = false
-    place(l, 24, 40, math.max(100, W - 48), 80)
+    local empty_width = chart_w - 48
+    if drawer_x and us.sel and not us.settings_open then
+      empty_width = drawer_x - 32
+      l.visible = empty_width >= 100
+    end
+    place(l, 24, 40, math.max(100, empty_width), 80)
   else
-    local _, selection = draw(canvas, L, us, st, player, CW, CH, zoom, recipe_icons)
+    local _, selection = draw(canvas, L, us, st, player, CW, CH, zoom, recipe_icons, read_balance)
     chain = selection
     paths = st.paths
     if not managed_scroll and (us.center_pending or (us.neighborhood and (us.centered_focus ~= us.focus or full))) then
@@ -1796,7 +1889,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   end
   if with_sidebar then
     local side = c.ssk_body.ssk_sidebar
-    side.style.width, side.style.height = sidebar_w, viewH
+    side.style.width, side.style.height, side.style.vertical_spacing = sidebar_w, viewH, 8
     local map_scale, map_x, map_y = render_overview(side, L, us, paths, chain, sidebar_w, viewH, player, managed_scroll)
     if managed_scroll then
       local previous = us.chart_viewport
@@ -1821,8 +1914,8 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
       render_viewport(c, st)
       us.center_pending, us.fit_pending = nil, nil
     end
-    render_selection(side, L, us, sidebar_w, player, recipe_icons, keep_controls)
   end
+  if inspector then update_inspector(L, read_balance, recipe_icons) end
   us.zoom_pending = nil
 end
 
@@ -1923,7 +2016,12 @@ function SK.on_click(e, us)
     if not SK.step_history(us, a == "f_back" and -1 or a == "f_forward" and 1 or tags.steps) then return "none" end
   elseif a == "node" then
     us.sel = (us.sel ~= tags.key) and tags.key or nil
-  elseif a == "chart_settings" then us.settings_open = not us.settings_open or nil
+  elseif a == "chart_settings" then
+    us.selection_actions = nil
+    us.settings_open = not us.settings_open or nil
+  elseif a == "selection_actions" then
+    us.settings_open = nil
+    us.selection_actions = us.selection_actions ~= us.sel and us.sel or nil
   elseif a == "inputs_more" then us.input_depth = math.min(View.MAX_INPUT_DEPTH, (us.input_depth or 1) + 1)
   elseif a == "inputs_less" then us.input_depth = math.max(1, (us.input_depth or 1) - 1)
   elseif a == "deselect" then us.sel = nil

@@ -68,7 +68,8 @@ def prepare(args):
         shutil.copyfile(TESTS/a,target/'scripts'/b)
     (target/'scripts/modded_gui_config.lua').write_text(
         f'return {{warm_seconds={args.warm_seconds},resolution={{{args.width},{args.height}}},'
-        f' viewport={str(args.viewport).lower()},persist_warmed={str(not args.viewport).lower()}}}\n')
+        f' viewport={str(args.viewport).lower()},reuse_recorded={str(args.reuse_recorded_history).lower()},'
+        f'persist_warmed={str(not (args.viewport or args.reuse_recorded_history)).lower()}}}\n')
     if rail:
         # Verify the actual data-stage selection prototype, not only injected area events.
         with (target/'data-final-fixes.lua').open('a', encoding='utf-8') as data:
@@ -149,7 +150,7 @@ def run(stage,manifest,args):
                         shot=stage/'script-output/modded-gui'/f"{case['name']}.png"
                         if not shot.is_file() or shot.stat().st_size<10000:raise RuntimeError(f'Missing native screenshot: {shot}')
                         shots[shot.name]=digest(shot)
-                        if case['renderer']=='poly' and (not args.viewport or case.get('camera')):
+                        if case.get('camera'):
                             from PIL import Image
                             witness=stage/'script-output/modded-gui'/f"{case['name']}-camera-witness.png"
                             with Image.open(witness) as img:
@@ -162,6 +163,12 @@ def run(stage,manifest,args):
                         for case in evidence['viewport']:
                             shot=stage/'script-output/modded-gui'/f"viewport-{case['name']}.png"
                             shots[shot.name]=digest(shot)
+                    if not rail:
+                        card=stage/'script-output/modded-gui'/evidence['rate_card']['screenshot']
+                        if not card.is_file() or card.stat().st_size<10000:
+                            time.sleep(.5)
+                            continue
+                        shots[card.name]=digest(card)
                     if rail:evidence['playtest_sha256']=digest(playtest)
                     evidence['camera_pixel_witnesses']=witnesses
                     (stage/'evidence.json').write_text(json.dumps(evidence,indent=2))
@@ -189,8 +196,9 @@ def main():
     mode=parser.add_mutually_exclusive_group()
     mode.add_argument('--cells-rail',action='store_true',help='Capture Cells rail UI and save an isolated playable copy')
     mode.add_argument('--viewport',action='store_true',help='Check Full Sankey viewport navigation on the warmed save')
+    mode.add_argument('--reuse-recorded-history',action='store_true',help='Allow a shorter warm-up on an existing save with recorded production history')
     args=parser.parse_args();args.save=args.save.resolve();args.mods=args.mods.resolve()
-    minimum=60 if args.cells_rail or args.viewport else 600
+    minimum=60 if args.cells_rail or args.viewport or args.reuse_recorded_history else 600
     if args.warm_seconds<minimum:raise ValueError(f'Collect at least {minimum} game seconds of real production history')
     stage,manifest=prepare(args)
     try:run(stage,manifest,args)

@@ -17,6 +17,7 @@ local MachineStatus = require("scripts.machine_status_ui")
 local Watch = require("scripts.watch")
 local Canvas = require("scripts.canvas")
 local HistoryUI = require("scripts.history_ui")
+local RateCard = require("scripts.rate_card_ui")
 local TransfersUI = require("scripts.transfers_ui")
 local Transfers = require("scripts.transfers")
 local SERockets = require("scripts.se_rockets")
@@ -319,9 +320,13 @@ function UI.refresh(player, only_auto, full, keep_balance_rows, refresh_graph)
   local c = content(player, id)
   if not c then return end
   local surface = sidx_for(player, us)
-  if us.sidx ~= surface then close_inspectors(player) end
+  if us.sidx ~= surface then
+    us.selection_actions = nil
+    close_inspectors(player)
+  end
   us.sidx = surface
   update_header(player,us)
+  RateCard.refresh(player, us, full)
   if id == "cells" then
     us.cells = us.cells or {}
     us.cells.chart = us.cells.chart or {}
@@ -352,7 +357,8 @@ end
 
 -- Chart settings float over the chart; Esc, tab changes and reopening close them.
 local function close_chart_settings(us)
-  local open = false
+  local open = us.selection_actions ~= nil
+  us.selection_actions = nil
   for _, s in pairs({ us, us.fx, us.bal_fx, us.cells and us.cells.chart }) do
     if s.settings_open then s.settings_open, open = nil, true end
   end
@@ -364,6 +370,7 @@ function UI.close(player)
   clear_scroll_thumbs(player)
   CellOutlines.on_window_closed(player.index)
   close_inspectors(player)
+  RateCard.close(player)
   MaterialPicker.close(player)
   Help.close(player)
   HistoryUI.clear_hover(player.index)
@@ -729,6 +736,9 @@ function UI.on_click(e)
   if Cells.on_click(player, el) then return true end
   if MachineStatus.on_click(player, el, UI.close) then return true end
   local us = ustate(e.player_index)
+  if e.alt and el.tags.ssk_card_material and us.tab_id ~= "sankey" then
+    return RateCard.toggle(player, us, el.tags.ssk_card_material)
+  end
   if us.tab_id == "cells" and CellsUI.rail_view(us.cells) and RailUI.on_click(el.tags, us.cells) then
     UI.refresh(player)
     return true
@@ -768,6 +778,8 @@ function UI.on_click(e)
   local a = el.tags and el.tags.ssk_ui
   if not a then return false end
   if a == "close" then UI.close(player)
+  elseif a == "rate_card" then RateCard.toggle(player, us, chart.focus)
+  elseif a == "rate_card_close" then RateCard.close(player)
   elseif a == "cells" then UI.close(player); Cells.open(player)
   elseif a == "cell_new" and us.tab_id == "cells" then
     UI.close(player)
@@ -1170,6 +1182,10 @@ function UI.on_closed(e)
     return true
   end
   if e.element and e.element.valid and e.element.name == WIN then
+    if RateCard.close(player) then
+      player.opened = e.element
+      return true
+    end
     if player.gui.screen.ssk_material_picker then
       MaterialPicker.close(player)
       return true

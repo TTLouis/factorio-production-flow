@@ -180,6 +180,11 @@ def run(stage,args):
                         results['night_vision_ribbon_colors_matched']=len(shared)
                     for filename in results.get('viewport_modes', {}).values():
                         captures[filename]=digest(stage/'script-output/gui-interaction'/filename)
+                    for filename in results.get('rate_card', {}).values():
+                        card=stage/'script-output/gui-interaction'/filename
+                        if not card.is_file() or card.stat().st_size<10000:
+                            raise RuntimeError(f'Missing Full Sankey rate-card screenshot {card}')
+                        captures[filename]=digest(card)
                     results['screenshots_sha256']=captures
                     (stage/'evidence.json').write_text(json.dumps(results,indent=2))
                     print(f'PASS native contracts at {results["scale"]:.0%}: {stage}',flush=True)

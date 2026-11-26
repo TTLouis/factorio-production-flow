@@ -23,6 +23,23 @@ local function route(st)
   return table.concat(parts, "|")
 end
 local function event(el) return { player_index = 1, element = el } end
+local BalanceUI = TREQ("scripts.balance_ui")
+local rate_units = TREQ("scripts.locale")("history-items-s")
+local positive = LOC(BalanceUI.hover_details(3, 1, rate_units))
+local negative = LOC(BalanceUI.hover_details(1, 3, rate_units))
+local neutral = LOC(BalanceUI.hover_details(3, 3, rate_units))
+assert(positive:find("[color=0.5,0.9,0.5]+2.00[/color]", 1, true), "positive net should be green")
+assert(negative:find("[color=1,0.45,0.4]−2.00[/color]", 1, true), "negative net should be red")
+assert(neutral:find("Net /s  0", 1, true) and not neutral:find("[color=", 1, true), "zero net should be neutral")
+local function check_balance(elements, key)
+  local icon, bar = elements.icons[key], elements.bars[key]
+  assert(icon and bar and icon.tooltip == bar.tooltip, "material hover must match its icon")
+  local hover = LOC(bar.tooltip)
+  assert(bar.tags.ssk_card_material == key and icon.tags.ssk_card_material == key, "bars and icons should pin the same material")
+  for _, field in ipairs({ "Produced", "consumed", "Net /s", "Producers", "Consumers", "Stock", "Empty in" }) do
+    assert(hover:find(field, 1, true), "material hover is missing " .. field)
+  end
+end
 for _, renderer in ipairs({ "sprites", "poly" }) do
   local us = { view = "detail", layout = "clean", renderer = renderer, lines = "curves", heights = "sqrt",
     period = 0, preset = "all", canvas_w = 1000 }
@@ -32,6 +49,10 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
   local before = route(storage.sk_render[1])
   local key = "item/electronic-circuit"
   assert(elements.icons[key] and elements.bars[key], "fixture needs icon and bar targets")
+  check_balance(elements, key)
+  local fluid_hover = LOC(elements.bars["fluid/petroleum-gas"].tooltip)
+  assert(fluid_hover:find("Net /s", 1, true) and not fluid_hover:find("Stock", 1, true),
+    "fluid hovers show flow details without chest stock")
   for k, label in pairs(elements.labels) do
     assert(label.visible == false, "unselected header must be hidden")
     local icon, bar = elements.icons[k], elements.bars[k]
@@ -57,6 +78,9 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
   local made = LOC(elements.bars[key].tooltip[#elements.bars[key].tooltip])
   assert(made:find("Made by:", 1, true) and made:find("[recipe=electronic-circuit]", 1, true)
     and made:find("[item=iron-plate]", 1, true), "material bar lists the recipes making it: " .. made)
+  local _, made_sections = LOC(elements.bars[key].tooltip):gsub("Made by", "")
+  local _, used_sections = LOC(elements.bars[key].tooltip):gsub("Used by", "")
+  assert(made_sections == 1 and used_sections == 1, "hover should contain one recipe breakdown")
   if renderer == "sprites" then print("RECIPE DETAILS SAMPLE:\n" .. recipe_text .. "\n--\n" .. made) end
   -- Hover does not rebuild the chart or change selection/positions.
   local icon, bar = elements.icons[key], elements.bars[key]
@@ -115,6 +139,7 @@ for _, renderer in ipairs({ "sprites", "poly" }) do
     SK.fill(player, c, fx, 520, 600, true)
     elements = collect(c)
     assert(#elements.toggles == 1 and elements.labels[key].visible, "focused item must be identified")
+    check_balance(elements, key)
     for _,target in pairs(elements.icons) do assert(not target.style.draw_grayscale_picture,
       "Full Sankey node dimming must not affect Focus/Balance icons") end
     local other
@@ -136,6 +161,53 @@ prototypes.item[key] = { name = key, localised_name = { "item-name.electronic-ci
 SK.fill(player, c, { view = "detail", layout = "clean", period = 0, canvas_w = 1000 }, 1000, 700, true)
 assert(collect(c).icons["item/" .. key].tooltip[4][1] == "item-name.electronic-circuit", "localised name lost")
 prototypes.item[key] = previous
+
+local RateCard = TREQ("scripts.rate_card_ui")
+local state = {sidx = player.surface.index, tab_id = "focus", period = 60}
+assert(RateCard.toggle(player, state, "item/" .. key))
+local pinned = player.gui.screen[RateCard.NAME]
+local body = pinned.ssk_rate_card_scroll.ssk_rate_card_body
+assert(body.ssk_card_rates_plot and body.ssk_card_net_plot, "pinned card should draw both history plots")
+RateCard.refresh(player, state)
+assert(player.gui.screen[RateCard.NAME] == pinned, "refresh should keep the pinned frame")
+assert(RateCard.toggle(player, state, "item/" .. key) and not player.gui.screen[RateCard.NAME], "pin should toggle")
+assert(RateCard.toggle(player, state, "item/" .. key))
+RateCard.refresh(player, {sidx = state.sidx + 1, tab_id = "focus"})
+assert(not player.gui.screen[RateCard.NAME], "surface changes must close a card from the old scope")
+assert(RateCard.toggle(player, state, "item/" .. key))
+RateCard.refresh(player, {sidx = state.sidx, tab_id = "sankey"})
+assert(not player.gui.screen[RateCard.NAME], "Full Sankey uses a docked card instead of the floating window")
+local original_scale = player.display_scale
+player.display_scale = 1.5
+assert(RateCard.toggle(player, state, "item/" .. key))
+local card = player.gui.screen[RateCard.NAME]
+local screen_w = math.floor(player.display_resolution.width / player.display_scale)
+assert(card.location[1] == math.floor(math.max(12, screen_w - math.min(430, screen_w - 32) - 36) * 1.5),
+  "Floating card location must be in screen pixels")
+RateCard.close(player)
+player.display_scale = original_scale
+
+local Sampler = TREQ("scripts.sampler")
+local original_cell_rates = Sampler.cell_rates
+Sampler.cell_rates = function() return { ["removed-cell-recipe"] = {cps=1, normal_cps=1} } end
+local cell_body = c.add{type="flow", direction="vertical"}
+RateCard.render_body(cell_body, state.sidx, "item/" .. key, state.period, 300,
+  {cell={id=987654, surface_index=state.sidx, since=0, name="Test cell"}})
+Sampler.cell_rates = original_cell_rates
+local totals = cell_body.children[2]
+assert(totals.type == "table" and LOC(totals.children[2].caption) == "0.000",
+  "Removed recipes must not contribute to current cell totals")
+
+local Balance, Model = TREQ("scripts.balance"), TREQ("scripts.model")
+local model = Model.build(state.sidx, state.period)
+local stats_only = "item/stats-only-fixture"
+model.rates.nodes[stats_only] = {prod=7, cons=3}
+local read = Balance.material_reader(state.sidx, model, true)
+local browse = Balance.material_reader(state.sidx, model)
+local row = assert(read(stats_only))
+assert(row.prod==7 and row.cons==3 and not browse(stats_only),
+  "Stats-only materials have measured totals in cards without changing Balance list membership")
+model.rates.nodes[stats_only] = nil
 c.destroy()
 TREQ("scripts.canvas").clear(player.index)
 print("HOVER LABEL TESTS OK")

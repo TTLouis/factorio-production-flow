@@ -260,10 +260,11 @@ end
 local function show_recipe_returns(player, UI)
   -- Feed known rates from native recipes into the regular Full Sankey entry
   -- point so this test does not depend on waiting for matching machine cycles.
-  local model = { seconds = 60, edges = {}, residuals = {}, rates = { recipes = {} } }
+  local model = { seconds = 60, edges = {}, residuals = {}, used = {}, rates = { recipes = {} } }
   for _, name in ipairs({ "water-barrel", "empty-water-barrel", "kovarex-enrichment-process" }) do
     local recipe = assert(storage.graph.recipes[name])
     local rate = name == "kovarex-enrichment-process" and 0.05 or 1
+    model.used[#model.used + 1] = name
     model.rates.recipes[name] = { normal_cps = rate, cps = rate }
     for _, part in ipairs(recipe.ingredients) do
       local amount = part.amount * rate

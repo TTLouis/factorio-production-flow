@@ -73,9 +73,12 @@ local function fmt(x)
   return string.format("%.3f", x)
 end
 
-local function signed(x)
-  if x == 0 then return "0" end
-  return Loc.join((x > 0 and "+" or "−"), fmt(math.abs(x)))
+local function signed(x, percent)
+  local magnitude = math.abs(x)
+  local value = percent and string.format("%.0f%%", magnitude * 100) or fmt(magnitude)
+  if x == 0 or (percent and value == "0%") then return percent and "0%" or "0" end
+  local color = x < 0 and "1,0.45,0.4" or "0.5,0.9,0.5"
+  return Loc("balance-formatted", color, Loc.join(x < 0 and "−" or "+", value))
 end
 
 local function time(sec)
@@ -144,10 +147,64 @@ local function values(r)
     item = item_name(r.key), status = r.inactive and Loc("balance-inactive") or Loc("balance-formatted", st.color, st.label),
     prod = fmt(r.prod), cons = fmt(r.cons), net = signed(r.net),
     stock = r.stock and fmt(r.stock) or "—", eta = r.eta and Loc.join("≈ ", time(r.eta)) or "—",
-    netp = string.format("%+.0f%%", r.netp * 100), pu = pct(r.pu), cu = pct(r.cu),
+    netp = signed(r.netp, true), pu = pct(r.pu), cu = pct(r.cu),
     trend = r.trend and signed(r.trend) or "—",
   }
 end
+
+function BU.hover_details(prod, cons, units, row)
+  local net = prod - cons
+  local lines = {
+    Loc("sankey-produced-consumed", fmt(prod), units, fmt(cons), units),
+    Loc.join(Loc("balance-net-s"), "  ", signed(net)),
+  }
+  if row then
+    local v = values(row)
+    lines[2] = Loc.join(lines[2], " (", v.netp, ") · ", v.status)
+    if row.pu or row.cu then
+      lines[#lines + 1] = Loc.join(Loc("balance-producers"), "  ", v.pu, " · ", Loc("balance-consumers"), "  ", v.cu)
+    end
+    if row.key:sub(1, 5) == "item/" then
+      lines[#lines + 1] = Loc.join(Loc("balance-stock"), "  ", v.stock, " · ", Loc("balance-empty-in"), "  ", v.eta)
+      if row.trend then lines[#lines + 1] = Loc.join(Loc("balance-stock-min"), "  ", v.trend) end
+    end
+  end
+  return Loc.join_list(lines, "\n")
+end
+
+function BU.card_totals(parent, prod, cons, row)
+  local table_element = parent.add{type = "table", column_count = 3, style = "ssk_striped_rows"}
+  table_element.style.horizontally_stretchable = true
+  table_element.style.horizontal_spacing = 8
+  table_element.style.vertical_spacing = 0
+  table_element.style.top_cell_padding, table_element.style.bottom_cell_padding = 2, 2
+  local function add(caption, value, detail, help)
+    local label = table_element.add{type = "label", caption = caption}
+    label.style.horizontally_stretchable = true
+    for _, text in ipairs({value, detail or ""}) do
+      local number = table_element.add{type = "label", caption = text, tooltip = help}
+      number.style.minimal_width, number.style.horizontal_align = 64, "right"
+    end
+  end
+  local v = row and values(row)
+  local reference = math.max(prod, cons)
+  add(Loc("balance-made-s"), fmt(prod), row and row.pu and Loc("rate-card-utilisation", v.pu),
+    Loc("balance-estimated-producer-utilisation-measured-crafts-current-crafting"))
+  add(Loc("balance-used-s"), fmt(cons), row and row.cu and Loc("rate-card-utilisation", v.cu),
+    Loc("balance-estimated-consumer-utilisation-measured-crafts-current-crafting"))
+  add(Loc("balance-net-s"), signed(prod - cons), signed(reference > 0 and (prod - cons) / reference or 0, true),
+    Loc("balance-net-rate-divided-by-the-larger-of"))
+  if v then
+    if row.key:sub(1, 5) == "item/" then
+      add(Loc("balance-stock"), v.stock)
+      if row.trend then add(Loc("balance-stock-min"), v.trend) end
+      if row.eta then add(Loc("balance-empty-in"), v.eta) end
+    end
+    parent.add{type = "label", caption = v.status}
+  end
+end
+
+BU.format_rate = fmt
 
 local function columns(details, width, lane)
   local out = {}
@@ -195,6 +252,7 @@ local function caption(v, col)
     end
     return out
   end
+  if col.sub == "netp" or col.sub == "trend" then return Loc.join(v[col.id], "\n", v[col.sub]) end
   if col.sub then return Loc.join(v[col.id], "\n[color=0.65,0.65,0.65]", v[col.sub], "[/color]") end
   return v[col.id]
 end
@@ -260,9 +318,6 @@ local function add_row(parent, r, g, cols, fav)
       el.style.horizontal_align = col.numeric and "right" or "left"
       if col.id == "item" then el.tags = { ssk_ui = "bal_material", key = r.key } end
       if col.id == "item" or col.id == "status" then el.style.font = "default-bold" end
-      if col.id == "net" and r.net ~= 0 then
-        el.style.font_color = r.net < 0 and { 1, 0.45, 0.4 } or { 1, 0.85, 0.35 }
-      end
       -- Long modded names truncate consistently; the tooltip keeps the full name.
       el.style.single_line = not col.sub and not (col.id=="item" and col.narrow)
     end
@@ -666,8 +721,6 @@ function BU.fill(player, c, us, scope, only_auto)
       cells[i].status.tooltip=list[i].inactive and Loc("balance-no-measured-activity-in-the-current-window")
         or Balance.STATUS[list[i].status].help
     end
-    local net = list[i].net
-    cells[i].net.style.font_color = net < 0 and { 1, 0.45, 0.4 } or net > 0 and { 1, 0.85, 0.35 } or { 1, 1, 1 }
     cells[i].focus.ssk_bal_inspect.toggled = us.bal_fx and us.bal_fx.focus == list[i].key or false
   end
   refresh.tooltip = Loc("balance-refresh-table")

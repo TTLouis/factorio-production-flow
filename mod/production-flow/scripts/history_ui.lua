@@ -418,6 +418,21 @@ local function draw_rates(painter, h, width, height, mode, top, paths, from_zero
   return paths
 end
 
+function H.draw_card_rates(parent, history, width, units, height)
+  label(parent, nil, Loc.join(swatch(MADE), " ", Loc("balance-made-s"), "   ", swatch(USED), " ",
+    Loc("balance-used-s"), " · ", units), "caption_label")
+  height = height or 108
+  local paths = rate_paths(history.points, function(tick) return time_x(history, width, tick) end)
+  local rate_host = parent.add{type = "flow", name = "ssk_card_rates_plot", direction = "vertical"}
+  local rates = GuiPlot.begin(rate_host, width, height)
+  draw_rates(rates, history, width, height, "rates", 0, paths, true)
+  label(parent, nil, Loc.join(swatch(NET_POSITIVE), " +   ", swatch(USED), " −   ",
+    Loc("history-net-rate"), " · ", units), "caption_label")
+  local net_host = parent.add{type = "flow", name = "ssk_card_net_plot", direction = "vertical"}
+  local net = GuiPlot.begin(net_host, width, height)
+  draw_rates(net, history, width, height, "net", 0, paths, true)
+end
+
 local function draw_stock(painter, h, width, height, top, receipts)
   local highest = 0
   local hover_by_x = {}

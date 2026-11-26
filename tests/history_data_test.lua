@@ -570,5 +570,28 @@ crossings={};crossing_metadata={provider="sa",received_partial=true}
 h=H.build(1,5,material)
 assert(#h.import_receipts==0,"unknown cargo receipts must never invent an import marker")
 
+reset(600)
+fine(6, stats(3, 7))
+fine(7, {})
+fine(9, stats(8, 2))
+h = H.card_rates(1, 4, material)
+near(h.points[1].net, -4)
+near(h.points[2].net, 0)
+assert(h.points[3].net == nil, "missing coverage must stay a gap")
+near(h.points[4].net, 6)
+
+storage.graph = {nodes = {[material] = {producers = {"smelt", "smelt"}, consumers = {"gear", "gear"}}},
+  recipes = {
+    smelt = {products = {{key = material, amount = 1, prod = 1}, {key = material, amount = 2, prod = 0}}},
+    gear = {ingredients = {{key = material, amount = 2}, {key = material, amount = 1}}},
+  }}
+storage.bins[6].cell = {[2] = {smelt = {c = 99, n = 99}}}
+storage.bins[7].cell = {[2] = {smelt = {c = 3, n = 2}, gear = {c = 2, n = 2}}, [3] = {smelt = {c = 20, n = 20}}}
+h = H.card_rates(1, 4, material, {id = 2, since = 7 * 60})
+assert(h.points[1].made == nil and h.points[3].made == nil, "chart must honor the cell's creation and coverage")
+near(h.points[2].made, 7)
+near(h.points[2].used, 6)
+near(h.points[4].net, 0)
+
 Transport.events=original_events
 print("MATERIAL HISTORY OK: bounded aligned rates, gaps, ranked usage, measured and estimated stock, surface scopes")

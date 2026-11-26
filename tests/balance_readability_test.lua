@@ -19,7 +19,7 @@ for k,n in pairs(L.nodes) do
   assert(n.color==P.material(k), "material colors must not depend on node order")
 end
 local st=storage.sk_render["1:focus"]
-assert(not st.quiet and st.selected==nil and #st.ribbons>0)
+assert(not st.dim_nodes and st.selected==nil and #st.ribbons>0)
 for _,r in ipairs(st.ribbons) do
   assert(r.color==P.material(r.to), "default ribbon must use destination color")
   local tint=P.tint(P.muted(r.color))

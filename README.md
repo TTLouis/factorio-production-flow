@@ -28,7 +28,9 @@ the layout of dense charts are still being refined.
   with capacity, and follow linked train stops and their cargo history.
 - **Full Sankey.** Explore the recipe network on the selected surface. The Chart
   overview outlines the visible area as you pan and zoom. Click a material in
-  the overview to jump to it. Selecting a node dims unrelated nodes and flows.
+  the overview to jump to it. Selecting a material pins its rate card and dims
+  unrelated nodes and flows. The card keeps recent history visible after the
+  bar drops out of the current period.
 
 In Full Sankey, use **Shift + mouse wheel**, **wheel tilt**, or **Page Up / Page Down**
 to scroll horizontally. The overview box is on by default. Turn off **Live Full
@@ -47,9 +49,9 @@ has been recorded so far.
 
 ## Install
 
-Requires **Factorio 2.1**. Tested with Factorio **2.1.24** in base Factorio,
-Space Age, and Space Exploration 0.7.64. Space Age and Space Exploration are
-optional integrations.
+Requires **Factorio 2.1**. Tested with Factorio **2.1.25** in base Factorio,
+Space Age, and Space Exploration 0.7.64 with Krastorio 2. Space Age and Space
+Exploration are optional integrations.
 
 Install [Production Flow from the Mod Portal](https://mods.factorio.com/mod/production-flow),
 or download the ZIP from the

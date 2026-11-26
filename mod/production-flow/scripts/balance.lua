@@ -120,11 +120,12 @@ end
 -- prod/cons/net are per-second rates, netp is net / max(prod, cons), pu/cu are
 -- optional utilisation ratios, stock/trend are optional count/per-minute values,
 -- and eta is optional seconds to empty. Unknown optional fields remain absent.
----@return table|nil row Nil for negligible throughput without positive stock.
-local function material_row(key, residual, graph, model, capacity, used, stock, known)
-  local produced, consumed = residual.prod or 0, residual.cons or 0
+---@return table|nil row Inactive materials are included only for chart inspection.
+local function material_row(key, residual, graph, model, capacity, used, stock, known, include_inactive)
+  local produced, consumed = residual and residual.prod or 0, residual and residual.cons or 0
   local reference = math.max(produced, consumed)
-  if reference > 1e-3 or (stock[key] and stock[key].count > 0) then
+  local listed = reference > 1e-3 or (stock[key] and stock[key].count > 0)
+  if listed or include_inactive then
     local node = graph.nodes[key]
     local producer_utilisation = node and utilisation_of(node.producers, model.rates, capacity, used)
     local consumer_utilisation = node and utilisation_of(node.consumers, model.rates, capacity, used)
@@ -137,6 +138,7 @@ local function material_row(key, residual, graph, model, capacity, used, stock, 
       stock = entry and entry.count, trend = entry and entry.per_min,
       eta = B.time_to_empty(entry, net),
       status = status_for(reference, net_fraction, producer_utilisation, consumer_utilisation, entry),
+      inactive = not listed or nil,
     }
   end
 end
@@ -167,6 +169,21 @@ function B.sort(rows, order)
   end)
 end
 
+-- Both the table and the chart use the model for their selected surface and period.
+function B.material_reader(sidx, model, include_inactive)
+  local graph = Graph.get()
+  local capacity = Sampler.capacity(sidx)
+  local stock = Sampler.stock(sidx)
+  local known = Sampler.stock_known(sidx)
+  local used = used_recipes(graph, model)
+  local function read(key)
+    local totals = model.residuals[key]
+    if not totals and include_inactive then totals = model.rates.nodes and model.rates.nodes[key] end
+    return material_row(key, totals, graph, model, capacity, used, stock, known, include_inactive)
+  end
+  return read, stock, known
+end
+
 ---@param sidx number|nil Surface index, passed through to the model and samplers.
 ---@param period number|nil Model sampling period, passed through unchanged.
 ---@return table[] rows Sorted by status, descending absolute netp, then material key.
@@ -175,16 +192,12 @@ end
 ---@return boolean known Whether items missing from stock can be treated as empty.
 ---@return table<string, table> totals Measured production and consumption rates per second.
 function B.rows(sidx, period)
-  local graph = Graph.get()
   local model = Model.build(sidx, period)
-  local capacity = Sampler.capacity(sidx)
-  local stock = Sampler.stock(sidx)
-  local used = used_recipes(graph, model)
+  local read, stock, known = B.material_reader(sidx, model)
   local residuals = residuals_with_stock(model.residuals, stock)
-  local known = Sampler.stock_known(sidx)
   local rows = {}
-  for key, residual in pairs(residuals) do
-    local row = material_row(key, residual, graph, model, capacity, used, stock, known)
+  for key in pairs(residuals) do
+    local row = read(key)
     if row then rows[#rows + 1] = row end
   end
   table.sort(rows, row_before)

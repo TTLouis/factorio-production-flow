@@ -6,6 +6,15 @@ Release history is maintained in the [Factorio changelog](mod/production-flow/ch
 Run `python tools/changelog.py --write` after editing it.
 See [validation and engineering notes](docs/validation.md) for historical test details.
 
+## 0.4.14 — 2026-11-26
+
+### Gui
+
+- Click a material bar in Full Sankey to pin its rates and recipes. Open Focus, Balance or Machines from the card, and find chart edits in the three-dot menu.
+- Keep Made, Used and Net history visible after a pinned material drops out of the chart. The history spans 20 minutes at the default ten-minute period.
+- Hover material bars for balance details. Alt-click in Balance Flow, Focus or a chart for an individual cell without subcells to pin a rate card.
+- Keep material bars distinct from their flow ribbons while highlighting a chain.
+
 ## 0.4.13 — 2026-11-26
 
 ### Gui

@@ -104,7 +104,7 @@ function Flow.ids(surface_index, scope)
 end
 
 -- Measured: crafts the sampler attributed to the cell over the period.
-local function measured_rates(record, period, exclusive, since)
+function Flow.measured_rates(record, period, exclusive, since)
   local recipes, seconds, requested = Sampler.cell_rates(record.id, record.surface_index, period, math.max(record.since or 0, since or 0), exclusive)
   local rates = {}
   for name, rate in pairs(recipes) do
@@ -283,7 +283,7 @@ function Flow.build(selected, opts)
     local rates = capacity
     if measured_mode then
       local seconds, requested
-      rates, seconds, requested = measured_rates(record, opts.period, false, since)
+      rates, seconds, requested = Flow.measured_rates(record, opts.period, false, since)
       graph.seconds, graph.requested = seconds, requested
       graph.utilisation = utilisation(rates, capacity)
       graph.partial = seconds + 1 < requested
@@ -341,11 +341,11 @@ function Flow.build(selected, opts)
     parent_capacity, parent_fuels = Capacity.rates(parent_members, assigned, parent.ports and parent.ports.inputs, not measured_mode)
     if measured_mode then
       local seconds, requested
-      parent_rates, seconds, requested = measured_rates(parent, opts.period, false, since)
+      parent_rates, seconds, requested = Flow.measured_rates(parent, opts.period, false, since)
       graph.seconds, graph.requested = seconds, requested
       graph.partial = seconds + 1 < requested
       for _, id in ipairs(ids) do
-        local child_rates = measured_rates(records[id], opts.period, true, since)
+        local child_rates = Flow.measured_rates(records[id], opts.period, true, since)
         for name, rate in pairs(child_rates) do
           local remainder = parent_rates[name]
           if remainder then
@@ -371,7 +371,7 @@ function Flow.build(selected, opts)
         if id == parent_id then
           rates, seconds, requested = parent_rates, graph.seconds, graph.requested
         else
-          rates, seconds, requested = measured_rates(record, opts.period, true, since)
+          rates, seconds, requested = Flow.measured_rates(record, opts.period, true, since)
         end
         graph.requested = requested
         if seconds + 1 < requested then graph.newest = math.min(graph.newest or seconds, seconds) end

@@ -123,6 +123,75 @@ local function rate_points(result, sources, lab_input, rate_start_tick)
   return points, totals, duration
 end
 
+local function cell_material_amounts(graph, key)
+  local made, used = {}, {}
+  local node = graph.nodes[key]
+  if not node then return made, used end
+  for _, name in ipairs(node.producers) do
+    if not made[name] then
+      local normal, bonus = 0, 0
+      for _, part in ipairs(graph.recipes[name].products) do
+        if part.key == key then
+          normal = normal + part.amount
+          bonus = bonus + (part.prod or part.amount)
+        end
+      end
+      made[name] = {normal=normal, bonus=bonus}
+    end
+  end
+  for _, name in ipairs(node.consumers) do
+    if not used[name] then
+      local amount = 0
+      for _, part in ipairs(graph.recipes[name].ingredients) do
+        if part.key == key then amount = amount + part.amount end
+      end
+      used[name] = amount
+    end
+  end
+  return made, used
+end
+
+-- The pinned card needs rates only. Read the same recorded coverage as
+-- History, without computing stock estimates or recipe usage bands.
+function H.card_rates(sidx, period, key, cell)
+  local now = game.tick
+  local result = {start_tick = now - period * TICKS_PER_SECOND, end_tick = now,
+    bucket_seconds = math.ceil(period / MAX_BUCKETS)}
+  local since = cell and math.floor((cell.since or 0) / TICKS_PER_SECOND) * TICKS_PER_SECOND
+  local first = since and math.max(result.start_tick, since) or result.start_tick
+  local sources = Sampler.history_sources(sidx, first, now, not cell)
+  local outputs, inputs
+  if cell then outputs, inputs = cell_material_amounts(Graph.get(), key) end
+  for _, source in ipairs(sources) do
+    if source.known then
+      if cell then
+        source.first = math.max(source.first, since)
+        local samples = source.bin.cell and source.bin.cell[cell.id]
+        local made, used = 0, 0
+        if samples then
+          for name, amount in pairs(outputs) do
+            local sample = samples[name]
+            if sample then
+              local normal = Sampler.normal_crafts(sample)
+              made = made + normal * amount.normal + (sample.c - normal) * amount.bonus
+            end
+          end
+          for name, amount in pairs(inputs) do
+            local sample = samples[name]
+            if sample then used = used + Sampler.normal_crafts(sample) * amount end
+          end
+        end
+        source.made, source.used, source.estimates = made, used, {}
+      else
+        material_totals(source, sidx, key)
+      end
+    end
+  end
+  local points, _, seconds = rate_points(result, sources, nil, result.start_tick)
+  result.points, result.seconds = points, seconds
+  return result
+end
+
 local function ranked_uses(totals)
   local keys = {}
   for key in pairs(totals) do keys[#keys + 1] = key end

@@ -1120,7 +1120,7 @@ function V.build(player, us, W, viewH, source, automatic)
       us.chart_zoom, us.chart_fit, us.renderer, us.color_mode, player.display_scale,
       player.mod_settings["ssk-return-direction-markers"] and player.mod_settings["ssk-return-direction-markers"].value,
     })
-    if automatic and us.render_fingerprint == L.render_fingerprint then return end
+    if automatic and us.render_fingerprint == L.render_fingerprint then return nil, m, L end
   end
   us.keep_layout = us.layout_snapshot and us.layout_snapshot.signature == signature or false
   if us.neighborhood then Neighborhood.layout(L, us, W, viewH, V)
@@ -1138,7 +1138,7 @@ function V.build(player, us, W, viewH, source, automatic)
     for j, sub in ipairs(lane.sub_list) do snap.subs[sub.id] = j end
   end
   us.layout_snapshot = snap
-  return L
+  return L, m
 end
 
 ---------------------------------------------------------------------------

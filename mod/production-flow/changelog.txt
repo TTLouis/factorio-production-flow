@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.4.14
+Date: 2026-11-26
+  Gui:
+    - Click a material bar in Full Sankey to pin its rates and recipes. Open Focus, Balance or Machines from the card, and find chart edits in the three-dot menu.
+    - Keep Made, Used and Net history visible after a pinned material drops out of the chart. The history spans 20 minutes at the default ten-minute period.
+    - Hover material bars for balance details. Alt-click in Balance Flow, Focus or a chart for an individual cell without subcells to pin a rate card.
+    - Keep material bars distinct from their flow ribbons while highlighting a chain.
+---------------------------------------------------------------------------------------------------
 Version: 0.4.13
 Date: 2026-11-26
   Gui:

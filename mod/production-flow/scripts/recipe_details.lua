@@ -155,16 +155,18 @@ function RD.recipe(context, name, fmt)
 end
 
 -- Lines for an item or fluid bar: the running recipes that make and use it.
-function RD.material(context, key, fmt)
+function RD.material(context, key, fmt, limit, recipe_icons)
   local graph = storage.graph
   local node = graph and graph.nodes[key]
   if not (context and context.rates and node) then return nil end
   local lines = {}
+  limit = limit or LIST_LIMIT
   local function list(names, heading, input)
-    local found = {}
+    local found, seen = {}, {}
     for _, name in ipairs(names) do
       local recipe, rate = graph.recipes[name], context.rates[name]
-      if recipe and rate then
+      if recipe and rate and not seen[name] then
+        seen[name] = true
         local amount = 0
         for _, part in ipairs(input and recipe.ingredients or recipe.products) do
           if part.key == key then amount = amount + rate_of(rate, part, input) end
@@ -179,11 +181,14 @@ function RD.material(context, key, fmt)
     end)
     lines[#lines + 1] = heading
     for i, entry in ipairs(found) do
-      if i > LIST_LIMIT then
-        lines[#lines + 1] = Loc("recipe-details-more", string.format("%d", #found - LIST_LIMIT))
+      if i > limit then
+        lines[#lines + 1] = Loc("recipe-details-more", string.format("%d", #found - limit))
         break
       end
-      lines[#lines + 1] = Loc.join("[recipe=", entry.name, "]  ", recipe_line(entry.recipe, entry.rate, fmt))
+      local icon = recipe_icons and recipe_icons("recipe/" .. entry.name)
+      local recipe_icon = "[recipe=" .. entry.name .. "]"
+      if icon then recipe_icon = Loc.join(icon, " ", recipe_icon) end
+      lines[#lines + 1] = Loc.join(recipe_icon, "  ", recipe_line(entry.recipe, entry.rate, fmt))
     end
   end
   list(node.producers, Loc("recipe-details-made-by"), false)

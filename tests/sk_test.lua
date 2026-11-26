@@ -31,6 +31,7 @@ click({ ssk_sk = "up" }); click({ ssk_sk = "down" }, true)
 click({ ssk_sk = "collapse", gid = "mechanical" }); print("after collapse:", info())
 click({ ssk_sk = "expand", gid = "mechanical" })
 click({ ssk_sk = "node", key = "item/copper-cable" })
+click({ ssk_sk = "selection_actions" })
 local tf = find(player.gui.screen, function(e) return e.name == "ssk_newgroup" end)[1]; tf.text = "My wires"
 click({ ssk_sk = "new_group" }); print("group of cable:", TREQ("scripts.groups").of(1, "item/copper-cable"))
 sel("move_group", 3)

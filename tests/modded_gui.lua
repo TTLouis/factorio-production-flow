@@ -54,10 +54,20 @@ local function valid_material(key)
 end
 
 local function choose_material(rates)
+  local connected = {}
+  if Config.reuse_recorded then
+    for name, rate in pairs(rates.recipes) do
+      local recipe = storage.graph.recipes[name]
+      if recipe and rate.cps > 0 then
+        for _, part in ipairs(recipe.ingredients) do connected[part.key] = true end
+        for _, part in ipairs(recipe.products) do connected[part.key] = true end
+      end
+    end
+  end
   local best, activity = nil, -1
   for key, node in pairs(rates.nodes) do
     local total = (node.prod or 0) + (node.cons or 0)
-    if valid_material(key) and total > 0 then
+    if valid_material(key) and total > 0 and (not Config.reuse_recorded or connected[key]) then
       if key == "item/iron-plate" then return key end
       if total > activity or (total == activity and (not best or key < best)) then
         best, activity = key, total
@@ -67,6 +77,22 @@ local function choose_material(rates)
   return assert(best, "Reporter factory has no active item/fluid on the connected player's surface after warmup")
 end
 
+local function recorded_factory_surface(Sampler)
+  local best, best_count = nil, 0
+  for _, surface in pairs(game.surfaces) do
+    if surface.name ~= "ssk-canvas" then
+      local rates, count = Sampler.rates(surface.index, PERIOD), 0
+      for name, rate in pairs(rates.recipes) do
+        if rate.cps > 0 and storage.graph.recipes[name] then count = count + 1 end
+      end
+      if count > best_count or (best and count == best_count and surface.index < best.index) then
+        best, best_count = surface, count
+      end
+    end
+  end
+  return assert(best, "The input save has no recorded recipe flow to reuse")
+end
+
 local function reset_chart(state, renderer)
   state.live, state.renderer, state.show_labels = false, renderer, true
   state.layout, state.heights, state.lines, state.color_mode = "clean", "sqrt", "curves", "destination"
@@ -74,6 +100,7 @@ local function reset_chart(state, renderer)
   state.tier_lo, state.tier_hi, state.auto_rank = nil, nil, nil
   state.hidden, state.collapsed, state.pos, state.gpos, state.lpos = {}, {}, {}, {}, {}
   state.zoom, state.center_pending, state.fit_pending = 1, nil, nil
+  state.chart_zoom, state.chart_fit, state.chart_viewport = nil, nil, nil
 end
 
 local function open_case(UI, player, state, case)
@@ -198,6 +225,10 @@ function T.tick(UI, Sampler)
     storage.modded_gui_test = state
     state.opened_gui_type_at_start=player.opened_gui_type
     state.controller_at_start=player.controller_type
+    local saved_surface = Config.reuse_recorded and recorded_factory_surface(Sampler) or player.surface
+    state.saved_surface = Config.reuse_recorded and saved_surface.index or nil
+    state.saved_coverage=Sampler.coverage(saved_surface.index,PERIOD)
+    if Config.reuse_recorded then assert(state.saved_coverage>0,"The input save has no recorded history to reuse") end
     player.opened=nil
     hide_other_screen_roots(player,state)
     game.tick_paused, game.speed = false, Config.warm_speed or 64
@@ -212,14 +243,16 @@ function T.tick(UI, Sampler)
     if elapsed>=(state.next_progress or 3600) then
       state.next_progress=elapsed+3600
       hide_other_screen_roots(player,state)
-      log("MODDED GUI HISTORY "..helpers.table_to_json({elapsed_ticks=elapsed,coverage=Sampler.coverage(player.surface.index,PERIOD),controller_type=player.controller_type}))
+      log("MODDED GUI HISTORY "..helpers.table_to_json({elapsed_ticks=elapsed,
+        coverage=Sampler.coverage(state.saved_surface or player.surface.index,PERIOD),controller_type=player.controller_type}))
     end
     if game.tick - state.start_tick < (WARM_SECONDS + 5) * 60 then return end
     game.speed = 1
     state.warm_ticks = game.tick - state.start_tick
-    state.surface, state.surface_index = player.surface.name, player.surface.index
+    local surface = state.saved_surface and assert(game.surfaces[state.saved_surface]) or player.surface
+    state.surface, state.surface_index = surface.name, surface.index
     state.coverage = Sampler.coverage(state.surface_index, PERIOD)
-    assert(state.coverage >= (Config.viewport and PERIOD or WARM_SECONDS),
+    assert(state.coverage >= PERIOD,
       "Reporter factory did not acquire the required real production-history coverage")
     local rates, recorded = Sampler.rates(state.surface_index, PERIOD)
     state.focus, state.recorded_seconds = choose_material(rates), recorded
@@ -266,9 +299,30 @@ function T.tick(UI, Sampler)
       state.viewport = state.viewport or {}
       if viewport_step(UI, player, state) then return end
     end
+    if not state.rate_card then
+      open_case(UI, player, state, {tab="sankey", renderer="sprites"})
+      local root = player.gui.screen.ssk_main
+      local function material_bar(element, key)
+        local tags = element.tags
+        return tags.ssk_sk == "overview_jump" and (not key or tags.key == key) and valid_material(tags.key)
+      end
+      local target = find(root, function(e) return material_bar(e, state.focus) end)
+        or assert(find(root, material_bar), "The factory must have a material bar to pin")
+      local key = target.tags.key
+      assert(UI.on_click{element=target, player_index=player.index})
+      local panel = assert(find(root, function(e) return e.name == "ssk_selected_material" end))
+      local card = panel.ssk_selected_scroll.ssk_rate_card_body
+      assert(panel.tags.key == key and card.ssk_card_rates_plot and card.ssk_card_net_plot,
+        "The pinned material must have both plots from recorded factory history")
+      state.rate_card = {key=key, screenshot="sankey-rate-card.png"}
+      state.next_tick = game.tick + 20
+      return
+    end
+    game.take_screenshot{player=player,path="modded-gui/" .. state.rate_card.screenshot,
+      resolution=RESOLUTION,show_gui=true,force_render=true}
     local actual_mods = {}
     for name, version in pairs(script.active_mods) do actual_mods[name] = version end
-    local result = { cases=state.cases, coverage=state.coverage, warm_ticks=state.warm_ticks,
+    local result = { cases=state.cases, coverage=state.coverage, saved_coverage=state.saved_coverage, warm_ticks=state.warm_ticks,
       focus=state.focus, surface=state.surface, surface_index=state.surface_index,
       actual_mods=actual_mods, display_scale=player.display_scale, display_resolution=player.display_resolution,
       resolution=RESOLUTION, engine_mouse_input=false, rate_source="actual Sampler.rates; no fixture override",
@@ -278,6 +332,7 @@ function T.tick(UI, Sampler)
     result.controller_at_start=state.controller_at_start
     result.warmed_save=state.warmed_save
     result.viewport=state.viewport
+    result.rate_card=state.rate_card
     write(player, "results", result)
     state.done = true
     assert(#state.failures == 0, "Reporter native GUI checks failed; see modded-gui/results.json")
