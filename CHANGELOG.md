@@ -6,6 +6,22 @@ Release history is maintained in the [Factorio changelog](mod/production-flow/ch
 Run `python tools/changelog.py --write` after editing it.
 See [validation and engineering notes](docs/validation.md) for historical test details.
 
+## 0.4.15 — 2026-11-26
+
+### Bugfixes
+
+- Keep row shading aligned with shipment entries in Space Exploration's Transfers Items list.
+
+### Gui
+
+- Alt-click a material in Full Sankey to open rate history. Pin multiple flyouts and fold them to make room.
+- See all observed consuming recipes, plus mining inputs and drill counts for mined materials. Click machine and drill icons to preview and jump to them.
+
+### Optimizations
+
+- Detailed Full Sankey ribbon tooltips are off by default. Enable Detailed Full Sankey ribbons in per-player mod settings to show recipe details on hover.
+- Turn off Show Full Sankey overview bands in map mod settings to reduce drawing while keeping the overview materials clickable and the viewport box visible.
+
 ## 0.4.14 — 2026-11-26
 
 ### Gui

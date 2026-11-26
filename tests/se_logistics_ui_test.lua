@@ -241,10 +241,13 @@ assert(#ItemList.manifests({records={},from_tick=0,to_tick=game.tick},{method="r
 tab(2,"items")
 local function items_root() return assert(panel().se_tabs.se_items.viewport.body.transport_items) end
 local ir=items_root()
-local headers=ir.list.box.viewport.stack.header.columns.children
-local cells=ir.list.box.viewport.stack.rows.grid.children
-assert(ir.list.box.viewport.stack.header.spec.style=="ssk_balance_header"
-  and ir.list.box.viewport.stack.rows.grid.spec.style=="ssk_balance_grid","Items must reuse Balance's actual table styles")
+local stack=ir.list.box.viewport.stack
+local headers=stack.header.columns.children
+local cells=stack.rows.grid.children
+assert(stack.header.spec.style=="ssk_balance_header" and stack.rows.grid.spec.style=="ssk_striped_rows",
+  "Items must reuse Balance's header and row backgrounds")
+assert(not stack.rows.grid.spec.draw_horizontal_lines and stack.rows.grid.spec.draw_vertical_lines,
+  "Items must keep column dividers without drifting horizontal lines")
 assert(#headers==7 and #cells==14,"Manifest list acquired unrelated stock items or lost columns")
 for i=1,7 do assert(headers[i].style.width==cells[i].style.width,"Header and row columns must use identical widths") end
 assert(LOC(headers[5].caption)=="Used /s" and LOC(headers[7].caption)=="Empty in")

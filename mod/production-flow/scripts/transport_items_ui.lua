@@ -70,7 +70,7 @@ end
 -- then the note along the bottom. A scrolling list keeps a 12 px scrollbar lane
 -- and an 8 px gutter; a list that fits gives both to the item column, so its rows
 -- meet the box's right edge as they meet its left one.
-local LANE,GUTTER,ROW_H,LAYOUT=12,8,34,3
+local LANE,GUTTER,ROW_H,LAYOUT=12,8,34,4
 local PAD,STRIP_H,HEADER_H,NOTE_H,HBAR=12,56,32,36,12
 local function dimensions(width)
   local left=math.min(820,math.max(570,math.floor(width*.46)),math.floor(width*.54))
@@ -84,9 +84,10 @@ local function rows_height(width,height)
   local box_h=height-STRIP_H-PAD-NOTE_H
   return box_h-HEADER_H-(content+LANE+GUTTER>box and HBAR or 0),box_h
 end
-local function grid(parent,name,cols)
-  local t=parent.add{type="table",name=name,style="ssk_balance_grid",column_count=#cols,
-    draw_horizontal_lines=true,draw_vertical_lines=true}
+local function grid(parent,name,cols,style)
+  -- As in Balance, row shading follows the cells when native horizontal lines drift.
+  local t=parent.add{type="table",name=name,style=style,column_count=#cols,
+    draw_horizontal_lines=false,draw_vertical_lines=true}
   t.style.horizontal_spacing,t.style.vertical_spacing=0,0
   t.style.left_cell_padding,t.style.right_cell_padding=3,3
   return t
@@ -125,12 +126,12 @@ local function build(parent,width,height)
   local stack=viewport.add{type="flow",name="stack",direction="vertical"};stack.style.width=full;stack.style.vertical_spacing=0
   local header=stack.add{type="frame",name="header",style="ssk_balance_header",direction="vertical"}
   header.style.width,header.style.height,header.style.bottom_padding=full,HEADER_H,4
-  local headings=grid(header,"columns",cols);headings.style.top_cell_padding,headings.style.bottom_cell_padding=2,2
+  local headings=grid(header,"columns",cols,"ssk_balance_grid");headings.style.top_cell_padding,headings.style.bottom_cell_padding=2,2
   for _,c in ipairs(cols) do label(headings,c.id,c.caption,c.width,"bold_label",c.id~="fav" and c.id~="item") end
   header.add{type="line",name="line",direction="horizontal"}.style.width=full
   local scroll=stack.add{type="scroll-pane",name="rows",style="naked_scroll_pane",horizontal_scroll_policy="never",vertical_scroll_policy="auto-and-reserve-space"}
   scroll.style.width,scroll.style.height=full,rows_h
-  local table=grid(scroll,"grid",cols)
+  local table=grid(scroll,"grid",cols,"ssk_striped_rows")
   table.style.top_cell_padding,table.style.bottom_cell_padding=5,5
   local note=label(left,"note","",left_width-2*PAD,"grey_label");note.style.single_line=false
   note.style.left_margin,note.style.top_margin,note.style.height=PAD,8,20

@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.4.15
+Date: 2026-11-26
+  Bugfixes:
+    - Keep row shading aligned with shipment entries in Space Exploration's Transfers Items list.
+  Gui:
+    - Alt-click a material in Full Sankey to open rate history. Pin multiple flyouts and fold them to make room.
+    - See all observed consuming recipes, plus mining inputs and drill counts for mined materials. Click machine and drill icons to preview and jump to them.
+  Optimizations:
+    - Detailed Full Sankey ribbon tooltips are off by default. Enable Detailed Full Sankey ribbons in per-player mod settings to show recipe details on hover.
+    - Turn off Show Full Sankey overview bands in map mod settings to reduce drawing while keeping the overview materials clickable and the viewport box visible.
+---------------------------------------------------------------------------------------------------
 Version: 0.4.14
 Date: 2026-11-26
   Gui:
