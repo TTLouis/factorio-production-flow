@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from localization_check import install_native_support
-from se_transport_fixture import ROOT, digest, inject_verification_hook, validate_staged_production
+from se_transport_fixture import ROOT, digest, inject_verification_hook, validate_staged_production, wire_native_locale
 
 
 class StagedProductionTests(unittest.TestCase):
@@ -46,9 +46,7 @@ class StagedProductionTests(unittest.TestCase):
         for name in ('se_logistics_capture.lua', 'se_dense_presentation_fixture.lua'):
             self.hook(name)
             self.manifest['gui_hook_sha256'][name] = digest(self.production / 'scripts' / name)
-        self.control = 'local NativeLocale=require("scripts.test_locale_native")\n' + self.control.replace(
-            'function(e) UI.on_string_translated(e) end',
-            'function(e) NativeLocale.on_translated(e); UI.on_string_translated(e) end')
+        self.control = wire_native_locale(self.control)
         self.control += '\nrequire("scripts.se_logistics_capture").register(UI' + (',{focused=true}' if focused else '') + ')\n'
         self.write_control()
 
@@ -67,6 +65,8 @@ class StagedProductionTests(unittest.TestCase):
         for focused in (False, True):
             with self.subTest(focused=focused):
                 self.capture(focused)
+                self.assertIn('Cells.on_string_translated(e); NativeLocale.on_translated(e); UI.on_string_translated(e)',
+                              self.control)
                 self.validate()
                 if not focused:
                     # Start again from the pre-capture control for the next mode.

@@ -368,9 +368,26 @@ end
 
 Sm.craft_productivity = craft_productivity
 
-local function player_machine(e, player_force)
-  local force = player_force or (game.forces and game.forces.player)
-  return e and e.valid and force and e.force == force
+-- Registry scans call this for every machine. Comparing `force_index` avoids
+-- creating a LuaForce wrapper and an `__eq` bridge call per entity; callers
+-- that loop pass the player force and its index once.
+local function player_machine(e, player_force, player_force_index)
+  local force = player_force
+  if not force then
+    force = game.forces and game.forces.player
+    player_force_index = force and force.index
+  end
+  if not (force and e and e.valid) then return false end
+  if player_force_index then
+    local index = e.force_index
+    if index ~= nil then return index == player_force_index end
+  end
+  return e.force == force
+end
+
+local function player_scope()
+  local force = game.forces and game.forces.player
+  return force, force and force.index
 end
 
 local function seed_machine(rec,e)
@@ -609,7 +626,7 @@ function Sm.on_tick(tick)
   local machines = storage.machines
   local recipes = storage.graph and storage.graph.recipes
   local cell_units = storage.cell_units
-  local player_force = game.forces and game.forces.player
+  local player_force, player_force_index = player_scope()
 
   for _ = 1, per do
     local n = #list
@@ -632,7 +649,7 @@ function Sm.on_tick(tick)
       machines[u] = nil
       list[cur] = list[n]
       list[n] = nil
-    elseif not player_machine(e, player_force) then
+    elseif not player_machine(e, player_force, player_force_index) then
       remove_observation(rec)
       rec.eligible,rec.r,rec.pf=false,nil,nil
       cur=cur+1
@@ -1032,13 +1049,14 @@ function Sm.update_cell_units(affected_units, new_units, new_shared)
   storage.cell_shared_units = next(old_shared) and old_shared or nil
 end
 
+-- Machine validity and ownership can change between callbacks on the same tick.
 function Sm.machine_summary(sidx)
   local m, cap = {}, {}
   local g = storage.graph
   local recipes = g and g.recipes
-  local player_force = game.forces and game.forces.player
+  local player_force, player_force_index = player_scope()
   for _, rec in pairs(storage.machines) do
-    if rec.r and (not sidx or rec.s == sidx) and player_machine(rec.e, player_force) then
+    if rec.r and (not sidx or rec.s == sidx) and player_machine(rec.e, player_force, player_force_index) then
       local rname = rec.r
       m[rname] = (m[rname] or 0) + 1
       local r = recipes and recipes[rname]
@@ -1053,9 +1071,9 @@ end
 ---@return table<string, integer> counts Recipe name -> registered machine count.
 function Sm.machine_counts(sidx)
   local m = {}
-  local player_force = game.forces and game.forces.player
+  local player_force, player_force_index = player_scope()
   for _, rec in pairs(storage.machines) do
-    if rec.r and (not sidx or rec.s == sidx) and player_machine(rec.e, player_force) then m[rec.r] = (m[rec.r] or 0) + 1 end
+    if rec.r and (not sidx or rec.s == sidx) and player_machine(rec.e, player_force, player_force_index) then m[rec.r] = (m[rec.r] or 0) + 1 end
   end
   return m
 end
@@ -1107,9 +1125,9 @@ end
 function Sm.capacity(sidx)
   local g = storage.graph
   local cap = {}
-  local player_force = game.forces and game.forces.player
+  local player_force, player_force_index = player_scope()
   for _, rec in pairs(storage.machines) do
-    if rec.r and (not sidx or rec.s == sidx) and player_machine(rec.e, player_force) then
+    if rec.r and (not sidx or rec.s == sidx) and player_machine(rec.e, player_force, player_force_index) then
       local r = g and g.recipes[rec.r]
       local energy = r and r.energy or 0
       if energy > 0 and rec.spd then cap[rec.r] = (cap[rec.r] or 0) + rec.spd / energy end

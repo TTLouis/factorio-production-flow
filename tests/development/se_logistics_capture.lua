@@ -3,6 +3,7 @@
 -- Primary stock captures use live factory production and completed inventory scans.
 local Native=require("scripts.test_locale_native")
 local D=require("scripts.se_transfer_data")
+local Panels=require("scripts.se_transfer_panels")
 local Endpoints=require("scripts.transfer_endpoints")
 local History=require("scripts.history")
 local Dense=require("scripts.se_dense_presentation_fixture")
@@ -225,7 +226,7 @@ function C.register(UI,config)
       us.se_logistics.group=nil
       UI.open(p)
       click(UI,p,tagged(panel(p).se_tabs.se_flow.viewport.body,"history",function(t)return t.direction=="exports" end))
-      local records=us.se_logistics.history._records
+      local records=Panels.last_records(us.se_logistics.history)
       assert(#records>0 and records[1].sender and records[1].receiver,"No native endpoint jump pair")
       local record=records[1]
       assert(Endpoints.resolve(record.sender,p.force) and Endpoints.resolve(record.receiver,p.force))
@@ -281,13 +282,13 @@ function C.register(UI,config)
     elseif step==3 then
       click(UI,p,tagged(panel(p).se_tabs.se_flow.viewport.body,"history",function(t) return t.direction=="exports" end))
       assert(state.view=="history" and state.history.route and state.history.return_view=="flow")
-      assert(#state.history._records>=1 and state.history._records[1].sent[1].count>0)
-      assert_receipts_measured(state.history._records)
+      assert(#Panels.last_records(state.history)>=1 and Panels.last_records(state.history)[1].sent[1].count>0)
+      assert_receipts_measured(Panels.last_records(state.history))
       click(UI,p,tagged(panel(p).se_tabs.se_history.viewport.body,"panel-expand"))
       assert(state.history.expanded)
       local log=panel(p).se_tabs.se_history.viewport.body.entity_history.main.se_history_layout.se_history_log
       local manifests=log.se_shipment_1.manifest_detail.manifests
-      local first=state.history._records[1]
+      local first=Panels.last_records(state.history)[1]
       -- One item/lost/received table, no subtitles, measured or not.
       local sent=assert(manifests.received.manifest)
       local cell=sent.children[sent.column_count+1]
@@ -307,18 +308,18 @@ function C.register(UI,config)
     elseif step==4 then
       reset(UI,p,"history")
       state.history={method="cannon",return_view="flow"};UI.refresh(p)
-      assert(#state.history._records==evidence.actual.cannon_effects and #state.history._records>=6)
+      assert(#Panels.last_records(state.history)==evidence.actual.cannon_effects and #Panels.last_records(state.history)>=6)
       local measured=0
-      for _,r in ipairs(state.history._records) do
+      for _,r in ipairs(Panels.last_records(state.history)) do
         assert(r.method=="cannon" and r.sent and r.to and r.direction=="exports","Fixture cannon shot not paired")
         assert(r.status=="received" or r.status=="spilled" or r.status=="arrived","Fixture cannon shot unsettled")
         if r.received then measured=measured+1 end
       end
-      assert(measured>0 and measured<#state.history._records,"Fixture lacks both measured and spilled cannon shots")
-      assert_receipts_measured(state.history._records)
+      assert(measured>0 and measured<#Panels.last_records(state.history),"Fixture lacks both measured and spilled cannon shots")
+      assert_receipts_measured(Panels.last_records(state.history))
       click(UI,p,tagged(panel(p).se_tabs.se_history.viewport.body,"panel-expand"))
       local receiver=tagged(panel(p).se_tabs.se_history.viewport.body,"panel-jump",function(t) return t.side=="receiver" end)
-      assert(receiver and receiver.enabled==(state.history._records[1].receiver~=nil),"Cannon receiver jump disagrees with the receipt")
+      assert(receiver and receiver.enabled==(Panels.last_records(state.history)[1].receiver~=nil),"Cannon receiver jump disagrees with the receipt")
     elseif step==5 then
       reset(UI,p,"history")
       view(UI,p,2,"items")
@@ -369,8 +370,8 @@ function C.register(UI,config)
       local bucket=assert(tagged(panel(p).se_tabs.se_history.viewport.body,"panel-bucket"),"Exact sent boundary has no timeline bucket")
       local tick=bucket.tags.bucket
       click(UI,p,bucket)
-      assert(state.history.bucket==tick and #state.history._records>=1)
-      assert_receipts_measured(state.history._records)
+      assert(state.history.bucket==tick and #Panels.last_records(state.history)>=1)
+      assert_receipts_measured(Panels.last_records(state.history))
     elseif step==8 then
       reset(UI,p,"flow")
       local pick=p.gui.screen.ssk_main.ssk_window_bar.ssk_surface_picker
@@ -382,7 +383,7 @@ function C.register(UI,config)
       assert(us.surface=="Nauvis Orbit")
     elseif step==9 then
       reset(UI,p,"history",60)
-      assert(#state.history._records==0,"Short native window should contain no transport events")
+      assert(#Panels.last_records(state.history)==0,"Short native window should contain no transport events")
     elseif step==10 then
       us.surface="nauvis";UI.open(p)
       reset(UI,p,"flow")
@@ -390,7 +391,7 @@ function C.register(UI,config)
     elseif step==11 then
       reset(UI,p,"history")
       state.history={material="iron-plate"};UI.refresh(p)
-      assert(#state.history._records>=8,"All-route iron History is still sparse")
+      assert(#Panels.last_records(state.history)>=8,"All-route iron History is still sparse")
     elseif step==12 then
       evidence.synthetic_layout=Dense.install(p,game.surfaces.nauvis)
       evidence.synthetic_layout.initial_records=evidence.synthetic_layout.records
@@ -402,9 +403,9 @@ function C.register(UI,config)
     elseif step==13 then
       reset(UI,p,"history",600)
       state.history={material="iron-plate"};UI.refresh(p)
-      assert(#state.history._records==48 and state.history._pages>=3)
+      assert(#Panels.last_records(state.history)==48 and state.history._pages>=3)
       local imports,exports=0,0
-      for _,record in ipairs(state.history._records) do
+      for _,record in ipairs(Panels.last_records(state.history)) do
         if record.direction=="imports" and record.received then imports=imports+1 end
         if record.direction=="exports" and record.sent then exports=exports+1 end
       end
@@ -435,12 +436,12 @@ function C.register(UI,config)
       local transfer=assert(us.transport_history)
       assert(us.tab_id=="transfers" and transfer.origin.tab=="balance" and transfer.history.material=="iron-plate"
         and transfer.history.direction=="exports" and us.period==3600)
-      assert(#transfer.history._records>=1,"Clicked graph boundary lost its shipment records")
-      assert_receipts_measured(transfer.history._records)
+      assert(#Panels.last_records(transfer.history)>=1,"Clicked graph boundary lost its shipment records")
+      assert_receipts_measured(Panels.last_records(transfer.history))
       local body=assert(find(p.gui.screen.ssk_main,function(e) return e.name=="ssk_transport_history" end))
       click(UI,p,tagged(body,"panel-expand"))
       evidence.graph_history={origin="balance",material=transfer.history.material,direction=transfer.history.direction,
-        provider=transfer.provider,records=#transfer.history._records,received=received_label(transfer.history._records[1])}
+        provider=transfer.provider,records=#Panels.last_records(transfer.history),received=received_label(Panels.last_records(transfer.history)[1])}
     elseif step==18 then
       click(UI,p,generic_action(p.gui.screen.ssk_main,"transport_history_return"))
       assert(us.tab_id=="balance" and not us.transport_history and us.surface=="nauvis" and us.period==3600
@@ -464,7 +465,7 @@ function C.register(UI,config)
       assert(axis.type=="switch" and axis.switch_state=="left")
       axis.switch_state="right"
       assert(UI.on_switch{element=axis,player_index=p.index})
-      assert(state.history.axis=="events" and #state.history._exchanges>4)
+      assert(state.history.axis=="events" and #Panels.last_exchanges(state.history)>4)
       local targets=panel(p).se_tabs.se_history.viewport.body.entity_history.main.se_history_layout.se_history_plot.se_history_chart.se_panel_targets
       local previous,count=nil,0
       for _,e in pairs(targets.children) do if e.tags.se_logistics=="panel-exchange" then
@@ -486,8 +487,8 @@ function C.register(UI,config)
       -- capture runs. Compare with the provider at this tick, then verify that
       -- selecting an entity and returning to Total preserves that scope.
       local total=#D.query(p.force,game.surfaces.nauvis,game.tick,600,{timing="either"}).records
-      assert(total>1 and hs.entity==nil and root.sidebar.box.total.children[1].toggled and #hs._records==total,
-        ("History must default to Total (%d/%d records)"):format(#hs._records,total))
+      assert(total>1 and hs.entity==nil and root.sidebar.box.total.children[1].toggled and #Panels.last_records(hs)==total,
+        ("History must default to Total (%d/%d records)"):format(#Panels.last_records(hs),total))
       local pick=assert(find(root.sidebar.box.scroll,function(e)
         local key=e.tags.history_entity
         local count=key and hs._entity_counts[key]
@@ -495,8 +496,8 @@ function C.register(UI,config)
       end),"Expected an entity with a proper subset of the selected shipment window")
       local selected_key=pick.tags.history_entity
       click(UI,p,pick)
-      assert(hs.entity==selected_key and #hs._records>0 and #hs._records<total,"Entity click did not narrow real History")
-      local focused=#hs._records
+      assert(hs.entity==selected_key and #Panels.last_records(hs)>0 and #Panels.last_records(hs)<total,"Entity click did not narrow real History")
+      local focused=#Panels.last_records(hs)
       local star=assert(find(root.sidebar.box.scroll,function(e)return e.tags.history_entity_favourite==selected_key end))
       click(UI,p,star);assert(us.transport_entity_favs[selected_key])
       local search=root.sidebar.strip.controls.search;search.text="cannon"
@@ -504,7 +505,7 @@ function C.register(UI,config)
       assert(root.sidebar.strip.controls.search==search)
       local clear=assert(find(root.sidebar.strip.controls,function(e)return e.tags.history_entity_clear_search end));click(UI,p,clear)
       click(UI,p,root.sidebar.box.total.children[1])
-      assert(hs.entity==nil and #hs._records==total)
+      assert(hs.entity==nil and #Panels.last_records(hs)==total)
       evidence.entity_history={default="Total",total_records=total,focused_records=focused,selected_key=selected_key,
         groups=true,search=true,independent_favourites=true,synthetic=false}
     elseif step==24 then
@@ -522,7 +523,7 @@ function C.register(UI,config)
       UI.refresh(p)
       local function total(items) local n=0;for _,item in ipairs(items or {}) do n=n+item.count end;return n end
       local function pick()
-        for i,r in ipairs(state.history._records) do
+        for i,r in ipairs(Panels.last_records(state.history)) do
           if i<=3 and (step==25 and r.received and total(r.received)<total(r.sent) or step==26 and r.status=="spilled") then return i,r end
         end
       end
@@ -570,7 +571,7 @@ function C.register(UI,config)
       reset(UI,p,"history")
       state.history={method="cannon",direction="imports",return_view="flow"};UI.refresh(p)
       local spilled,measured=0,0
-      for _,r in ipairs(state.history._records) do
+      for _,r in ipairs(Panels.last_records(state.history)) do
         assert(r.direction=="imports" and r.method=="cannon","Orbit cannon History escaped its filter")
         local _,kind,count=Exchanges.observation(r)
         if r.status=="spilled" then
@@ -582,7 +583,7 @@ function C.register(UI,config)
       assert(spilled==1 and measured>=1,"Orbit cannon imports lack a spill and a measured receipt")
       -- Expand the newest measured shot: a whole cannon receipt reads a zero loss.
       local whole
-      for i,r in ipairs(state.history._records) do if r.received then whole=i;break end end
+      for i,r in ipairs(Panels.last_records(state.history)) do if r.received then whole=i;break end end
       click(UI,p,assert(tagged(panel(p).se_tabs.se_history.viewport.body,"panel-expand",function(t) return t.index==whole end)))
       local log=panel(p).se_tabs.se_history.viewport.body.entity_history.main.se_history_layout.se_history_log
       local grid=assert(log["se_shipment_"..whole].manifest_detail.manifests.received.manifest)
@@ -590,7 +591,7 @@ function C.register(UI,config)
       assert(cell.lost.caption=="0" and cell.received.caption=="100","Whole cannon receipt must read zero loss")
       assert(not log["se_shipment_"..whole].children[1].no_catcher,"A caught cannon shot must not warn")
       evidence.orbit_cannon_receipt_cell={row=whole,lost=0,received=100,synthetic=false}
-      evidence.orbit_cannon_imports={records=#state.history._records,measured=measured,spilled=spilled,synthetic=false}
+      evidence.orbit_cannon_imports={records=#Panels.last_records(state.history),measured=measured,spilled=spilled,synthetic=false}
     elseif step==28 or step==29 then
       -- Flow centre card on the fixture's moon and its orbit: SE zone details,
       -- and for the moon its top resources by SE's map generation estimate.

@@ -188,4 +188,43 @@ local evicted=launch(1,1,same,pad(907,b))
 assert(storage.se_rockets.tracking[evicted.id])
 for i=2,4097 do launch(i,i,{{name="iron",count=1}},nil) end
 assert(storage.se_rockets.tracking[evicted.id]==nil,"Evicted record still tracked")
-print("SE ROCKET RECEIPTS PASS: launch inventory claim, post-loss pad receipts, ambiguity, padless/pad-lost/zone/mismatch/full-pad unknowns, version gate, migration and eviction")
+-- 12. Factorio returns a new LuaObject wrapper for the same inventory on each
+-- call (and after reload). Wrappers compare equal with == but are distinct table
+-- keys, so a claimed inventory must be excluded by equality, not key identity.
+storage.se_rockets=nil;R.init(0)
+local WRAP={}
+WRAP.__index=function(w,k) return rawget(w,"_target")[k] end
+WRAP.__eq=function(x,y) return rawget(x,"_target")==rawget(y,"_target") end
+local function wrapper(target) return setmetatable({_target=target},WRAP) end
+local fresh_wrappers={}
+local saved_get=game.get_script_inventories
+game.get_script_inventories=function(mod)
+  assert(mod=="space-exploration","Read another mod's inventories")
+  local list={}
+  for i,target in ipairs(fresh_wrappers) do
+    local w=wrapper(target)
+    w.get_item_count=function()
+      local n=0
+      for _,v in ipairs(target.items) do n=n+v.count end
+      return n
+    end
+    list[i]=w
+  end
+  return {["space-exploration"]=list}
+end
+local crossed_a=inventory(same)
+fresh_wrappers={crossed_a}
+local first_wrapped=launch(5000,1000,same,pad(990,b))
+assert(first_wrapped.cargo_inventory==wrapper(crossed_a),"Wrapped inventory not claimed")
+local crossed_b=inventory(same)
+fresh_wrappers={crossed_a,crossed_b}
+local second_wrapped=launch(5001,1001,same,pad(991,b))
+assert(second_wrapped.cargo_inventory~=nil and second_wrapped.cargo_inventory==wrapper(crossed_b),
+  "An equal wrapper of a claimed inventory made the new launch ambiguous")
+-- A manifest whose total differs is skipped before reading its contents.
+local other=inventory({{name="iron",count=6}})
+other.get_contents=function() error("Read contents of an inventory with a different item count") end
+fresh_wrappers={other}
+assert(launch(5002,1002,same,pad(992,b)).cargo_inventory==nil)
+game.get_script_inventories=saved_get
+print("SE ROCKET RECEIPTS PASS: launch inventory claim, post-loss pad receipts, ambiguity, padless/pad-lost/zone/mismatch/full-pad unknowns, version gate, migration, eviction and wrapper equality")

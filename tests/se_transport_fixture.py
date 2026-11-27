@@ -34,6 +34,16 @@ def inject_verification_hook(production):
     control.write_text(control.read_text(encoding='utf-8')+'\nrequire("scripts.se_logistics_verification")\n',encoding='utf-8')
 
 
+def wire_native_locale(control):
+    # Archived fixture sources may predate the Cells translation callback.
+    handler = (r'^(script\.on_event\(defines\.events\.on_string_translated, function\(e\) '
+               r'(?:Cells\.on_string_translated\(e\); )?)UI\.on_string_translated\(e\) end\)$')
+    control, count = re.subn(handler, r'\g<1>NativeLocale.on_translated(e); UI.on_string_translated(e) end)',
+                             control, flags=re.M)
+    assert count == 1, 'Unrecognized native locale event wiring'
+    return 'local NativeLocale=require("scripts.test_locale_native")\n' + control
+
+
 def installed_mods(directory):
     result = {}
     for path in directory.glob('*.zip'):
@@ -349,10 +359,7 @@ def validate_staged_production(stage, manifest, clean_files):
             recorded = fixture_hash(name)
             assert manifest['gui_hook_sha256'].get(name) == recorded, 'GUI hook provenance differs: ' + name
             expected['scripts/' + name] = recorded
-        handler = 'function(e) UI.on_string_translated(e) end'
-        assert control.count(handler) == 1, 'Unrecognized native locale event wiring'
-        control = 'local NativeLocale=require("scripts.test_locale_native")\n' + control.replace(
-            handler, 'function(e) NativeLocale.on_translated(e); UI.on_string_translated(e) end')
+        control = wire_native_locale(control)
         controls = [control + '\nrequire("scripts.se_logistics_capture").register(UI' + config + ')\n'
                     for config in ('', ',{focused=true}')]
     actual = {path.relative_to(production).as_posix(): digest(path)
@@ -536,12 +543,7 @@ def main():
                 ['se_logistics_capture.lua','se_dense_presentation_fixture.lua']}
             for name, value in manifest['gui_hook_sha256'].items():
                 manifest['fixture_source_sha256']['tests/development/'+name]=value
-            control=(production/'control.lua').read_text(encoding='utf-8')
-            control=control.replace('function(e) UI.on_string_translated(e) end',
-                'function(e) require("scripts.test_locale_native").on_translated(e); UI.on_string_translated(e) end')
-            # Require at control parsing time, never in the runtime handler.
-            control=control.replace('require("scripts.test_locale_native").on_translated(e)', 'NativeLocale.on_translated(e)')
-            control='local NativeLocale=require("scripts.test_locale_native")\n'+control
+            control=wire_native_locale((production/'control.lua').read_text(encoding='utf-8'))
             capture_config=',{focused=true}' if args.focused_capture else ''
             (production/'control.lua').write_text(control+'\nrequire("scripts.se_logistics_capture").register(UI'+capture_config+')\n',encoding='utf-8')
             with (stage/'config.ini').open('a',encoding='utf-8') as output:output.write('[general]\nlocale=en\n')

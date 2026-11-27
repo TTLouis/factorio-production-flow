@@ -92,21 +92,28 @@ local function cargo_inventory(s,items)
   local ok,all=pcall(function() return game.get_script_inventories(MOD) end)
   local list=ok and type(all)=="table" and all[MOD]
   if type(list)~="table" then return nil end
+  -- Factorio returns a new LuaObject wrapper per call and after reload. Wrappers
+  -- of one inventory compare equal with == but are distinct table keys, so
+  -- claimed inventories are excluded by equality, never by key lookup.
   local claimed={}
   for _,r in pairs(s.tracking) do
-    if r.cargo_inventory then claimed[r.cargo_inventory]=true end
+    if r.cargo_inventory then claimed[#claimed+1]=r.cargo_inventory end
+  end
+  local function is_claimed(inventory)
+    for i=1,#claimed do if claimed[i]==inventory then return true end end
+    return false
   end
   local expected_total=0
   for _,v in ipairs(items) do expected_total=expected_total+v.count end
   local found
   for _,inventory in pairs(list) do
-    if inventory.valid and not claimed[inventory] then
+    if inventory.valid then
+      -- Cheap total first; only same-sized inventories pay the claim and manifest checks.
       local count_fn=inventory.get_item_count
-      if not count_fn or count_fn()==expected_total then
-        if same(contents(inventory),items) then
-          if found then return nil end
-          found=inventory
-        end
+      if (not count_fn or count_fn()==expected_total) and not is_claimed(inventory)
+        and same(contents(inventory),items) then
+        if found then return nil end
+        found=inventory
       end
     end
   end

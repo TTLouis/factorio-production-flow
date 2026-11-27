@@ -6,6 +6,21 @@ Release history is maintained in the [Factorio changelog](mod/production-flow/ch
 Run `python tools/changelog.py --write` after editing it.
 See [validation and engineering notes](docs/validation.md) for historical test details.
 
+## 0.4.16 — 2026-11-27
+
+### Optimizations
+
+- Refresh Full Sankey and Focus faster, especially when production data is unchanged.
+- Spread chest stock discovery across game ticks in factories with multiple surfaces to reduce pauses.
+
+### Bugfixes
+
+- Keep stock tooltips current in Balance Flow and Focus, and update Rate Card drill counts when drills are built or removed.
+- Keep the Cells Flow map jump working after a cell is deleted.
+- Preserve Space Exploration delivery cannon receipts when receiving chests are upgraded, and show history warnings for the selected delivery method.
+- Fix missing Space Exploration rocket receipts when overlapping launches carry identical cargo.
+- Fix potential multiplayer desyncs when viewing mining details or tracking Space Exploration deliveries.
+
 ## 0.4.15 — 2026-11-26
 
 ### Bugfixes

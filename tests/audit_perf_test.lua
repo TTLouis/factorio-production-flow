@@ -706,4 +706,75 @@ do
   Data.query = saved_query
 end
 
+-- 15. Sampler.machine_summary: force indices, surface scope and same-tick changes
+do
+  local saved_machines, saved_graph = storage.machines, storage.graph
+  local force = game.forces.player
+  local saved_index = force.index
+  force.index = 1
+  local own = { valid = true, force = force, force_index = 1 }
+  local foreign = { valid = true, force = force, force_index = 2 }
+  local legacy = { valid = true, force = force } -- Mocks without force_index use the force object.
+  local other_surface = { valid = true, force = force, force_index = 1 }
+  local recipe = "audit-recipe"
+  storage.graph = { recipes = { [recipe] = { energy = 2 } } }
+  storage.machines = {
+    [1] = { e = own, s = 1, r = recipe, spd = 2 },
+    [2] = { e = foreign, s = 1, r = recipe, spd = 100 },
+    [3] = { e = legacy, s = 1, r = recipe, spd = 4 },
+    [4] = { e = other_surface, s = 2, r = recipe, spd = 8 },
+  }
+
+  local counts, capacity = Sampler.machine_summary(1)
+  assert(counts[recipe] == 2 and capacity[recipe] == 3, "Summary must use force indices and keep legacy mocks")
+  local other_counts, other_capacity = Sampler.machine_summary(2)
+  assert(other_counts[recipe] == 1 and other_capacity[recipe] == 4, "Summary must respect surface scope")
+
+  legacy.valid = false
+  counts, capacity = Sampler.machine_summary(1)
+  assert(counts[recipe] == 1 and capacity[recipe] == 1, "Same-tick removal must update count and capacity")
+  own.force_index = 2
+  counts, capacity = Sampler.machine_summary(1)
+  assert(counts[recipe] == nil and capacity[recipe] == nil, "Same-tick ownership change must exclude the machine")
+  assert(Sampler.machine_counts(1)[recipe] == nil and Sampler.capacity(1)[recipe] == nil)
+
+  force.index = saved_index
+  storage.machines, storage.graph = saved_machines, saved_graph
+end
+
+-- 16. View.build fingerprint: the status snapshot keeps observed machine names only
+do
+  local saved_status, saved_force_index = storage.machine_status, rawget(player, "force_index")
+  player.force_index = saved_force_index or 1
+  local function case()
+    return { view = "focus", sidx = 1, period = 600, focus = "item/iron-plate", sel = "item/iron-plate",
+      focus_steps = 2, zoom = 1, live = true, hidden = {}, collapsed = {}, colors = {}, pos = {}, gpos = {}, lpos = {} }
+  end
+  local function fingerprint() return View.build(player, case(), 1000, 600, nil, false).render_fingerprint end
+  storage.machine_status = {}
+  local L = View.build(player, case(), 1000, 600, nil, false)
+  local recipes = {}
+  for k in pairs(L.nodes) do if k:sub(1, 7) == "recipe/" then recipes[#recipes + 1] = k:sub(8) end end
+  for r in pairs(L.details and L.details.rates or {}) do recipes[#recipes + 1] = r end
+  table.sort(recipes)
+  assert(#recipes > 0, "Focus chart must contain recipes for the status snapshot test")
+  local rows = {}
+  for _, r in ipairs(recipes) do
+    rows[r] = { observed = 2, sample_tick = 10, entities = { ["assembling-machine-2"] = 2 },
+      issues = { output_full = { count = 1, units = { [101] = true }, latest_unit = 101 } } }
+  end
+  storage.machine_status = { [1] = { [player.force_index] = rows } }
+  local base = assert(fingerprint(), "Focus chart must have a render fingerprint")
+  for _, row in pairs(rows) do
+    local issue = row.issues.output_full
+    row.sample_tick, row.observed = 99, 3
+    issue.units[102], issue.count, issue.latest_unit = true, 2, 102
+    row.entities["assembling-machine-2"] = 3
+  end
+  assert(fingerprint() == base, "Status sampling churn must not change the chart fingerprint")
+  rows[recipes[1]].entities["assembling-machine-3"] = 1
+  assert(fingerprint() ~= base, "A newly observed machine type must change the chart fingerprint")
+  storage.machine_status, player.force_index = saved_status, saved_force_index
+end
+
 print("AUDIT PERF TESTS OK")

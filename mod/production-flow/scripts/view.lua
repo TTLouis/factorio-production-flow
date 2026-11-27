@@ -1132,17 +1132,18 @@ function V.build(player, us, W, viewH, source, automatic)
           stock_snap[base] = { st.count, st.per_min }
         end
       end
+      -- The chart shows only which machine types were observed per recipe (tooltip
+      -- icons). Issue unit sets, latest_unit and sample_tick change on every status
+      -- sample and the inspector refreshes separately, so keep them out.
       local obs = Sampler.machine_status(sidx, player.force_index)
       if obs then
         status_snap = {}
         local function add_obs(rname)
           local row = obs[rname]
           if row and not status_snap[rname] then
-            local entry = {}
-            for rk, rv in pairs(row) do
-              if rk ~= "units" then entry[rk] = rv end
-            end
-            status_snap[rname] = entry
+            local names = {}
+            for name in pairs(row.entities or {}) do names[name] = true end
+            status_snap[rname] = names
           end
         end
         for k in pairs(L.nodes) do

@@ -86,7 +86,10 @@ function T.tick(UI,Sampler)
   end
   if cfg.mode=="build" then
     if elapsed==0 then
-      for _,p in pairs(game.players) do UI.close(p) end
+      for _,p in pairs(game.players) do
+        if p.controller_type==defines.controllers.cutscene then p.exit_cutscene() end
+        UI.close(p)
+      end
       build();game.speed=64
     end
     if elapsed%300==0 then log("STOCK STRESS progress "..elapsed.." "..helpers.table_to_json(Sampler.stock_status())) end
@@ -108,6 +111,8 @@ function T.tick(UI,Sampler)
     local player=assert(game.connected_players[1])
     if elapsed==0 then
       game.speed=1
+      if player.controller_type==defines.controllers.cutscene then player.exit_cutscene() end
+    elseif elapsed==1 then
       local us=storage.ui[player.index] or {};storage.ui[player.index]=us;us.tab_id="balance";us.bal_filter="all";us.surface="chest-stress"
       SK.balance_state(us).focus="item/steel-plate"
       UI.open(player)
@@ -116,7 +121,10 @@ function T.tick(UI,Sampler)
     elseif elapsed==120 then
       UI.close(player)
       local surface=game.surfaces[storage.stress_fixture.surface]
-      player.teleport({-248,-246},surface);player.zoom=1
+      local character=assert(player.character,"Capture requires a character after exiting the intro cutscene")
+      local position=assert(surface.find_non_colliding_position(character.name,{-249,-249},4,0.25))
+      assert(player.teleport(position,surface),"Could not move the player next to the fixture chest")
+      player.zoom=1
     elseif elapsed==150 then
       local surface=game.surfaces[storage.stress_fixture.surface]
       player.opened=assert(surface.find_entities_filtered{area={{-251,-251},{-248,-248}},name="steel-chest"}[1])
