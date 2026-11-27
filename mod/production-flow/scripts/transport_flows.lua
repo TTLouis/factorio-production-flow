@@ -112,15 +112,17 @@ function F.history(force,surface,tick,seconds,filters)
       received=math.min((tick-first)/60,coverage.received or boundaries.covered_seconds or 0)},
     received_partial=boundaries.received_gap_tick and boundaries.received_gap_tick>=first or false,
     coverage_known=boundaries.coverage_known==true}
-  local materials,qualities={},{ }
-  for _,record in ipairs(filter_sa(raw,{from_tick=first,to_tick=tick,timing="either"})) do
-    for _,manifest in pairs({sent=record.sent,received=record.received}) do
-      for _,item in ipairs(manifest) do materials[item.name]=true;if item.quality then qualities[item.quality]=true end end
+  if not active._skip_choices then
+    local materials,qualities={},{ }
+    for _,record in ipairs(filter_sa(raw,{from_tick=first,to_tick=tick,timing="either"})) do
+      for _,manifest in pairs({sent=record.sent,received=record.received}) do
+        for _,item in ipairs(manifest) do materials[item.name]=true;if item.quality then qualities[item.quality]=true end end
+      end
     end
+    for name in pairs(materials) do result.materials[#result.materials+1]=name end
+    for name in pairs(qualities) do result.qualities[#result.qualities+1]=name end
+    table.sort(result.materials);table.sort(result.qualities)
   end
-  for name in pairs(materials) do result.materials[#result.materials+1]=name end
-  for name in pairs(qualities) do result.qualities[#result.qualities+1]=name end
-  table.sort(result.materials);table.sort(result.qualities)
   return result
 end
 
@@ -181,12 +183,15 @@ local function add_event(result,record,kind,tick,manifest)
   end
 end
 
-function F.query(force,surface,tick,seconds)
+function F.query(force,surface,tick,seconds,options)
   local result={provider=nil,period_seconds=0,materials={},events={},coverage={},truncated=false,
     from_tick=0,to_tick=finite(tick) and tick or 0,scope_valid=false,unknown={}}
   if not valid(force,surface,tick,seconds) then return result end
   result.scope_valid=true;result.surface_index=surface.index
-  local history=F.history(force,surface,tick,seconds)
+  local skip_events=options and options.skip_events
+  local filter_material=options and options.material
+  if filter_material and filter_material:sub(1,5)=="item/" then filter_material=filter_material:sub(6) end
+  local history=F.history(force,surface,tick,seconds,{_skip_choices=true,_skip_groups=true,material=filter_material})
   result.provider=history.provider
   result.from_tick,result.to_tick,result.period_seconds=history.from_tick,history.to_tick,history.period_seconds
   result.coverage,result.truncated=history.coverage or {},history.truncated or false
@@ -228,8 +233,10 @@ function F.query(force,surface,tick,seconds)
           end
         end
       end
-      if record.direction=="exports" and sent then add_event(result,record,"sent",record.tick,record.sent) end
-      if record.direction=="imports" and received then add_event(result,record,"received",record.arrival_tick,record.received) end
+      if not skip_events then
+        if record.direction=="exports" and sent then add_event(result,record,"sent",record.tick,record.sent) end
+        if record.direction=="imports" and received then add_event(result,record,"received",record.arrival_tick,record.received) end
+      end
     end
   end
   for _,entry in pairs(result.materials) do
@@ -247,15 +254,18 @@ function F.query(force,surface,tick,seconds)
       end
     end
   end
-  table.sort(result.events,function(a,b)if a.tick~=b.tick then return a.tick<b.tick end;return a.key<b.key end)
+  if not skip_events then
+    table.sort(result.events,function(a,b)if a.tick~=b.tick then return a.tick<b.tick end;return a.key<b.key end)
+  end
   result._stats_excluded=nil
   return result
 end
 
 function F.events(force,surface,tick,seconds,filters)
-  local result=F.query(force,surface,tick,seconds)
-  if filters and filters.material then
-    local key=filters.material:sub(1,5)=="item/" and filters.material or "item/"..filters.material
+  local mat=filters and filters.material
+  local result=F.query(force,surface,tick,seconds,mat and {material=mat} or nil)
+  if mat then
+    local key=mat:sub(1,5)=="item/" and mat or "item/"..mat
     local events={}
     for _,event in ipairs(result.events) do if event.material==key then events[#events+1]=event end end
     return events,result

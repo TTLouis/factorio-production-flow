@@ -30,6 +30,46 @@ local function localised(proto)
   return ok and value or nil
 end
 
+local cached_sg_ref, sg_rank, sg_loc
+local cached_ig_ref, ig_rank, ig_loc
+
+local function build_rank_cache(all)
+  local list, ranks, locs = {}, {}, {}
+  for _, p in pairs(all or {}) do
+    list[#list + 1] = { name = p.name, order = p.order or "" }
+    locs[p.name] = localised(p)
+  end
+  table.sort(list, before)
+  for i, p in ipairs(list) do ranks[p.name] = i - 1 end
+  return ranks, locs
+end
+
+local function subgroup_rank_and_loc(sg)
+  if not sg then return 0, nil end
+  local all = prototypes.item_subgroup
+  local is_table = type(all) == "table"
+  if not sg_rank or (is_table and all ~= cached_sg_ref) then
+    cached_sg_ref = is_table and all or true
+    sg_rank, sg_loc = build_rank_cache(all)
+  end
+  local r = sg_rank[sg.name]
+  if r ~= nil then return r, sg_loc[sg.name] end
+  return rank(sg, all), localised(sg)
+end
+
+local function group_rank_and_loc(tab)
+  if not tab then return 0, nil end
+  local all = prototypes.item_group
+  local is_table = type(all) == "table"
+  if not ig_rank or (is_table and all ~= cached_ig_ref) then
+    cached_ig_ref = is_table and all or true
+    ig_rank, ig_loc = build_rank_cache(all)
+  end
+  local r = ig_rank[tab.name]
+  if r ~= nil then return r, ig_loc[tab.name] end
+  return rank(tab, all), localised(tab)
+end
+
 function Gr.less(a, b)
   if a.super_order ~= b.super_order then return a.super_order < b.super_order end
   if a.super ~= b.super then return a.super < b.super end
@@ -73,10 +113,11 @@ function Gr.info(pi, id)
     local sup = Default.supers[c.super]
     local tab_id = string.match(c.super, "^tab:(.+)$")
     local tab = tab_id and prototypes.item_group and prototypes.item_group[tab_id]
+    local tab_rank, tab_loc = group_rank_and_loc(tab)
     return { id = id, name = c.name, super = c.super, super_name = sup and sup.name or tab and nice(tab.name) or c.super,
-             super_localised_name = localised(tab),
+             super_localised_name = tab_loc,
              color = sup and sup.color or hash_color(c.super), order = 1000 + (c.order or 0),
-             super_order = Default.super_order[c.super] or (tab and 100 + rank(tab, prototypes.item_group)) or 99 }
+             super_order = Default.super_order[c.super] or (tab and 100 + tab_rank) or 99 }
   end
   local d = Default.groups[id]
   if d then
@@ -91,12 +132,14 @@ function Gr.info(pi, id)
   -- Keep a mod's own crafting-menu tab instead of mixing it into Other.
   if tab and not Default.tab_to_super[tab.name] then super = "tab:" .. tab.name end
   local sup = Default.supers[super]
-  return { id = id, name = nice(sub), localised_name = localised(sg),
+  local sg_r, sg_l = subgroup_rank_and_loc(sg)
+  local tab_r, tab_l = group_rank_and_loc(tab)
+  return { id = id, name = nice(sub), localised_name = sg_l,
            super = super, super_name = sup and sup.name or nice(tab.name),
-           super_localised_name = not sup and localised(tab) or nil,
+           super_localised_name = not sup and tab_l or nil,
            color = sup and sup.color or hash_color(super),
-           order = 500 + (sg and rank(sg, prototypes.item_subgroup) or 0),
-           super_order = Default.super_order[super] or (100 + rank(tab, prototypes.item_group)) }
+           order = 500 + (sg and sg_r or 0),
+           super_order = Default.super_order[super] or (100 + tab_r) }
 end
 
 function Gr.of(pi, key)

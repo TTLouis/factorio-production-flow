@@ -1,4 +1,5 @@
 local N=TREQ("scripts.transport_history_entities")
+local Panels=TREQ("scripts.se_transfer_panels")
 local player=game.players[1]
 local us=storage.ui[player.index]
 local force,surface=player.force,player.surface
@@ -36,11 +37,11 @@ assert(not root.divider and root.sidebar.spec.type=="frame" and root.main.spec.t
   and root.sidebar.style.height==650 and root.main.style.height==650
   and root.sidebar.style.width+root.main.style.width+root.style.horizontal_spacing==1200,
   "History must reuse Balance's sibling inset panels with matching depth, padding and exact width")
-assert(state.history.entity==nil and root.sidebar.box.total.children[1].toggled and #state.history._records==4,"Total must be the default aggregate")
+assert(state.history.entity==nil and root.sidebar.box.total.children[1].toggled and #Panels.last_records(state.history)==4,"Total must be the default aggregate")
 local key=N.key(a,surface,force)
 local pick=assert(find(root,function(e)return e.tags.history_entity==key end))
 assert(N.on_click({element=pick,player_index=player.index},state));render()
-assert(state.history.entity==key and #state.history._records==2,"Entity selection did not filter timeline/log input")
+assert(state.history.entity==key and #Panels.last_records(state.history)==2,"Entity selection did not filter timeline/log input")
 assert(#data.records==4 and data.records[1].sent[1].count==100,"Entity filtering mutated source records")
 local search=root.sidebar.strip.controls.search;search.text="2002"
 assert(N.on_text_changed({element=search},state));render()
@@ -53,11 +54,11 @@ assert(star.spec.style=="tool_button" and star.style.width==24)
 assert(N.on_click({element=star,player_index=player.index},state) and us.transport_entity_favs[key]);render()
 state.history.bucket=game.tick-600;state.history.exchange="old"
 assert(N.on_click({element=root.sidebar.box.total.children[1],player_index=player.index},state));render()
-assert(state.history.entity==nil and state.history.bucket==nil and state.history.exchange==nil and #state.history._records==4)
+assert(state.history.entity==nil and state.history.bucket==nil and state.history.exchange==nil and #Panels.last_records(state.history)==4)
 assert(N.on_click({element={valid=true,tags={history_entity=key}},player_index=player.index},state));render()
 assert(state.history.entity==key,"Destroyed historical entities lost their recorded identities")
 data.records={};render()
-assert(state.history.entity==nil and #state.history._records==0,"Expired selection did not return to Total")
+assert(state.history.entity==nil and #Panels.last_records(state.history)==0,"Expired selection did not return to Total")
 assert(N.on_click({element={valid=true,tags={history_entity="untrusted"}},player_index=player.index},state))
 assert(state.history.entity==nil,"Forged entity key selected unrelated history")
 fixture.destroy();us.transport_entity_favs=saved

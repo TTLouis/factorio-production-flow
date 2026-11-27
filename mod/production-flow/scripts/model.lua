@@ -198,7 +198,7 @@ end
 function M.build(sidx, period)
   local graph = Graph.get()
   local rates, seconds = Sampler.rates(sidx, period)
-  local machine_counts = Sampler.machine_counts(sidx)
+  local machine_counts, capacity = Sampler.machine_summary(sidx)
   local used_list = used_recipes(graph, rates, machine_counts)
   local verts, edges, adj, measured_inputs, measured_outputs = assemble_graph(graph, rates, used_list)
   local vertices, max_tier, sccs = calculate_tiers(verts, edges, adj)
@@ -214,6 +214,7 @@ function M.build(sidx, period)
     max_tier = max_tier,
     residuals = residuals,
     machines = machine_counts,
+    capacity = capacity,
     rates = rates,
   }
 end

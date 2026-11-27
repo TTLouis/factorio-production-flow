@@ -32,30 +32,35 @@ function N.build(nodes, links, model, focus, depth)
     edge.transport = original.transport
     for _, detail in ipairs(original.details or {}) do edge.details[#edge.details + 1] = detail end
   end
+  local in_links, out_links = {}, {}
+  for _, l in pairs(links) do
+    local il = in_links[l.to]
+    if not il then il = {}; in_links[l.to] = il end
+    il[#il + 1] = l
+    local ol = out_links[l.from]
+    if not ol then ol = {}; out_links[l.from] = ol end
+    ol[#ol + 1] = l
+  end
   local visited = {}
   local function inputs(key, distance)
     local target = copy(key, distance)
     if distance >= depth or visited[target.key] then return target end
     visited[target.key] = true
     local via_map = {}
-    for _, l in pairs(links) do
-      if l.to == key then
-        local via = {}
-        if nodes[l.from].kind == "recipe" then
-          for _, ingredient in pairs(links) do
-            if ingredient.to == l.from then
-              local input = inputs(ingredient.from, distance + 1)
-              link(input, target, ingredient, Loc("shared-recipe-input"))
-              via[#via + 1] = input.key
-            end
-          end
-        else
-          local input = inputs(l.from, distance + 1)
-          link(input, target, l)
+    for _, l in ipairs(in_links[key] or {}) do
+      local via = {}
+      if nodes[l.from].kind == "recipe" then
+        for _, ingredient in ipairs(in_links[l.from] or {}) do
+          local input = inputs(ingredient.from, distance + 1)
+          link(input, target, ingredient, Loc("shared-recipe-input"))
           via[#via + 1] = input.key
         end
-        via_map[l.from] = via
+      else
+        local input = inputs(l.from, distance + 1)
+        link(input, target, l)
+        via[#via + 1] = input.key
       end
+      via_map[l.from] = via
     end
     for _, contribution in ipairs(nodes[key] and nodes[key].contrib or {}) do
       local via = {}
@@ -67,25 +72,23 @@ function N.build(nodes, links, model, focus, depth)
     return target
   end
   local center = inputs(focus, 0)
-  for _, l in pairs(links) do
-    if l.from == focus then
-      local use = copy(l.to, -1)
-      link(center, use, l)
-      use.selected_usage = (use.selected_usage or 0) + l.rate
-      use.selected_material = focus
-      if use.kind == "recipe" then
-        local outputs = {}
-        for _, product in pairs(links) do
-          if product.from == l.to then outputs[#outputs + 1] = product.to end
-        end
-        table.sort(outputs)
-        for i, key in ipairs(outputs) do
-          local kind, name = key:match("^(%a+)/(.+)$")
-          local proto = prototypes[kind] and prototypes[kind][name]
-          outputs[i] = proto and proto.localised_name or name
-        end
-        use.context = Loc("multi-output-products", Loc.join_list(outputs, ", "))
+  for _, l in ipairs(out_links[focus] or {}) do
+    local use = copy(l.to, -1)
+    link(center, use, l)
+    use.selected_usage = (use.selected_usage or 0) + l.rate
+    use.selected_material = focus
+    if use.kind == "recipe" then
+      local outputs = {}
+      for _, product in ipairs(out_links[l.to] or {}) do
+        outputs[#outputs + 1] = product.to
       end
+      table.sort(outputs)
+      for i, key in ipairs(outputs) do
+        local kind, name = key:match("^(%a+)/(.+)$")
+        local proto = prototypes[kind] and prototypes[kind][name]
+        outputs[i] = proto and proto.localised_name or name
+      end
+      use.context = Loc("multi-output-products", Loc.join_list(outputs, ", "))
     end
   end
   return nn, nl

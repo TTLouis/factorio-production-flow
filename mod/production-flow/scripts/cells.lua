@@ -23,7 +23,7 @@ end
 
 local function eligible(entity, surface_index)
   return entity.valid and supported[entity.type] and entity.unit_number
-    and entity.surface.index == surface_index and entity.force == game.forces.player
+    and (entity.surface_index or entity.surface.index) == surface_index and entity.force == game.forces.player
 end
 
 local function live_members(entities, surface_index)
@@ -184,12 +184,13 @@ function Cells.on_built(entity)
   local cells = storage.production_cells
   if not (cells and next(cells.records) and entity and entity.valid and supported[entity.type]) then return end
   if not cells.slots then Cells.reindex() end
-  local by_key = cells.slots[entity.surface.index]
+  local surface_index = entity.surface_index or entity.surface.index
+  local by_key = cells.slots[surface_index]
   local slot = by_key and by_key[position_key(entity.position)]
   if not slot then return end
   local unit = entity.unit_number
-  if not (unit and eligible(entity, entity.surface.index)) then return end
-  local changed = false
+  if not (unit and eligible(entity, surface_index)) then return end
+  local affected_units
   for id, old in pairs(slot) do
     local record = cells.records[id]
     local previous = record and record.members[old]
@@ -197,10 +198,38 @@ function Cells.on_built(entity)
       record.members[old], record.positions[old] = nil, nil
       record.members[unit] = entity
       record.positions[unit] = spot(entity)
-      changed = true
+      slot[id] = unit
+      affected_units = affected_units or {}
+      affected_units[old] = true
+      affected_units[unit] = true
     end
   end
-  if changed then Cells.reindex() end
+  if affected_units then
+    local new_units, new_shared = {}, {}
+    local sorted_ids = {}
+    for id in pairs(cells.records) do sorted_ids[#sorted_ids + 1] = id end
+    table.sort(sorted_ids)
+    for target in pairs(affected_units) do
+      local list, counts = {}, {}
+      for _, id in ipairs(sorted_ids) do
+        local record = cells.records[id]
+        if record.members[target] then
+          list[#list + 1] = id
+          local scope = record.parent_id or 0
+          counts[scope] = (counts[scope] or 0) + 1
+        end
+      end
+      if #list > 0 then
+        new_units[target] = list
+        local sh = {}
+        for _, id in ipairs(list) do
+          if counts[cells.records[id].parent_id or 0] > 1 then sh[id] = true end
+        end
+        if next(sh) then new_shared[target] = sh end
+      end
+    end
+    Sampler.update_cell_units(affected_units, new_units, new_shared)
+  end
 end
 
 -- Space Exploration moves a spaceship by cloning its entities to another surface

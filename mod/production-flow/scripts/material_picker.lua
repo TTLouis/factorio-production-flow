@@ -14,6 +14,7 @@ local MAX_TAB_ROWS, MIN_ROWS, MAX_ROWS, CHROME = 4, 4, 12, 200
 -- Blueprint parameters and signal/miscellaneous categories are not production
 -- materials. Apply the same rule to browsing, search and translation requests.
 local EXCLUDED_GROUPS = { signals = true, other = true }
+local open_catalogs = {}
 local function selectable(proto)
   local group = proto.group or (proto.subgroup and proto.subgroup.group)
   return not proto.hidden and not proto.parameter
@@ -160,8 +161,8 @@ end
 -- and sort is the complete group/subgroup/prototype ordering key.
 -- Groups and total cover all selectable prototypes, even while searching;
 -- entries and matched_groups cover only the current text query.
-local function collect_catalog(picker_state, query, allowed, target, current)
-  local entries, groups, matched_groups, total = {}, {}, {}, 0
+local function collect_catalog(allowed, target, current)
+  local entries, groups, total = {}, {}, 0
   local seen_names = {}
   for _, kind in ipairs(kinds_for(target)) do
     for name, proto in pairs(prototypes[kind] or {}) do
@@ -175,20 +176,16 @@ local function collect_catalog(picker_state, query, allowed, target, current)
         total = total + 1
         local subgroup = proto.subgroup or { name = kind, order = "" }
         groups[group.name] = group
-        local display = picker_state.names[key] or name:gsub("%-", " ")
-        if matches_query(query, display, name) then
-          matched_groups[group.name] = true
-          entries[#entries + 1] = { key = key, name = name, kind = kind, group = group.name,
-            subgroup = Loc.join(group.name, "/", subgroup.name),
-            sort = Loc.join((group.order or ""), "\t", group.name, "\t", (subgroup.order or ""), "\t", subgroup.name, "\t", (proto.order or ""), "\t", name, "\t", kind) }
-        end
+        local name_lower = name:lower()
+        entries[#entries + 1] = { key = key, name = name, kind = kind, group = group.name,
+          subgroup = Loc.join(group.name, "/", subgroup.name),
+          name_search = name_lower:gsub("%-", " "),
+          tooltip = label(key),
+          elem_tooltip = { type = kind, name = name },
+          sort = Loc.join((group.order or ""), "\t", group.name, "\t", (subgroup.order or ""), "\t", subgroup.name, "\t", (proto.order or ""), "\t", name, "\t", kind) }
       end
     end
   end
-  return entries, groups, matched_groups, total
-end
-
-local function order_catalog(entries, groups)
   table.sort(entries, function(a, b) return a.sort < b.sort end)
   local group_list = {}
   for _, group in pairs(groups) do group_list[#group_list + 1] = group end
@@ -196,7 +193,21 @@ local function order_catalog(entries, groups)
     if (a.order or "") ~= (b.order or "") then return (a.order or "") < (b.order or "") end
     return a.name < b.name
   end)
-  return group_list
+  return { entries = entries, groups = groups, group_list = group_list, total = total }
+end
+
+local function filter_entries(catalog, picker_state, query)
+  local entries, matched_groups = {}, {}
+  local names = picker_state.names
+  for _, entry in ipairs(catalog.entries) do
+    local display = names[entry.key]
+    if query == "" or entry.name_search:find(query, 1, true)
+      or (display and display:lower():find(query, 1, true)) then
+      matched_groups[entry.group] = true
+      entries[#entries + 1] = entry
+    end
+  end
+  return entries, matched_groups
 end
 
 -- Search spans every group without changing the remembered browsing tab.
@@ -212,10 +223,18 @@ local function filter_group(frame, query, entries, groups, group_list, chosen_gr
   return entries, chosen_group
 end
 
-local function render_materials(frame, entries)
+local function render_materials(frame, entries, total)
   local grid = frame.ssk_material_inner.ssk_slot_frame.ssk_slot_scroll.ssk_results
+  local keys = {}
+  local current = frame.tags.current or ""
+  for i, entry in ipairs(entries) do keys[i] = entry.key end
+  local sig = current .. "\n" .. total .. "\n" .. table.concat(keys, "\n")
+  local prev = grid.tags
+  if prev and prev._sig == sig and prev._rows ~= nil and (#entries == 0 or #grid.children > 0) then
+    return grid, keys, prev._rows
+  end
   grid.clear()
-  local keys, last_subgroup, occupied = {}, nil, 0
+  local last_subgroup, occupied = nil, 0
   local columns = grid.column_count
   for _, entry in ipairs(entries) do
     if last_subgroup and entry.subgroup ~= last_subgroup then
@@ -226,17 +245,31 @@ local function render_materials(frame, entries)
       end
     end
     grid.add { type = "sprite-button", style = "slot_button", sprite = entry.key,
-      toggled = entry.key == frame.tags.current, tooltip = label(entry.key),
-      elem_tooltip = { type = entry.kind, name = entry.name },
+      toggled = entry.key == current, tooltip = entry.tooltip,
+      elem_tooltip = entry.elem_tooltip,
       tags = { ssk_picker = "pick", key = entry.key } }
-    keys[#keys + 1] = entry.key
     occupied, last_subgroup = occupied + 1, entry.subgroup
   end
-  return grid, keys, math.ceil(occupied / columns)
+  local material_rows = math.ceil(occupied / columns)
+  grid.tags = { keys = keys, total = total, _sig = sig, _rows = material_rows }
+  return grid, keys, material_rows
 end
 
 local function render_groups(frame, group_list, matched_groups, query, chosen_group, tab_size)
   local tabs = frame.ssk_material_inner.ssk_group_scroll.ssk_groups
+  local names = {}
+  for i, group in ipairs(group_list) do names[i] = group.name end
+  local sig = tostring(tab_size) .. "\n" .. table.concat(names, "\n")
+  local prev = tabs.tags
+  if prev and prev._sig == sig and #tabs.children == #group_list then
+    local children = tabs.children
+    for i, group in ipairs(group_list) do
+      local tab = children[i]
+      tab.toggled = query == "" and chosen_group == group.name
+      tab.enabled = query == "" or matched_groups[group.name] == true
+    end
+    return
+  end
   tabs.clear()
   for _, group in ipairs(group_list) do
     local tab = tabs.add { type = "sprite-button", style = "filter_group_button_tab_slightly_larger", sprite = Loc.join("item-group/", group.name),
@@ -248,6 +281,7 @@ local function render_groups(frame, group_list, matched_groups, query, chosen_gr
     local after = tab_size - 64 - before
     tab.style.left_padding, tab.style.right_padding, tab.style.top_padding, tab.style.bottom_padding = before, after, before, after
   end
+  tabs.tags = { _sig = sig }
 end
 
 -- Use the game's filter-group buttons and deep slot grid, populated exclusively
@@ -258,13 +292,17 @@ local function populate(player)
   local picker_state = state(player)
   local query = frame.ssk_title.ssk_query.text:lower()
   local chosen_group = query == "" and frame.tags.group or ""
-  local entries, groups, matched_groups, total = collect_catalog(picker_state, query, frame.tags.allowed, frame.tags.target, frame.tags.current)
-  local group_list = order_catalog(entries, groups)
+  local catalog = open_catalogs[player.index]
+  if not catalog then
+    catalog = collect_catalog(frame.tags.allowed, frame.tags.target, frame.tags.current)
+    open_catalogs[player.index] = catalog
+  end
+  local entries, matched_groups = filter_entries(catalog, picker_state, query)
+  local groups, group_list, total = catalog.groups, catalog.group_list, catalog.total
   entries, chosen_group = filter_group(frame, query, entries, groups, group_list, chosen_group)
-  local grid, keys, material_rows = render_materials(frame, entries)
+  local _, _, material_rows = render_materials(frame, entries, total)
   local tab_size = fit(player, frame, #group_list, material_rows)
   render_groups(frame, group_list, matched_groups, query, chosen_group, tab_size)
-  grid.tags = { keys = keys, total = total }
   frame.ssk_count.caption = #entries == 0 and Loc("material-picker-no-matching-materials") or (Loc("material-count", #entries))
 end
 
@@ -280,6 +318,7 @@ function P.on_group(e)
 end
 
 function P.close(player)
+  open_catalogs[player.index] = nil
   local f = player.gui.screen[NAME]
   if f then f.destroy() end
   local main = player.gui.screen.ssk_main

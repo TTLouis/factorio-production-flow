@@ -104,8 +104,9 @@ function Flow.ids(surface_index, scope)
 end
 
 -- Measured: crafts the sampler attributed to the cell over the period.
-function Flow.measured_rates(record, period, exclusive, since)
-  local recipes, seconds, requested = Sampler.cell_rates(record.id, record.surface_index, period, math.max(record.since or 0, since or 0), exclusive)
+function Flow.measured_rates(record, period, exclusive, since, pre_sources, pre_period_start)
+  local recipes, seconds, requested = Sampler.cell_rates(record.id, record.surface_index, period,
+    math.max(record.since or 0, since or 0), exclusive, pre_sources, pre_period_start)
   local rates = {}
   for name, rate in pairs(recipes) do
     if storage.graph.recipes[name] then
@@ -261,15 +262,36 @@ function Flow.build(selected, opts)
   local measured_mode = opts.mode ~= "capacity"
   local graph = { nodes = {}, links = {}, overlap = false, mode = measured_mode and "measured" or "capacity" }
   local records = Flow.records()
+  local sources_cache = {}
+  local function rate_sources_for(sidx)
+    local key = sidx or 0
+    local entry = sources_cache[key]
+    if not entry then
+      local srcs, start_tick = Sampler.rate_sources(sidx, opts.period)
+      entry = { srcs = srcs, start_tick = start_tick }
+      sources_cache[key] = entry
+    end
+    return entry.srcs, entry.start_tick
+  end
   -- A subdivision comparison uses one denominator, including its parent.
   -- Sampler rounds this start to its existing history-bin boundary.
-  local parent_id = selected and #Flow.ids(opts.surface, selected) > 0 and selected or nil
+  local selected_ids, selected_stage
+  if selected then selected_ids, selected_stage = Flow.ids(opts.surface, selected) end
+  local parent_id = selected_ids and #selected_ids > 0 and selected or nil
   local comparison_scope = parent_id or (not selected and opts.scope or nil)
+  local scope_ids, scope_stage
+  if comparison_scope then
+    if parent_id then
+      scope_ids, scope_stage = selected_ids, selected_stage
+    else
+      scope_ids, scope_stage = Flow.ids(opts.surface, comparison_scope)
+    end
+  end
   local since
   if comparison_scope then
     local parent = records[comparison_scope]
     since = parent and parent.since or 0
-    for _, id in ipairs(Flow.ids(opts.surface, comparison_scope)) do
+    for _, id in ipairs(scope_ids) do
       if not parent_id or next((Cells.members(records[id]))) then
         since = math.max(since, records[id].since or 0)
       end
@@ -283,7 +305,8 @@ function Flow.build(selected, opts)
     local rates = capacity
     if measured_mode then
       local seconds, requested
-      rates, seconds, requested = Flow.measured_rates(record, opts.period, false, since)
+      local srcs, pstart = rate_sources_for(record.surface_index)
+      rates, seconds, requested = Flow.measured_rates(record, opts.period, false, since, srcs, pstart)
       graph.seconds, graph.requested = seconds, requested
       graph.utilisation = utilisation(rates, capacity)
       graph.partial = seconds + 1 < requested
@@ -315,7 +338,12 @@ function Flow.build(selected, opts)
   -- A machine in multiple cells cannot be assigned to either one from selection
   -- evidence. It stays visible in each individual cell and is omitted here.
   local seen, shared, memberships = {}, {}, {}
-  local ids, stage = Flow.ids(opts.surface, parent_id or opts.scope)
+  local ids, stage
+  if scope_ids then
+    ids, stage = scope_ids, scope_stage
+  else
+    ids, stage = Flow.ids(opts.surface, parent_id or opts.scope)
+  end
   if not since then
     since = 0
     for _, id in ipairs(ids) do since = math.max(since, records[id].since or 0) end
@@ -329,6 +357,7 @@ function Flow.build(selected, opts)
     end
   end
   local parent_rates, parent_capacity, parent_members, parent_fuels
+  local child_measured = {}
   if parent_id then
     local parent = records[parent_id]
     parent_members = Cells.members(parent)
@@ -341,11 +370,15 @@ function Flow.build(selected, opts)
     parent_capacity, parent_fuels = Capacity.rates(parent_members, assigned, parent.ports and parent.ports.inputs, not measured_mode)
     if measured_mode then
       local seconds, requested
-      parent_rates, seconds, requested = Flow.measured_rates(parent, opts.period, false, since)
+      local psrcs, pstart = rate_sources_for(parent.surface_index)
+      parent_rates, seconds, requested = Flow.measured_rates(parent, opts.period, false, since, psrcs, pstart)
       graph.seconds, graph.requested = seconds, requested
       graph.partial = seconds + 1 < requested
       for _, id in ipairs(ids) do
-        local child_rates = Flow.measured_rates(records[id], opts.period, true, since)
+        local crec = records[id]
+        local csrcs, cpstart = rate_sources_for(crec.surface_index)
+        local child_rates, csec, creq = Flow.measured_rates(crec, opts.period, true, since, csrcs, cpstart)
+        child_measured[id] = { rates = child_rates, seconds = csec, requested = creq }
         for name, rate in pairs(child_rates) do
           local remainder = parent_rates[name]
           if remainder then
@@ -370,8 +403,12 @@ function Flow.build(selected, opts)
       if measured_mode then
         if id == parent_id then
           rates, seconds, requested = parent_rates, graph.seconds, graph.requested
+        elseif child_measured[id] then
+          local cached = child_measured[id]
+          rates, seconds, requested = cached.rates, cached.seconds, cached.requested
         else
-          rates, seconds, requested = Flow.measured_rates(record, opts.period, true, since)
+          local srcs, pstart = rate_sources_for(record.surface_index)
+          rates, seconds, requested = Flow.measured_rates(record, opts.period, true, since, srcs, pstart)
         end
         graph.requested = requested
         if seconds + 1 < requested then graph.newest = math.min(graph.newest or seconds, seconds) end

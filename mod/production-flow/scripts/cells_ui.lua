@@ -86,12 +86,18 @@ end
 
 -- Ensures a map view and cell outlines exist even when jumping from the Flow sub-tab.
 function UI.jump_target(player, state)
-  local view = UI.current_view(state)
   local records = Flow.records()
-  local shown = state.selected and records[state.selected] and { state.selected } or (state.ids or {})
-  if not view then
-    view = map_view(records, state.ids or {}, state)
+  local ids
+  if state.ids then
+    ids = {}
+    for _, id in ipairs(state.ids) do
+      if records[id] then ids[#ids + 1] = id end
+    end
+  else
+    ids = Flow.ids(state.sidx, state.scope)
   end
+  local view = UI.map_view(state, records, ids)
+  local shown = state.selected and records[state.selected] and { state.selected } or ids
   if view and #shown > 0 then
     Outlines.show(player, records, shown)
   end
@@ -319,9 +325,14 @@ function UI.fill(player, container, state, width, height, full, only_auto)
   state.nav_rows = nav
   state.ids = ids
   local views = split.ssk_cell_views
-  local view = UI.map_view(state, records, ids)
-  views.ssk_cell_map_tab.enabled = view ~= nil
-  if not view and state.view == "map" then state.view = nil end
+  local view
+  if state.view == "map" then
+    view = UI.map_view(state, records, ids)
+    views.ssk_cell_map_tab.enabled = view ~= nil
+    if not view then state.view = nil end
+  else
+    views.ssk_cell_map_tab.enabled = #ids > 0
+  end
   if view and state.view == "map" then
     Outlines.show(player, records, state.selected and { state.selected } or ids)
   else

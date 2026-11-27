@@ -406,12 +406,6 @@ function BU.fill(player, c, us, scope, only_auto)
   local previous = c.ssk_bal_root
   local live_reuse = only_auto and previous and previous.tags.visible_keys
   local groups, seen, by_key, counts = {}, {}, {}, {}
-  for _, r in ipairs(rows) do
-    local id = Groups.of(player.index, r.key)
-    if not seen[id] then seen[id] = Groups.info(player.index, id); groups[#groups + 1] = seen[id] end
-    by_key[r.key] = seen[id]
-  end
-  table.sort(groups, Groups.less)
   local function info(id)
     seen[id] = seen[id] or Groups.info(player.index, id)
     return seen[id]
@@ -420,60 +414,76 @@ function BU.fill(player, c, us, scope, only_auto)
     by_key[key] = by_key[key] or info(Groups.of(player.index, key))
     return by_key[key]
   end
-  -- A saved filter survives temporary inactivity; it can still be cleared.
-  if us.bal_group and not seen[us.bal_group] then
-    groups[#groups + 1] = info(us.bal_group)
+  if not live_reuse then
+    for _, r in ipairs(rows) do
+      local id = Groups.of(player.index, r.key)
+      if not seen[id] then seen[id] = Groups.info(player.index, id); groups[#groups + 1] = seen[id] end
+      by_key[r.key] = seen[id]
+    end
     table.sort(groups, Groups.less)
-  end
-  local filtered = {}
-  for _, r in ipairs(rows) do
-    if not us.bal_group or by_key[r.key].id == us.bal_group then
-      counts[r.status] = (counts[r.status] or 0) + 1
-      if BU.matches(r, us.bal_filter) then filtered[#filtered + 1] = r end
+    -- A saved filter survives temporary inactivity; it can still be cleared.
+    if us.bal_group and not seen[us.bal_group] then
+      groups[#groups + 1] = info(us.bal_group)
+      table.sort(groups, Groups.less)
     end
   end
-  if us.bal_sort == "groups" then
-    table.sort(filtered, function(a, b)
-      local ga, gb = by_key[a.key], by_key[b.key]
-      if ga.id ~= gb.id then return Groups.less(ga, gb) end
-      local oa, ob = Balance.STATUS[a.status].order, Balance.STATUS[b.status].order
-      if oa ~= ob then return oa < ob end
-      return a.key < b.key
-    end)
-  end
-  local order = not live_reuse and us.bal_sort or nil
-  local display, normal, nfav, empty = arrange(favs, rows, filtered, by_key, info, order)
-  local matching_count = nfav + #normal
-  local limit = math.min(#normal, us.bal_limit or LIMIT)
-  for i = 1, limit do
-    local r = normal[i]
-    display[#display + 1] = { row = r, section = us.bal_sort == "groups" and Loc.join("g:", by_key[r.key].id) or "all" }
-  end
+  local filtered = {}
+  local nfav, empty, display, normal, limit, matching_count = 0, {}, nil, {}, 0, 0
   if live_reuse then
-    -- Keep click targets and open dropdowns alive. Explicit Refresh/filter actions
-    -- reapply membership and ordering; live updates only change measured values.
-    local current={}; for _,r in ipairs(rows) do current[r.key]=r end
-    display={}
-    for _,key in ipairs(previous.tags.visible_keys) do
-      display[#display+1]={row=current[key] or {key=key,prod=0,cons=0,net=0,netp=0,status="ok",inactive=true}}
+    local current = {}
+    for _, r in ipairs(rows) do
+      current[r.key] = r
+      if not us.bal_group or Groups.of(player.index, r.key) == us.bal_group then
+        counts[r.status] = (counts[r.status] or 0) + 1
+      end
+    end
+    display = {}
+    for _, key in ipairs(previous.tags.visible_keys) do
+      display[#display + 1] = { row = current[key] or { key = key, prod = 0, cons = 0, net = 0, netp = 0, status = "ok", inactive = true } }
+    end
+  else
+    for _, r in ipairs(rows) do
+      if not us.bal_group or by_key[r.key].id == us.bal_group then
+        counts[r.status] = (counts[r.status] or 0) + 1
+        if BU.matches(r, us.bal_filter) then filtered[#filtered + 1] = r end
+      end
+    end
+    if us.bal_sort == "groups" then
+      table.sort(filtered, function(a, b)
+        local ga, gb = by_key[a.key], by_key[b.key]
+        if ga.id ~= gb.id then return Groups.less(ga, gb) end
+        local oa, ob = Balance.STATUS[a.status].order, Balance.STATUS[b.status].order
+        if oa ~= ob then return oa < ob end
+        return a.key < b.key
+      end)
+    end
+    display, normal, nfav, empty = arrange(favs, rows, filtered, by_key, info, us.bal_sort)
+    matching_count = nfav + #normal
+    limit = math.min(#normal, us.bal_limit or LIMIT)
+    for i = 1, limit do
+      local r = normal[i]
+      display[#display + 1] = { row = r, section = us.bal_sort == "groups" and Loc.join("g:", by_key[r.key].id) or "all" }
     end
   end
   local shown = #display
   local list = {}
   for i, d in ipairs(display) do list[i] = d.row end
-  local signature = { tostring(us.bal_height), tostring(us.bal_width), tostring(us.bal_details), us.bal_sort or "priority", us.bal_filter or "problems", us.bal_group or "", tostring(shown), tostring(matching_count), tostring(#rows == 0) }
-  for _, g in ipairs(groups) do signature[#signature + 1] = g.id end
-  local fav_keys = {}
-  for key in pairs(favs.items) do fav_keys[#fav_keys + 1] = Loc.join("*", key) end
-  for gid in pairs(favs.groups) do fav_keys[#fav_keys + 1] = Loc.join("#", gid) end
-  table.sort(fav_keys)
-  for _, k in ipairs(fav_keys) do signature[#signature + 1] = k end
-  for _, e in ipairs(empty) do signature[#signature + 1] = Loc.join("empty:", e.group.id) end
-  for i = 1, shown do
-    local r = list[i]
-    signature[#signature + 1] = Loc.join(r.key, ":", r.status, ":", (display[i].section or ""))
+  local signature
+  if not live_reuse then
+    signature = { tostring(us.bal_height), tostring(us.bal_width), tostring(us.bal_details), us.bal_sort or "priority", us.bal_filter or "problems", us.bal_group or "", tostring(shown), tostring(matching_count), tostring(#rows == 0) }
+    for _, g in ipairs(groups) do signature[#signature + 1] = g.id end
+    local fav_keys = {}
+    for key in pairs(favs.items) do fav_keys[#fav_keys + 1] = Loc.join("*", key) end
+    for gid in pairs(favs.groups) do fav_keys[#fav_keys + 1] = Loc.join("#", gid) end
+    table.sort(fav_keys)
+    for _, k in ipairs(fav_keys) do signature[#signature + 1] = k end
+    for _, e in ipairs(empty) do signature[#signature + 1] = Loc.join("empty:", e.group.id) end
+    for i = 1, shown do
+      local r = list[i]
+      signature[#signature + 1] = Loc.join(r.key, ":", r.status, ":", (display[i].section or ""))
+    end
+    signature = Loc.join_list(signature, "|")
   end
-  signature = Loc.join_list(signature, "|")
 
   -- Reuse existing cells while the visible rows stay the same. Live sampling
   -- updates values without destroying the table, dropdowns or scroll position.

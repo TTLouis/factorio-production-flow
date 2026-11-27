@@ -186,7 +186,7 @@ end
 
 function Rail.on_state(e)
   local s, train = storage.cell_rail, e.train
-  if not s or not train.valid then return end
+  if not s or (not next(s.stops) and not next(s.visits)) or not train.valid then return end
   local id, station = train.id, train.station
   local visit = s.visits[id]
   if train.manual_mode then s.visits[id] = nil; return end
@@ -201,14 +201,16 @@ function Rail.on_state(e)
       end
       s.visits[id], visit = nil, nil
     end
-    local owner = s.stops[unit]
-    local front = train.front_stock
-    if not visit and owner and front and Rail.live_stop(owner.stop, owner.surface) == station then
-      local ends = { [front.unit_number] = front.position }
-      local back = train.back_stock
-      if back then ends[back.unit_number] = back.position end
-      s.visits[id] = { train = train, stop = unit, ends = ends,
-        tick = e.tick or game.tick, cargo = cargo(train) }
+    local owner = not visit and s.stops[unit]
+    if owner and Rail.live_stop(owner.stop, owner.surface) == station then
+      local front = train.front_stock
+      if front then
+        local ends = { [front.unit_number] = front.position }
+        local back = train.back_stock
+        if back then ends[back.unit_number] = back.position end
+        s.visits[id] = { train = train, stop = unit, ends = ends,
+          tick = e.tick or game.tick, cargo = cargo(train) }
+      end
     elseif visit then
       visit.exit, visit.exit_tick = nil, nil
     end

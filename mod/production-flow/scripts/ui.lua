@@ -326,7 +326,7 @@ function UI.refresh(player, only_auto, full, keep_balance_rows, refresh_graph)
   end
   us.sidx = surface
   update_header(player,us)
-  RateCard.refresh(player, us, full)
+  RateCard.refresh(player, us, full, not only_auto)
   if id == "cells" then
     us.cells = us.cells or {}
     us.cells.chart = us.cells.chart or {}
@@ -697,63 +697,67 @@ local function jump_to_map(player, state)
   if ok then return end
   CellOutlines.clear(player.index, "map")
   local record = state.selected and storage.production_cells.records[state.selected]
-  for _, entity in pairs(record and record.members or {}) do
-    if entity.valid then player.centered_on = entity; return end
+  local best_unit, best_entity
+  for unit, entity in pairs(record and record.members or {}) do
+    if entity.valid and (not best_unit or unit < best_unit) then best_unit, best_entity = unit, entity end
   end
+  if best_entity then player.centered_on = best_entity end
 end
 
 function UI.on_click(e)
   local el = e.element
+  local tags = el.tags
+  if el.name ~= "ssk_toggle" and (not tags or next(tags) == nil) then return false end
   local player = game.get_player(e.player_index)
-  local page = el.tags.ssk_scroll_page
+  local page = tags and tags.ssk_scroll_page
   if page then
     local chart, us, viewport = scroll_chart(player)
     if not chart then return end
-    local axis = el.tags.ssk_scroll_axis
+    local axis = tags.ssk_scroll_axis
     return pan_chart(player, chart, us, viewport.x + (axis=="x" and page*viewport.w or 0),
       viewport.y + (axis=="y" and page*viewport.h or 0))
   end
-  if el.tags and el.tags.ssk_picker == "open" and el.tags.target == "cell" then
+  if tags and tags.ssk_picker == "open" and tags.target == "cell" then
     Cells.open_display_picker(player)
     return true
-  elseif el.tags and el.tags.ssk_picker == "open" and (el.tags.target == "focus" or el.tags.target == "balance") then
+  elseif tags and tags.ssk_picker == "open" and (tags.target == "focus" or tags.target == "balance") then
     close_inspectors(player)
-    MaterialPicker.open(player, el.tags.target, el.tags.current)
+    MaterialPicker.open(player, tags.target, tags.current)
     return true
-  elseif el.tags and el.tags.ssk_picker == "group" then
+  elseif tags and tags.ssk_picker == "group" then
     MaterialPicker.on_group(e)
     return true
-  elseif el.tags and el.tags.ssk_picker == "pick" then
+  elseif tags and tags.ssk_picker == "pick" then
     return UI.on_selection(e)
-  elseif el.tags and el.tags.ssk_picker == "close" then
+  elseif tags and tags.ssk_picker == "close" then
     MaterialPicker.close(player)
     return true
-  elseif el.tags and el.tags.ssk_picker == "search" then
+  elseif tags and tags.ssk_picker == "search" then
     MaterialPicker.toggle_search(player)
     return true
   end
   if el.name == "ssk_toggle" then UI.toggle(player); return true end
-  if el.tags.ssk_cell_delete_answer then
-    finish_cell_delete(player, el.tags.ssk_cell_delete_answer == "delete")
+  if tags.ssk_cell_delete_answer then
+    finish_cell_delete(player, tags.ssk_cell_delete_answer == "delete")
     return true
-  elseif el.tags.ssk_cell_delete_request then
-    Cells.prompt_delete(player, el.tags.ssk_cell_delete_request, false, Cells.close)
+  elseif tags.ssk_cell_delete_request then
+    Cells.prompt_delete(player, tags.ssk_cell_delete_request, false, Cells.close)
     return true
   end
-  if el.tags.ssk_cell == "show" then show_cell(player, el.tags.cell_id); return true end
+  if tags.ssk_cell == "show" then show_cell(player, tags.cell_id); return true end
   if Cells.on_click(player, el) then return true end
   if MachineStatus.on_click(player, el, UI.close) then return true end
   local us = ustate(e.player_index)
   if RateCard.on_click(player, el, us) then return true end
-  if e.alt and el.tags.ssk_card_material then
-    return RateCard.toggle(player, us, el.tags.ssk_card_material)
+  if e.alt and tags.ssk_card_material then
+    return RateCard.toggle(player, us, tags.ssk_card_material)
   end
-  if us.tab_id == "cells" and CellsUI.rail_view(us.cells) and RailUI.on_click(el.tags, us.cells) then
+  if us.tab_id == "cells" and CellsUI.rail_view(us.cells) and RailUI.on_click(tags, us.cells) then
     UI.refresh(player)
     return true
   end
-  if el.tags and el.tags.ssk_ui=="transport_history" then
-    if TransportHistoryUI.open(player,us,el.tags) then UI.open(player) end
+  if tags and tags.ssk_ui=="transport_history" then
+    if TransportHistoryUI.open(player,us,tags) then UI.open(player) end
     return true
   end
   if us.tab_id=="transfers" and us.transport_history then
@@ -908,13 +912,16 @@ function UI.on_click(e)
 end
 
 function UI.on_selection(e)
-  local tags = e.element and e.element.valid and e.element.tags
-  if tags and tags.ssk_cell_list_surface then
-    Cells.on_list_surface(game.get_player(e.player_index), e.element)
-    return
+  local el = e.element
+  if not el or el.valid == false then return false end
+  local tags = el.tags
+  if not tags or next(tags) == nil then return false end
+  if tags.ssk_cell_list_surface then
+    Cells.on_list_surface(game.get_player(e.player_index), el)
+    return true
   end
-  if tags and tags.ssk_rail_role then
-    Cells.on_rail_role(game.get_player(e.player_index), e.element)
+  if tags.ssk_rail_role then
+    Cells.on_rail_role(game.get_player(e.player_index), el)
     return true
   end
   local handled, key, target = MaterialPicker.selection(e)
@@ -940,7 +947,6 @@ function UI.on_selection(e)
     end
     return true
   end
-  local tags = e.element.tags
   local us = ustate(e.player_index)
   if us.tab_id=="transfers" and us.transport_history then
     local handled=TransportHistoryUI.on_selection(e,us)
@@ -1018,7 +1024,10 @@ end
 
 function UI.on_hover(e, entering)
   local element = e.element
-  local axis = element.valid and element.tags.ssk_scroll_visual
+  if not element or element.valid == false then return false end
+  local tags = element.tags
+  if element.name ~= "ssk_rail_stop_button" and (not tags or next(tags) == nil) then return false end
+  local axis = tags and tags.ssk_scroll_visual
   if axis then
     -- Clicking the main window can cover sibling frames. Expose the grip when
     -- the pointer next reaches the visible thumb, even without a title-bar drag.
@@ -1029,7 +1038,7 @@ function UI.on_hover(e, entering)
     end
     return true
   end
-  return RailUI.on_hover(e.element, entering) or HistoryUI.on_hover(e, entering) or SK.on_hover(e, entering)
+  return RailUI.on_hover(element, entering) or HistoryUI.on_hover(e, entering) or SK.on_hover(e, entering)
 end
 
 function UI.on_checked(e)
@@ -1255,7 +1264,7 @@ function UI.on_string_translated(e)
   if TransportHistoryUI.on_translated(e,us) and us.tab_id=="transfers" then
     UI.refresh(game.get_player(e.player_index));return
   end
-  if us.se_logistics and SELogisticsUI.on_translated(e,us.se_logistics) and us.tab_id=="transfers" and us.se_logistics.view=="items" then
+  if us.se_logistics and SELogisticsUI.on_translated(e,us.se_logistics) and us.tab_id=="transfers" and (us.se_logistics.view=="items" or us.se_logistics.view=="history") then
     UI.refresh(game.get_player(e.player_index))
   end
 end

@@ -1,4 +1,5 @@
 local UI=TREQ("scripts.ui")
+local Panels=TREQ("scripts.se_transfer_panels")
 local Flows=TREQ("scripts.transport_flows")
 local Transfers=TREQ("scripts.transfers")
 local Rockets=TREQ("scripts.se_rockets")
@@ -53,7 +54,7 @@ for _,selected_provider in ipairs({"se","sa"}) do
     assert(panel().ssk_transport_history_tabs.selected_tab_index==2,"Handoff did not select History")
     assert(last_request.surface==player.surface and last_request.force==player.force
       and last_request.filters.material=="iron-plate" and last_request.filters.direction=="exports")
-    assert(#us.transport_history.history._records==1)
+    assert(#Panels.last_records(us.transport_history.history)==1)
     local axis=assert(find(panel(),function(e) return e.tags.transfer_axis end))
     assert(axis.type=="switch")
     axis.switch_state="right"
@@ -71,7 +72,7 @@ for _,selected_provider in ipairs({"se","sa"}) do
     UI.refresh(player,true)
     assert(panel().ssk_transport_history_tabs.transport_history_panel.toolbar.rows.controls==controls,"History refresh rebuilt native filter controls")
     assert(select(controls.history_direction,1) and us.transport_history.history.direction==nil)
-    assert(#us.transport_history.history._records==2,"All-direction History filter was not applied")
+    assert(#Panels.last_records(us.transport_history.history)==2,"All-direction History filter was not applied")
     assert(select(controls.history_material,2) and us.transport_history.history.material=="copper-plate")
     assert(us.fx.focus=="item/iron-plate" and us.bal_fx.focus=="item/iron-plate","History material selection changed source material")
     -- Global period changes stay local to this temporary visit when returning.

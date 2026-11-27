@@ -46,10 +46,21 @@ function C.on_surface_deleted(index)
   local s = state()
   if not s then return end
   local batch = s.batch
+  if batch and batch.discover then
+    local discover, dcursor = {}, 1
+    for i, sidx in ipairs(batch.discover) do
+      if sidx ~= index then
+        discover[#discover + 1] = sidx
+        if i < (batch.dcursor or 1) then dcursor = dcursor + 1 end
+      end
+    end
+    batch.discover, batch.dcursor = discover, dcursor
+  end
   local list, cursor, limit = {}, 1, 0
   for i, unit in ipairs(s.list) do
     local entity = s.entities[unit]
-    if entity and entity.valid and entity.surface.index == index then
+    local entity_surface = entity and entity.valid and (entity.surface_index or (entity.surface and entity.surface.index))
+    if entity_surface == index then
       s.entities[unit] = nil
     else
       list[#list + 1] = unit
@@ -63,25 +74,31 @@ function C.on_surface_deleted(index)
   end
 end
 
+local function discover_surface(surface_index, batch, player_force, check_se)
+  local surface = game.surfaces[surface_index]
+  if not surface or surface.valid == false then return end
+  batch.s[surface_index] = batch.s[surface_index] or {}
+  -- Engine-created pods do not raise the normal entity-built events. Cargo
+  -- waiting at a platform hatch has already left hub_main, but has not yet
+  -- dispatched. Discover it before fixing this scan's bounded registry.
+  for _, pod in pairs(surface.find_entities_filtered{type="cargo-pod", force=player_force}) do C.add(pod) end
+  -- SE creates surviving padless cargo containers without a built event.
+  -- Read the public entity prototype/inventory; this is physical stock,
+  -- never an inferred received-shipment manifest.
+  if check_se then
+    for _, pod in pairs(surface.find_entities_filtered{name="se-cargo-rocket-cargo-pod", force=player_force}) do C.add(pod) end
+  end
+end
+
 function C.request(tick)
   local s = state()
   if s.batch or tick < s.next_tick then return end
-  local surfaces = {}
+  local discover = {}
   for _, surface in pairs(game.surfaces) do
-    surfaces[surface.index] = {}
-    -- Engine-created pods do not raise the normal entity-built events. Cargo
-    -- waiting at a platform hatch has already left hub_main, but has not yet
-    -- dispatched. Discover it before fixing this scan's bounded registry.
-    for _,pod in pairs(surface.find_entities_filtered{type="cargo-pod",force=game.forces.player}) do C.add(pod) end
-    -- SE creates surviving padless cargo containers without a built event.
-    -- Read the public entity prototype/inventory; this is physical stock,
-    -- never an inferred received-shipment manifest.
-    if script and script.active_mods and script.active_mods["space-exploration"]
-      and prototypes.entity and prototypes.entity["se-cargo-rocket-cargo-pod"] then
-      for _,pod in pairs(surface.find_entities_filtered{name="se-cargo-rocket-cargo-pod",force=game.forces.player}) do C.add(pod) end
-    end
+    if surface.valid ~= false then discover[#discover + 1] = surface.index end
   end
-  s.batch = {start=tick, cursor=1, limit=#s.list, s=surfaces, reads=0}
+  table.sort(discover)
+  s.batch = {start=tick, discover=discover, dcursor=1, cursor=1, limit=#s.list, s={}, reads=0}
 end
 
 function C.tick(tick)
@@ -89,6 +106,23 @@ function C.tick(tick)
   C.request(tick)
   local b = s.batch
   if not b then return end
+  local player_force = game.forces.player
+  if b.discover then
+    local total = #b.discover
+    if b.dcursor <= total then
+      local check_se = script and script.active_mods and script.active_mods["space-exploration"]
+        and prototypes.entity and prototypes.entity["se-cargo-rocket-cargo-pod"] ~= nil
+      discover_surface(b.discover[b.dcursor], b, player_force, check_se)
+      b.dcursor = b.dcursor + 1
+    end
+    if b.dcursor > total then
+      b.discover, b.dcursor = nil, nil
+      b.limit = #s.list
+    end
+    -- Spread multi-surface discovery (1 surface/tick) to avoid megabase stalls;
+    -- single-surface maps still read their first batch in the same tick.
+    if b.discover or total > 1 then return end
+  end
   for _=1,C.PER_TICK do
     if b.cursor > b.limit then break end
     local u = s.list[b.cursor]
@@ -102,7 +136,7 @@ function C.tick(tick)
       s.list[n] = nil
       b.limit = b.limit-1
     else
-      if e.force == game.forces.player then
+      if e.force == player_force then
         local eligible=true
         if e.type=="cargo-pod" then
           local origin=e.cargo_pod_origin
@@ -112,7 +146,7 @@ function C.tick(tick)
         local id=eligible and defines.inventory[INVENTORY[e.type]]
         local inv = id and e.get_inventory(id)
         if inv and inv.valid then
-          local index = e.surface.index
+          local index = e.surface_index or (e.surface and e.surface.index)
           local totals = b.s[index] or {}; b.s[index] = totals
           for _, item in pairs(inv.get_contents()) do
             local key = "item/"..item.name

@@ -164,7 +164,7 @@ assert(click(route))
 assert(us.se_logistics.view=="history" and us.se_logistics.material=="iron-plate")
 assert(us.se_logistics.history.return_view=="flow" and us.se_logistics.history.route)
 local hs=us.se_logistics.history
-assert(#hs._records==1 and hs._records[1].sent[1].count==1000 and hs._records[1].received==nil,"History fabricated or conflated a receipt")
+assert(#Panels.last_records(hs)==1 and Panels.last_records(hs)[1].sent[1].count==1000 and Panels.last_records(hs)[1].received==nil,"History fabricated or conflated a receipt")
 local saved_route,saved_material,saved_method=hs.route,hs.material,hs.method
 us.period=3600;UI.refresh(player)
 assert(hs.route==saved_route and hs.material==saved_material and hs.method==saved_method,"Period change discarded route/material/method")
@@ -182,7 +182,7 @@ assert(axis.type=="switch" and axis.switch_state=="left" and not axis.allow_none
 UI.refresh(player,true)
 assert(axis_switch()==axis and axis.valid,"Live refresh rebuilt the History axis switch")
 axis.switch_state="right";assert(UI.on_switch{element=axis,player_index=1})
-assert(hs.axis=="events" and hs.material==nil and #hs._exchanges>0,"Route History must retain every manifest item")
+assert(hs.axis=="events" and hs.material==nil and #Panels.last_exchanges(hs)>0,"Route History must retain every manifest item")
 assert(axis_switch()==axis and axis.switch_state=="right")
 local exchange_hit=assert(tagged(panel().se_tabs.se_history,"panel-exchange"))
 assert(click(exchange_hit) and hs.exchange,"Exchange click did not select its records")
@@ -203,7 +203,7 @@ local selected_bucket=bucket.tags.bucket
 assert(click(bucket) and hs.bucket==selected_bucket)
 assert(click(tagged(panel().se_tabs.se_history,"panel-bucket-clear")) and hs.bucket==nil)
 assert(click(tagged(panel().se_tabs.se_history,"panel-expand")))
-assert(us.se_logistics.history.expanded==hs._records[1].key,"History expansion lost shipment identity")
+assert(us.se_logistics.history.expanded==Panels.last_records(hs)[1].key,"History expansion lost shipment identity")
 local manifests=history_scroll.se_shipment_1.manifest_detail.manifests
 -- No subtitles or departure/outcome lines: the detail is one item/lost/received table.
 local detail_frame=history_scroll.se_shipment_1.manifest_detail
@@ -224,7 +224,7 @@ assert(LOC(log_headers[6].caption)=="Sender" and LOC(log_headers[7].caption)=="R
 assert(log_headers[6].style.width==sender.parent.style.width and log_headers[7].style.width==receiver.parent.style.width,
   "Endpoint header and action widths must match")
 -- An existing button must revalidate its saved endpoint when clicked.
-local record=hs._records[1];local old_surface=player.surface
+local record=Panels.last_records(hs)[1];local old_surface=player.surface
 record.sender.entity.valid=false
 assert(click(sender) and UI.is_open(player) and player.surface==old_surface,"Stale jump closed or moved the player")
 record.sender.entity.valid=true
@@ -346,7 +346,7 @@ local measured_bars,estimated_bars,outlines=#shapes(stock_chart,"measured"),#sha
 assert(measured_bars==3 and estimated_bars==2 and outlines==20,"Stock measured/estimated bars need distinct fills and four outlines each")
 assert(click(tagged(legacy_items,"history",function(t) return t.direction=="exports" end)))
 assert(us.se_logistics.view=="history" and us.se_logistics.history.return_view=="items" and us.se_logistics.history.material=="iron-plate")
-assert(#us.se_logistics.history._records==1 and us.se_logistics.history._records[1].sent[1].count==1000)
+assert(#Panels.last_records(us.se_logistics.history)==1 and Panels.last_records(us.se_logistics.history)[1].sent[1].count==1000)
 assert(click(tagged(panel().se_tabs.se_history,"panel-return")))
 assert(us.se_logistics.view=="items" and us.se_logistics.material=="iron-plate")
 us.se_logistics.quality="normal";refresh_legacy()
@@ -357,15 +357,15 @@ legacy_items.destroy()
 -- The Cannon method shows witnessed effects with unknown manifests, no route.
 us.se_logistics.material=nil;us.se_logistics.quality=nil;us.se_logistics.method=nil;us.se_logistics.history={method="cannon"}
 tab(3,"history")
-assert(#us.se_logistics.history._records==3,"Ordinary History must show all transport methods and materials")
+assert(#Panels.last_records(us.se_logistics.history)==3,"Ordinary History must show all transport methods and materials")
 us.se_logistics.history.route,us.se_logistics.history.direction="stale-route","exports"
 UI.refresh(player,true)
-assert(#us.se_logistics.history._records==3,"Ordinary History must ignore saved route and direction without a drilldown")
+assert(#Panels.last_records(us.se_logistics.history)==3,"Ordinary History must ignore saved route and direction without a drilldown")
 assert(not panel().se_tabs.se_history.toolbar)
 tab(1,"flow")
-assert(click(tagged(panel().se_tabs.se_flow.viewport.body,"history",function(t)return t.unpaired end)))
-assert(#us.se_logistics.history._records==1)
-record=us.se_logistics.history._records[1]
+assert(click(tagged(panel().se_tabs.se_history.parent.se_flow.viewport.body,"history",function(t)return t.unpaired end)))
+assert(#Panels.last_records(us.se_logistics.history)==1)
+record=Panels.last_records(us.se_logistics.history)[1]
 assert(record.method=="cannon" and record.sent==nil and record.received==nil and record.receiver==nil)
 receiver=assert(tagged(panel().se_tabs.se_history,"panel-jump",function(t) return t.side=="receiver" end))
 assert(not receiver.enabled,"Unknown cannon destination exposed an enabled receiver jump")
@@ -621,7 +621,7 @@ assert(#positives==1 and #negatives==1)
 local positive,negative=positives[1],negatives[1]
 assert(positive.parent.style.top_margin+positive.style.height<negative.parent.style.top_margin,
   "Known receipt/export bars lost common signed baseline")
-assert(renderer_state.history._records[1].received[1].count==700 and renderer_state.history._records[2].sent[1].count==1000)
+assert(Panels.last_records(renderer_state.history)[1].received[1].count==700 and Panels.last_records(renderer_state.history)[2].sent[1].count==1000)
 local shipment_log=truth_fixture.se_history_layout.se_history_log
 assert(LOC(shipment_log.se_shipment_1.children[1].children[2].tooltip)==LOC({"production-flow.se-ui-arrival-time"})
   and LOC(shipment_log.se_shipment_2.children[1].children[2].tooltip)==LOC({"production-flow.se-ui-departure-time"}),
@@ -685,7 +685,7 @@ local catcher_log=truth_fixture.se_history_layout.se_history_log
 local warned=0
 for i=1,3 do
   local main=catcher_log["se_shipment_"..i].children[1]
-  local record=catcher_state.history._records[i]
+  local record=Panels.last_records(catcher_state.history)[i]
   local warning=main.no_catcher
   if record.received==nil then
     warned=warned+1
@@ -701,12 +701,12 @@ history_data.records[1].exchange_id=42;history_data.records[1].from={id=1};histo
 history_data.records[2].exchange_id=42;history_data.records[2].from={id=2};history_data.records[2].to={id=1}
 renderer_state.history.axis="events"
 Panels.history(truth_fixture,player,origin,10,renderer_state,900,500,history_data)
-assert(#renderer_state.history._exchanges==1 and renderer_state.history._exchanges[1].received==700
-  and renderer_state.history._exchanges[1].sent==1000,"Exchange netted or split opposite directions")
+assert(#Panels.last_exchanges(renderer_state.history)==1 and Panels.last_exchanges(renderer_state.history)[1].received==700
+  and Panels.last_exchanges(renderer_state.history)[1].sent==1000,"Exchange netted or split opposite directions")
 local chosen=assert(tagged(truth_fixture,"panel-exchange"))
 assert(Panels.on_click({element=chosen},renderer_state))
 Panels.history(truth_fixture,player,origin,10,renderer_state,900,500,history_data)
-assert(renderer_state.history.exchange and #renderer_state.history._records==2,"Exchange filtering discarded a direction")
+assert(renderer_state.history.exchange and #Panels.last_records(renderer_state.history)==2,"Exchange filtering discarded a direction")
 renderer_state.history.exchange=nil
 renderer_state.history.axis="time"
 local measured_records=history_data.records
@@ -716,7 +716,7 @@ local inbound=assert(tagged(truth_fixture,"panel-bucket"))
 assert(LOC(inbound.tooltip):find("Dispatched here: 750 items",1,true),"Time mode lost the inbound dispatch quantity")
 renderer_state.history.axis="events"
 Panels.history(truth_fixture,player,origin,10,renderer_state,900,500,history_data)
-local inbound_group=renderer_state.history._exchanges[1]
+local inbound_group=Panels.last_exchanges(renderer_state.history)[1]
 assert(inbound_group.inbound_dispatch==750 and not inbound_group.received_known and not inbound_group.unmeasured)
 assert(LOC(tagged(truth_fixture,"panel-exchange").tooltip):find("receipt unknown",1,true))
 assert(#shapes(truth_plot,"inbound_dispatch")==1 and #shapes(truth_plot,"incoming")==0,
@@ -749,7 +749,7 @@ for i=1,120 do history_data.records[i]={key="dense-exchange:"..i,direction="expo
   tick=game.tick-600+i*4,sent=item(1)} end
 renderer_state.history={material="iron-plate",axis="events"}
 Panels.history(truth_fixture,player,origin,10,renderer_state,900,500,history_data)
-assert(#renderer_state.history._exchanges==120 and renderer_state.history._event_pages==4,"Compact pages dropped old exchanges")
+assert(#Panels.last_exchanges(renderer_state.history)==120 and renderer_state.history._event_pages==4,"Compact pages dropped old exchanges")
 local latest_hits=truth_fixture.se_history_layout.se_history_plot.se_history_chart.se_panel_targets.children
 assert(#latest_hits==18 and latest_hits[#latest_hits].style.left_margin+latest_hits[#latest_hits].style.width==883,
   "Short latest page must end at the right of the plot")

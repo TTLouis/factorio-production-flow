@@ -14,6 +14,17 @@ local GuiPlot=require("scripts.gui_plot")
 local Colors=require("shared.plot_colors")
 local P={}
 local PAGE=20
+local last_view=setmetatable({},{__mode="k"})
+
+function P.last_records(hs)
+  local view=hs and last_view[hs]
+  return view and view.records or (hs and hs._records) or {}
+end
+
+function P.last_exchanges(hs)
+  local view=hs and last_view[hs]
+  return view and view.exchanges or (hs and hs._exchanges) or {}
+end
 local IN={r=.40,g=.67,b=.90,a=1}
 local OUT={r=.92,g=.58,b=.30,a=1}
 local INBOUND_BARS={
@@ -392,11 +403,12 @@ function P.history(parent,player,surface,period,state,width,height,data,context)
   local selected={}
   for _,record in ipairs(records(data)) do selected[#selected+1]=record end
   table.sort(selected,function(a,b) if record_time(a)~=record_time(b) then return record_time(a)>record_time(b) end;return tostring(a.key)<tostring(b.key) end)
-  hs._records=selected
   local event_groups=hs.axis=="events" and Exchanges.build(selected,first,last,hs.material,hs.quality) or {}
   local event_page,event_pages,event_start,event_finish=Exchanges.page(event_groups,width-84,hs.event_page)
   hs._event_pages=event_pages
   if hs.event_page then hs.event_page=event_page end
+  hs._records,hs._exchanges=nil,nil
+  last_view[hs]={records=selected,exchanges=event_groups}
   local title=context or layout.se_history_title
   title.style.width,title.style.height=width,context and 28 or HistoryLayout.STRIP_HEIGHT
   if not title.axis then
@@ -452,7 +464,6 @@ function P.history(parent,player,surface,period,state,width,height,data,context)
   local maximum=0
   for _,bin in pairs(bins) do maximum=math.max(maximum,shipment_maximum(bin)) end
   local exchanges=event_groups
-  hs._exchanges=exchanges
   local chosen
   for _,group in ipairs(exchanges) do
     maximum=math.max(maximum,shipment_maximum(group))
@@ -553,10 +564,12 @@ function P.history(parent,player,surface,period,state,width,height,data,context)
   scroll.style.width,scroll.style.height=width,HistoryLayout.log_height(height,chart_height,note_height,context)
   scroll.se_history_empty.visible=#filtered==0
   local visible_rows=0
+  local page_records={}
   for n=(hs.page-1)*PAGE+1,math.min(hs.page*PAGE,#filtered) do
     visible_rows=visible_rows+1
     local entry=filtered[n];local record,index=entry.record,entry.index
     local key=record_key(record,index)
+    page_records[index]={key=key,sender=record.sender,receiver=record.receiver}
     local wrapper=scroll["se_shipment_"..visible_rows]
     if not wrapper then wrapper=scroll.add{type="flow",name="se_shipment_"..visible_rows,direction="vertical"} end
     wrapper.visible=true;wrapper.clear()
@@ -587,6 +600,7 @@ function P.history(parent,player,surface,period,state,width,height,data,context)
       Manifest.receipt(manifests,"received",record.sent,record.received,row_width-16,number,nil,unknown_tip)
     end
   end
+  hs._page_records=page_records
   for i=visible_rows+1,PAGE do
     local wrapper=scroll["se_shipment_"..i]
     if wrapper then wrapper.visible=false end
@@ -609,11 +623,13 @@ function P.on_click(e,state,close_all)
   elseif a=="panel-return" then
     if hs.return_view=="flow" or hs.return_view=="items" then state.view=hs.return_view end
   elseif a=="panel-expand" then
-    local record=(hs._records or {})[tags.index]
-    if record and record_key(record,tags.index)==tags.key then local key=record_key(record,tags.index);hs.expanded=hs.expanded~=key and key or nil end
+    local record=(hs._page_records and hs._page_records[tags.index]) or (hs._records and hs._records[tags.index])
+    local key=record and (record.key or record_key(record,tags.index))
+    if key and key==tags.key then hs.expanded=hs.expanded~=key and key or nil end
   elseif a=="panel-jump" then
-    local record=(hs._records or {})[tags.index]
-    if record and record_key(record,tags.index)==tags.key and (tags.side=="sender" or tags.side=="receiver") then
+    local record=(hs._page_records and hs._page_records[tags.index]) or (hs._records and hs._records[tags.index])
+    local key=record and (record.key or record_key(record,tags.index))
+    if key and key==tags.key and (tags.side=="sender" or tags.side=="receiver") then
       Endpoints.jump(game.get_player(e.player_index),record[tags.side],close_all)
     end
   else return false end

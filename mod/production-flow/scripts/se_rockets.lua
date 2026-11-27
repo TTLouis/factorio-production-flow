@@ -92,14 +92,21 @@ local function cargo_inventory(s,items)
   local ok,all=pcall(function() return game.get_script_inventories(MOD) end)
   local list=ok and type(all)=="table" and all[MOD]
   if type(list)~="table" then return nil end
+  local claimed={}
+  for _,r in pairs(s.tracking) do
+    if r.cargo_inventory then claimed[r.cargo_inventory]=true end
+  end
+  local expected_total=0
+  for _,v in ipairs(items) do expected_total=expected_total+v.count end
   local found
   for _,inventory in pairs(list) do
-    if inventory.valid then
-      local claimed=false
-      for _,r in pairs(s.tracking) do if r.cargo_inventory==inventory then claimed=true;break end end
-      if not claimed and same(contents(inventory),items) then
-        if found then return nil end
-        found=inventory
+    if inventory.valid and not claimed[inventory] then
+      local count_fn=inventory.get_item_count
+      if not count_fn or count_fn()==expected_total then
+        if same(contents(inventory),items) then
+          if found then return nil end
+          found=inventory
+        end
       end
     end
   end
@@ -193,11 +200,10 @@ function R.on_tick(tick)
   local s=storage.se_rockets
   local tracking=s and s.tracking
   if not (tracking and next(tracking)) then return end
-  local refresh=tick%CARGO_REFRESH==0
   for id,r in pairs(tracking) do
     local inventory=r.cargo_inventory
     if inventory and inventory.valid then
-      if refresh then
+      if (tick+id)%CARGO_REFRESH==0 then
         local cargo=contents(inventory)
         if cargo then r.cargo=cargo;r.cargo_tick=tick end
       end
@@ -213,10 +219,11 @@ function R.on_padless(e)
   local pad=e.launchpad
   if not (s and pad and pad.valid and pad.force.valid) then return end
   local candidate
-  for i=0,s.count-1 do
+  for i=s.count-1,0,-1 do
     local r=s.history[(s.first-1+i)%LIMIT+1]
+    if e.tick-r.departure_tick>36000 then break end
     if r.launch_pad==e.unit_number and r.force==pad.force and r.to.zone==e.destination_zone_index
-      and r.status=="unconfirmed" and e.tick>=r.departure_tick and e.tick-r.departure_tick<=36000 then
+      and r.status=="unconfirmed" and e.tick>=r.departure_tick then
       if candidate then return end -- The callback has no shipment ID; do not guess.
       candidate=r
     end
@@ -240,7 +247,7 @@ end
 
 -- Routes group remote surfaces, with individual pad/shipment details retained.
 -- Received stays nil unless a pad landing was measured: zero would assert a receipt.
-function R.query(force,surface,tick,seconds,material)
+function R.query(force,surface,tick,seconds,material,options)
   local s=storage.se_rockets
   local result={imports={},exports={},materials={},records={},seconds=0,shipments=0}
   if not (s and surface and surface.valid) then return result end
@@ -248,6 +255,23 @@ function R.query(force,surface,tick,seconds,material)
   result.seconds=math.max(0,(tick-since)/60)
   local dropped=s.dropped[force.index]
   result.truncated=dropped and dropped.force==force and dropped.tick>=since or false
+  local raw_only=options and options.raw_only
+  if raw_only then
+    for i=s.count-1,0,-1 do
+      local r=s.history[(s.first-1+i)%LIMIT+1]
+      if r.departure_tick<since then break end
+      if r.force==force and r.force.valid and r.departure_tick<=tick then
+        local from=r.from.surface==surface
+        local to=r.to.surface==surface
+        if from~=to then
+          result.shipments=result.shipments+1
+          result.records[#result.records+1]=r
+        end
+      end
+    end
+    table.sort(result.records,function(a,b) return a.id>b.id end)
+    return result
+  end
   local groups={imports={},exports={}}
   local material_set={}
   each(s,function(r)

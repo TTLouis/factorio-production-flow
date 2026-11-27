@@ -246,12 +246,14 @@ function D.query(force,surface,tick,seconds,filters)
   result.seconds=(tick-result.from_tick)/60
   -- Request the retained provider horizon before applying boundary timing.
   -- A received shipment may have departed before the chosen arrival window.
-  local rockets=Rockets.query(force,surface,tick,RETENTION)
+  local rockets=Rockets.query(force,surface,tick,RETENTION,nil,{raw_only=true})
   local cannons=Cannons.query(force,surface,tick,RETENTION)
   result.coverage.rocket=math.min(result.seconds,rockets.seconds or 0)
   result.coverage.cannon=math.min(result.seconds,cannons.seconds or 0)
-  result.truncated=(filters.method~="cannon" and rockets.truncated)
-    or (filters.method~="rocket" and cannons.truncated) or false
+  result.rockets_truncated=rockets.truncated or false
+  result.cannons_truncated=cannons.truncated or false
+  result.truncated=(filters.method~="cannon" and result.rockets_truncated)
+    or (filters.method~="rocket" and result.cannons_truncated) or false
   local raw={}
   for _,record in ipairs(rockets.records or {}) do
     if record.force==force and record.force.valid then
@@ -270,22 +272,55 @@ function D.query(force,surface,tick,seconds,filters)
   local window=copy_table(filters)
   window.from_tick,window.to_tick=result.from_tick,result.to_tick
   result.records=D.filter(raw,window)
-  result.groups=grouped(result.records)
+  result.groups=filters._skip_groups and {imports={},exports={}} or grouped(result.records)
   for _,record in ipairs(result.records) do
     if record.direction=="unpaired" then result.unpaired[#result.unpaired+1]=record end
   end
-  -- Keep choice IDs independent of the active item/method/direction filter.
-  local all=D.filter(raw,{from_tick=result.from_tick,to_tick=result.to_tick,timing=filters.timing})
-  local materials,qualities={},{}
-  for _,record in ipairs(all) do
-    for _,manifest in pairs({sent=record.sent,received=record.received}) do
-      for _,item in ipairs(manifest) do materials[item.name]=true;qualities[item.quality]=true end
+  if not filters._skip_choices then
+    -- Keep choice IDs independent of the active item/method/direction filter.
+    local all=D.filter(raw,{from_tick=result.from_tick,to_tick=result.to_tick,timing=filters.timing})
+    local materials,qualities={},{}
+    for _,record in ipairs(all) do
+      for _,manifest in pairs({sent=record.sent,received=record.received}) do
+        for _,item in ipairs(manifest) do materials[item.name]=true;qualities[item.quality]=true end
+      end
     end
+    for value in pairs(materials) do result.materials[#result.materials+1]=value end
+    for value in pairs(qualities) do result.qualities[#result.qualities+1]=value end
+    table.sort(result.materials);table.sort(result.qualities)
   end
-  for value in pairs(materials) do result.materials[#result.materials+1]=value end
-  for value in pairs(qualities) do result.qualities[#result.qualities+1]=value end
-  table.sort(result.materials);table.sort(result.qualities)
   return result
+end
+
+function D.narrow(base,filters)
+  filters=filters or {}
+  if base.records==nil and base.groups then return base end
+  local window=copy_table(filters)
+  window.from_tick,window.to_tick=base.from_tick,base.to_tick
+  local records=D.filter(base.records,window)
+  local unpaired={}
+  for _,record in ipairs(records) do
+    if record.direction=="unpaired" then unpaired[#unpaired+1]=record end
+  end
+  local truncated=base.truncated
+  if base.rockets_truncated~=nil or base.cannons_truncated~=nil then
+    truncated=(filters.method~="cannon" and base.rockets_truncated==true)
+      or (filters.method~="rocket" and base.cannons_truncated==true)
+  end
+  return {
+    records=records,
+    groups=filters._skip_groups and {imports={},exports={}} or grouped(records),
+    materials=base.materials,
+    qualities=base.qualities,
+    unpaired=unpaired,
+    from_tick=base.from_tick,
+    to_tick=base.to_tick,
+    seconds=base.seconds,
+    rockets_truncated=base.rockets_truncated,
+    cannons_truncated=base.cannons_truncated,
+    truncated=truncated,
+    coverage=base.coverage,
+  }
 end
 
 return D

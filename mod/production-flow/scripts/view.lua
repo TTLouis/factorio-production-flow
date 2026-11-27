@@ -14,6 +14,7 @@ local Budget = require("scripts.chart_budget")
 --          player order keys override (D10–D12); linear fit scale × zoom (D14).
 
 local Model = require("scripts.model")
+local Sampler = require("scripts.sampler")
 local Gr = require("scripts.groups")
 local Graph = require("scripts.graph")
 local Default = require("shared.groups_default")
@@ -536,21 +537,24 @@ local function tiers(nodes, links, mode)
     end
   end
   for c, ids in pairs(inner) do
-    local rem, outw, inw = {}, {}, {}
-    for _, v in ipairs(members[c]) do rem[v] = true; outw[v] = 0; inw[v] = 0 end
+    local rem, outw, inw, out_edges, in_edges = {}, {}, {}, {}, {}
+    for _, v in ipairs(members[c]) do rem[v] = true; outw[v] = 0; inw[v] = 0; out_edges[v] = {}; in_edges[v] = {} end
     for _, id in ipairs(ids) do
       local l = links[id]
       outw[l.from] = outw[l.from] + l.rate
       inw[l.to] = inw[l.to] + l.rate
+      out_edges[l.from][#out_edges[l.from] + 1] = l
+      in_edges[l.to][#in_edges[l.to] + 1] = l
     end
-    local s1, s2, left = {}, {}, #members[c]
+    local s1, s2_rev, left = {}, {}, #members[c]
     local function drop(v)
       rem[v] = nil
       left = left - 1
-      for _, id in ipairs(ids) do
-        local l = links[id]
-        if l.from == v and rem[l.to] then inw[l.to] = inw[l.to] - l.rate end
-        if l.to == v and rem[l.from] then outw[l.from] = outw[l.from] - l.rate end
+      for _, l in ipairs(out_edges[v]) do
+        if rem[l.to] then inw[l.to] = inw[l.to] - l.rate end
+      end
+      for _, l in ipairs(in_edges[v]) do
+        if rem[l.from] then outw[l.from] = outw[l.from] - l.rate end
       end
     end
     while left > 0 do
@@ -558,7 +562,7 @@ local function tiers(nodes, links, mode)
       while changed do
         changed = false
         for _, v in ipairs(members[c]) do
-          if rem[v] and outw[v] <= 1e-9 then table.insert(s2, 1, v); drop(v); changed = true
+          if rem[v] and outw[v] <= 1e-9 then s2_rev[#s2_rev + 1] = v; drop(v); changed = true
           elseif rem[v] and inw[v] <= 1e-9 then s1[#s1 + 1] = v; drop(v); changed = true end
         end
       end
@@ -576,7 +580,8 @@ local function tiers(nodes, links, mode)
     end
     local pos = {}
     for i, v in ipairs(s1) do pos[v] = i end
-    for i, v in ipairs(s2) do pos[v] = #s1 + i end
+    local s2_len = #s2_rev
+    for i = 1, s2_len do pos[s2_rev[s2_len + 1 - i]] = #s1 + i end
     for _, id in ipairs(ids) do
       local l = links[id]
       if pos[l.from] >= pos[l.to] then
@@ -807,7 +812,7 @@ function V.build(player, us, W, viewH, source, automatic)
   else
     m = Model.build(sidx, us.period)
     nodes, links, reversing, recipes = build_graph(pi, m, us)
-    add_transport(nodes, links, Transport.query(player.force, game.surfaces[sidx], game.tick, us.period))
+    add_transport(nodes, links, Transport.query(player.force, game.surfaces[sidx], game.tick, us.period, { skip_events = true }))
   end
   local ff = player.mod_settings["ssk-fluid-scale"].value
   local focused
@@ -1113,13 +1118,47 @@ function V.build(player, us, W, viewH, source, automatic)
     for _, k in ipairs(sorted_keys(us[field] or {})) do signature[#signature + 1] = field .. k .. "=" .. us[field][k] end
   end
   signature = table.concat(signature, "|")
-  if budget and not budget.oversized then
+  if not (budget and budget.oversized) then
     local minimum_evidence = m.seconds >= 2
+    local stock_known, stock_snap, status_snap
+    if not source then
+      stock_known = Sampler.stock_known(sidx)
+      local all_stock = Sampler.stock(sidx)
+      stock_snap = {}
+      for _, n in pairs(L.nodes) do
+        local base = n.group_key or n.base or (n.transport and n.transport.material) or n.key
+        if base and not stock_snap[base] and all_stock[base] then
+          local st = all_stock[base]
+          stock_snap[base] = { st.count, st.per_min }
+        end
+      end
+      local obs = Sampler.machine_status(sidx, player.force_index)
+      if obs then
+        status_snap = {}
+        local function add_obs(rname)
+          local row = obs[rname]
+          if row and not status_snap[rname] then
+            local entry = {}
+            for rk, rv in pairs(row) do
+              if rk ~= "units" then entry[rk] = rv end
+            end
+            status_snap[rname] = entry
+          end
+        end
+        for k in pairs(L.nodes) do
+          if k:sub(1, 7) == "recipe/" then add_obs(k:sub(8)) end
+        end
+        if L.details and L.details.rates then
+          for rname in pairs(L.details.rates) do add_obs(rname) end
+        end
+      end
+    end
     L.render_fingerprint = Budget.fingerprint(signature, L, {
       minimum_evidence, source and source.empty, L.column_labels, L.all_tiers, L.details and L.details.rates,
       L.details and RecipeDetails.machine_counts(L.details), us.sel, us.pinned, us.show_labels,
       us.chart_zoom, us.chart_fit, us.renderer, us.color_mode, player.display_scale, us.detailed_ribbons,
       player.mod_settings["ssk-return-direction-markers"] and player.mod_settings["ssk-return-direction-markers"].value,
+      stock_known, stock_snap, status_snap,
     })
     if automatic and us.render_fingerprint == L.render_fingerprint then return nil, m, L end
   end
@@ -1132,7 +1171,7 @@ function V.build(player, us, W, viewH, source, automatic)
     L.return_y = L.content_h
     L.content_h = L.content_h + return_room
   end
-  local snap = { signature = signature, scale = L.scale, content_h = L.content_h, tops = {}, col_x = L.col_x, lanes = {}, subs = {} }
+  local snap = { signature = signature, scale = L.scale, fit = L.fit, content_h = L.content_h, tops = {}, col_x = L.col_x, lanes = {}, subs = {} }
   for k, y in pairs(us.auto_rank or {}) do snap.tops[k] = y end
   for i, lane in ipairs(L.lane_list) do
     snap.lanes[lane.id] = i
@@ -1546,13 +1585,15 @@ function V.assign_colors(L, us)
     end
   end
   for _, p in ipairs(L.extra_pairs or {}) do add(p[1], p[2]) end
-  local order = {}
-  for _, n in pairs(L.nodes) do order[#order + 1] = n end
+  local order, deg = {}, {}
+  for _, n in pairs(L.nodes) do
+    local d = 0
+    for _ in pairs(nbr[n] or {}) do d = d + 1 end
+    deg[n] = d
+    order[#order + 1] = n
+  end
   table.sort(order, function(a, b)
-    local da, db = 0, 0
-    for _ in pairs(nbr[a] or {}) do da = da + 1 end
-    for _ in pairs(nbr[b] or {}) do db = db + 1 end
-    if da ~= db then return da > db end
+    if deg[a] ~= deg[b] then return deg[a] > deg[b] end
     return a.key < b.key
   end)
   local function hash(s)
@@ -1897,18 +1938,26 @@ function V.layout_focus(L, us, W, viewH, wide)
     end
     return highest
   end
-  local weight=0
-  for _,n in pairs(L.nodes) do weight=math.max(weight,n.wvalue) end
-  local lo,hi=0,weight>0 and 140/weight or 1
   local viewport_room=math.max(100,viewH-V.PAD_TOP-V.PAD_BOTTOM-24) -- scrollbars and pane padding
-  local target=math.max(viewport_room,packed(0))
-  for _=1,32 do
-    local mid=(lo+hi)/2
-    if packed(mid)<=target+0.01 then lo=mid else hi=mid end
+  local snap = us.keep_layout and us.layout_snapshot
+  local s
+  if snap and snap.scale then
+    s = snap.fit or snap.scale
+    L.fit = s
+    L.scale = snap.scale
+  else
+    local weight=0
+    for _,n in pairs(L.nodes) do weight=math.max(weight,n.wvalue) end
+    local lo,hi=0,weight>0 and 140/weight or 1
+    local target=math.max(viewport_room,packed(0))
+    for _=1,32 do
+      local mid=(lo+hi)/2
+      if packed(mid)<=target+0.01 then lo=mid else hi=mid end
+    end
+    s=lo
+    L.fit = s
+    L.scale = s * (not wide and us.zoom or 1)
   end
-  local s=lo
-  L.fit = s
-  L.scale = us.keep_layout and us.layout_snapshot.scale or s * (not wide and us.zoom or 1)
   for _, l in ipairs(L.links) do l.t = math.max(L.min_t, l.w * L.scale) end
   for _, sg in ipairs(segs) do sg.t = sg.link.t end
   for ci = 1, ncol do
@@ -2044,6 +2093,26 @@ function V.layout_focus(L, us, W, viewH, wide)
       end
     end
   end
+  local snap_tops = us.keep_layout and us.layout_snapshot and us.layout_snapshot.tops
+  local use_snap_tops = type(snap_tops) == "table"
+  if use_snap_tops then
+    for ci = 1, ncol do
+      for _, n in ipairs(cols[ci]) do
+        if snap_tops[n.key] == nil then use_snap_tops = false; break end
+      end
+      if not use_snap_tops then break end
+    end
+  end
+  if use_snap_tops then
+    for ci = 1, ncol do
+      local list = cols[ci]
+      for _, n in ipairs(list) do n.top = snap_tops[n.key] end
+      for i = 2, #list do
+        local lim = list[i - 1].top + list[i - 1].slot + V.F_GAP
+        if list[i].top < lim then list[i].top = lim end
+      end
+    end
+  else
   for ci = 1, ncol do for p_, n in ipairs(cols[ci]) do n.pos = p_ end end
   -- type-1 conflicts: a non-inner segment crossing an inner (via→via) segment loses
   local marked = {}
@@ -2164,6 +2233,7 @@ function V.layout_focus(L, us, W, viewH, wide)
       local lim = list[i - 1].top + list[i - 1].slot + V.F_GAP
       if list[i].top < lim then list[i].top = lim end
     end
+  end
   end
   -- The balanced alignment can leave large empty stretches between branches.
   -- Project it into the measured packed height, retaining order and all reserved
@@ -2359,14 +2429,16 @@ function V.layout_focus(L, us, W, viewH, wide)
     L.label_w[ci] = header_w - 8
   end
   L.lane_list = {}
-  -- ribbons that cross inside a gap get different colours
+  -- ribbons that cross inside a gap get different colours (contrast mode only)
   L.extra_pairs = {}
-  for _, list in pairs(gap_segs) do
-    for i = 1, #list do
-      for j = i + 1, #list do
-        local a, b = list[i], list[j]
-        if (a.y1 - b.y1) * (a.y2 - b.y2) < 0 then
-          L.extra_pairs[#L.extra_pairs + 1] = { a.link.a, b.link.a }
+  if us.color_mode == "contrast" then
+    for _, list in pairs(gap_segs) do
+      for i = 1, #list do
+        for j = i + 1, #list do
+          local a, b = list[i], list[j]
+          if (a.y1 - b.y1) * (a.y2 - b.y2) < 0 then
+            L.extra_pairs[#L.extra_pairs + 1] = { a.link.a, b.link.a }
+          end
         end
       end
     end

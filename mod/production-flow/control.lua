@@ -12,6 +12,7 @@ local SECannons = require("scripts.se_cannons")
 local Cells = require("scripts.cells")
 local CellRail = require("scripts.cell_rail")
 local CellCapacity = require("scripts.cell_capacity")
+local Mining = require("scripts.mining_details")
 
 local STATS_EVERY = 60
 local UI_REFRESH_STRIDE, UI_REFRESH_SLOTS = 6, 50 -- One pass per player every 300 ticks.
@@ -102,20 +103,39 @@ end)
 -- entity registry
 ---------------------------------------------------------------------------
 local build_filter = { {filter="type",type="container"}, {filter="type",type="logistic-container"},
-  {filter="type",type="temporary-container"}, {filter="type",type="cargo-landing-pad"}, {filter="type",type="space-platform-hub"} }
+  {filter="type",type="temporary-container"}, {filter="type",type="cargo-landing-pad"}, {filter="type",type="space-platform-hub"},
+  {filter="type",type="mining-drill"} }
 for _, t in ipairs(Sampler.TYPES) do build_filter[#build_filter + 1] = { filter = "type", type = t } end
+
+local function invalidate_drill(entity)
+  if entity and entity.valid and entity.type == "mining-drill" then
+    Mining.invalidate(entity.surface_index or (entity.surface and entity.surface.index))
+  end
+end
 
 for _, name in ipairs({ "on_built_entity", "on_robot_built_entity", "script_raised_built",
                         "script_raised_revive", "on_space_platform_built_entity" }) do
   local id = defines.events[name]
   if id then
-    script.on_event(id, function(e) Sampler.add(e.entity); Cells.on_built(e.entity) end, build_filter)
+    script.on_event(id, function(e)
+      Sampler.add(e.entity)
+      Cells.on_built(e.entity)
+      invalidate_drill(e.entity)
+    end, build_filter)
   end
 end
 script.on_event(defines.events.on_entity_cloned, function(e)
   Sampler.add(e.destination)
   Cells.on_cloned(e.source, e.destination)
+  invalidate_drill(e.destination)
 end, build_filter)
+local drill_filter = { { filter = "type", type = "mining-drill" } }
+for _, name in ipairs({ "on_player_mined_entity", "on_robot_mined_entity", "on_entity_died", "script_raised_destroy" }) do
+  local id = defines.events[name]
+  if id then
+    script.on_event(id, function(e) invalidate_drill(e.entity) end, drill_filter)
+  end
+end
 -- removals are handled lazily by the sampler (invalid entities are dropped on visit)
 
 local track_cargo = Transfers.available()
@@ -144,6 +164,7 @@ script.on_event(defines.events.on_pre_surface_deleted, function(e)
   UI.on_chart_surface_deleted(e.surface_index)
   Sampler.on_surface_deleted(e.surface_index)
   Cells.on_surface_deleted(e.surface_index)
+  Mining.invalidate(e.surface_index)
   if track_cargo then Transfers.on_surface_deleted(e) end
 end)
 
@@ -172,8 +193,8 @@ script.on_nth_tick(UI_REFRESH_STRIDE, function(e) UI.auto_refresh(e.tick / UI_RE
 script.on_nth_tick(600, function(e)
   Sampler.on_stock(e.tick)
   if track_cargo then Transfers.on_housekeeping(e.tick) end
-  if SERockets.available() then SERockets.prune(e.tick) end
-  if SECannons.available() then SECannons.prune(e.tick) end
+  if se_rockets_active then SERockets.prune(e.tick) end
+  if se_cannons_active then SECannons.prune(e.tick) end
 end)
 
 ---------------------------------------------------------------------------

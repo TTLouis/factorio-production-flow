@@ -292,6 +292,7 @@ dofile(TESTDIR .. "/se_logistics_ui_test.lua")
 dofile(TESTDIR .. "/gui_state_lifecycle_test.lua")(handlers)
 dofile(TESTDIR .. "/force_scope_test.lua")(handlers)
 dofile(TESTDIR .. "/localization_test.lua")
+dofile(TESTDIR .. "/audit_perf_test.lua")
 print("ALL OK")
 
 -- Return overlays share the Full Sankey zoom transform.

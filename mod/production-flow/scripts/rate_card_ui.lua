@@ -210,7 +210,9 @@ function R.render_body(body, sidx, key, period, width, options)
   end
   local recipe_context = {rates = rates}
   local mined, mining_uses = {}, {}
-  if not cell then mined, mining_uses = Mining.sources_and_uses(sidx, key) end
+  if not cell then
+    mined, mining_uses = Mining.sources_and_uses(sidx, key, options.player and options.player.force, options.fresh ~= false)
+  end
   if options.recipe_tables or #mined + #mining_uses > 0 then
     local made_by = RecipeDetails.material_rows(recipe_context, key, false)
     local used_by = RecipeDetails.material_rows(recipe_context, key, true)
@@ -236,7 +238,7 @@ function R.render_body(body, sidx, key, period, width, options)
   end
 end
 
-local function refresh_card(player, card, us, bring_forward, models)
+local function refresh_card(player, card, us, bring_forward, models, fresh)
   local tags = card.tags
   local cell = tags.cell and Flow.records()[tags.cell]
   local pinned = is_pinned(card)
@@ -264,7 +266,7 @@ local function refresh_card(player, card, us, bring_forward, models)
     tags.tick = nil
   end
   local tick = math.floor(game.tick / 300)
-  if tags.tick == tick and tags.period == period and tags.capacity == capacity and tags.width == width
+  if not fresh and tags.tick == tick and tags.period == period and tags.capacity == capacity and tags.width == width
     and tags.screen_h == screen_h then return end
   tags.tick, tags.period, tags.capacity, tags.width, tags.screen_h = tick, period, capacity, width, screen_h
   card.tags = tags
@@ -285,15 +287,15 @@ local function refresh_card(player, card, us, bring_forward, models)
   end
   R.render_body(scroll.ssk_rate_card_body, tags.surface, tags.key, period, width - 48,
     {cell=cell, capacity=capacity, model=context and context.model, read_balance=context and context.read_balance,
-      recipe_tables=true, player=player})
+      recipe_tables=true, player=player, fresh=fresh ~= false})
 end
 
-function R.refresh(player, us, bring_forward)
+function R.refresh(player, us, bring_forward, fresh)
   local models = {}
   local cards = player.gui.screen.children
   for i = #cards, 1, -1 do
     local card = cards[i]
-    if card.name == R.NAME or is_pinned(card) then refresh_card(player, card, us, bring_forward, models) end
+    if card.name == R.NAME or is_pinned(card) then refresh_card(player, card, us, bring_forward, models, fresh) end
   end
 end
 
@@ -310,7 +312,7 @@ function R.on_click(player, element, us)
     card.tags = tags
     card.ssk_rate_card_scroll.visible = not tags.folded
     update_fold(element, tags.folded)
-    if not tags.folded then refresh_card(player, card, us, false, {}) end
+    if not tags.folded then refresh_card(player, card, us, false, {}, true) end
   elseif action == "pin" then
     if is_pinned(card) then
       R.close(player)
@@ -385,7 +387,7 @@ function R.toggle(player, us, key)
   local scroll = card.add{type="scroll-pane", name="ssk_rate_card_scroll", style="ssk_rate_card_scroll",
     horizontal_scroll_policy="never", vertical_scroll_policy="auto-and-reserve-space"}
   scroll.add{type="flow", name="ssk_rate_card_body", direction="vertical"}.style.vertical_spacing = 5
-  refresh_card(player, card, us, false, {})
+  refresh_card(player, card, us, false, {}, true)
   card.bring_to_front()
   return true
 end

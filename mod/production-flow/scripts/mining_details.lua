@@ -2,7 +2,7 @@
 local Mining = {}
 
 local by_material
-local sample_tick, surface_counts
+local DRILL_CACHE_TICKS = 300
 
 local function index_resources()
   local materials = {}
@@ -32,14 +32,37 @@ local function index_resources()
   return materials
 end
 
-local function drill_counts(surface)
-  if sample_tick ~= game.tick then
-    sample_tick, surface_counts = game.tick, {}
+function Mining.invalidate(sidx)
+  local cache = storage and storage.mining_cache
+  if not cache then return end
+  if not sidx then
+    storage.mining_cache = {}
+    return
   end
-  local counts = surface_counts[surface.index]
-  if counts then return counts end
-  counts = {}
-  for _, drill in ipairs(surface.find_entities_filtered{type="mining-drill", force="player"}) do
+  local prefix = tostring(sidx) .. ":"
+  for k in pairs(cache) do
+    if k:sub(1, #prefix) == prefix then cache[k] = nil end
+  end
+end
+
+local function drill_counts(surface, force, fresh)
+  local target_force = force or (game.forces and game.forces.player) or "player"
+  local force_key = type(target_force) == "string" and target_force or target_force.index
+  local cache_key = surface.index .. ":" .. tostring(force_key)
+  local cache
+  if storage then
+    cache = storage.mining_cache
+    if not cache then cache = {}; storage.mining_cache = cache end
+  end
+  local entry = cache and cache[cache_key]
+  if entry and entry.surface == surface and game.tick >= entry.tick then
+    local age = game.tick - entry.tick
+    if (fresh and age == 0) or (not fresh and age < DRILL_CACHE_TICKS) then
+      return entry.counts
+    end
+  end
+  local counts = {}
+  for _, drill in ipairs(surface.find_entities_filtered{type="mining-drill", force=target_force}) do
     local target = drill.mining_target
     if target and target.valid and target.type == "resource" then
       local types = counts[target.name]
@@ -47,17 +70,22 @@ local function drill_counts(surface)
       types[drill.name] = (types[drill.name] or 0) + 1
     end
   end
-  surface_counts[surface.index] = counts
+  if cache then
+    for k, v in pairs(cache) do
+      if v.surface and v.surface.valid == false then cache[k] = nil end
+    end
+    cache[cache_key] = { tick = game.tick, surface = surface, counts = counts }
+  end
   return counts
 end
 
-function Mining.sources_and_uses(sidx, key)
+function Mining.sources_and_uses(sidx, key, force, fresh)
   if not by_material then by_material = index_resources() end
   local made, used = {}, {}
   local definitions = by_material[key]
   local surface = definitions and game.surfaces[sidx]
   if not surface then return made, used end
-  local counts = drill_counts(surface)
+  local counts = drill_counts(surface, force, fresh)
   for name, resource in pairs(definitions) do
     local row = {resource=resource, drills=counts[name]}
     if resource.products[key] then made[#made + 1] = row end

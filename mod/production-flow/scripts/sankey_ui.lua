@@ -814,13 +814,25 @@ local function highlight(st, key)
   -- Balance is already scoped to the selected material. Keep its colours
   -- visible while hovering or pinning a neighbour.
   if not st.dim_nodes then key = nil end
-  local chain = key and selected_chain(st.paths, key)
+  local chain
+  if key then
+    st.chains = st.chains or {}
+    chain = st.chains[key]
+    if not chain then
+      chain = selected_chain(st.paths, key)
+      st.chains[key] = chain
+    end
+  end
   for _, r in ipairs(st.ribbons) do
-    -- Keep the darker flow shade at joins so highlighted material bars stay distinct.
-    local c = chain and not chain_contains_link(chain, r.from, r.to) and palette.DIM or palette.muted(r.color)
-    if r.ro then
-      if r.ro.valid then r.ro.color = Canvas.col(c) end
-    elseif r.elem and r.elem.valid then r.elem.sprite = ribbon_sprite(r, c) end
+    local dim = chain ~= nil and not chain_contains_link(chain, r.from, r.to)
+    if r._dimmed ~= dim then
+      r._dimmed = dim
+      -- Keep the darker flow shade at joins so highlighted material bars stay distinct.
+      local c = dim and palette.DIM or palette.muted(r.color)
+      if r.ro then
+        if r.ro.valid then r.ro.color = Canvas.col(c) end
+      elseif r.elem and r.elem.valid then r.elem.sprite = ribbon_sprite(r, c) end
+    end
   end
   for node_key, node in pairs(st.node_visuals or {}) do
     local dim = chain ~= nil and not chain_contains(chain, node_key)
@@ -944,6 +956,7 @@ end
 local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons, read_balance, detailed_ribbons)
   st.ribbons = {}
   st.node_visuals = {}
+  st.chains = nil
   st.dim_nodes = not us.neighborhood
   st.selected = us.view == "focus" and us.focus or us.sel
   if us.neighborhood then st.selected=us.pinned end
@@ -1800,9 +1813,9 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
   end
   local L, model, unchanged = View.build(player, us, chart_w, viewH, source, only_auto and not full and #canvas.children > 0)
   local inspector = full_chart and (with_sidebar and c.ssk_body.ssk_sidebar or c)
-  local function update_inspector(layout, read_balance, recipe_icons)
+  local function update_inspector(layout, read_balance, recipe_icons, fresh)
     local options = {model=model, read_balance=read_balance, recipe_rates=layout.details and layout.details.rates,
-      recipe_icons=recipe_icons, plot_height=100, recipe_tables=true, player=player}
+      recipe_icons=recipe_icons, plot_height=100, recipe_tables=true, player=player, fresh=fresh}
     render_selection(inspector, layout, us, inspector_w, viewH, player, options, drawer_x)
   end
   if not L then
@@ -1811,7 +1824,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
     local scroll = summary and summary.ssk_selected_scroll
     local body = scroll and scroll.ssk_rate_card_body
     if unchanged and body and body.tags.tick ~= math.floor(game.tick / 300) then
-      update_inspector(unchanged, nil, observed_recipe_icons(player, us))
+      update_inspector(unchanged, nil, observed_recipe_icons(player, us), false)
     end
     return
   end
@@ -1960,7 +1973,7 @@ function SK.fill(player, c, us, W, viewH, full, only_auto, source, refresh_graph
       us.center_pending, us.fit_pending = nil, nil
     end
   end
-  if inspector then update_inspector(L, read_balance, recipe_icons) end
+  if inspector then update_inspector(L, read_balance, recipe_icons, not only_auto) end
   us.zoom_pending = nil
 end
 

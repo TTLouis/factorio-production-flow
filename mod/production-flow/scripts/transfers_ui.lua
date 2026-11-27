@@ -408,8 +408,8 @@ local function draw_ribbon(painter, x0, y0, x1, y1, data, highest, color)
   return ribbon_shape(x0, y0, x1, y1, width)
 end
 
-local function flow_signature(result)
-  local parts = { result.platform.id, result.platform.name, result.platform.location or "", result.made.seconds or 0 }
+local function flow_signature(result, width, viewport)
+  local parts = { result.platform.id, result.platform.name, result.platform.location or "", result.made.seconds or 0, width or 0, viewport or 0 }
   local function manifest(data)
     -- Cache identities depend on raw data, never a per-player LocalisedString.
     parts[#parts + 1] = data.weight or 0
@@ -463,9 +463,10 @@ local function flow_graph(player, parent, result, width, viewport)
   for _, list in ipairs({ left, right }) do
     for _, cell in ipairs(list) do highest = math.max(highest, cell.route.weight or 0) end
   end
-  local signature = flow_signature(result)
+  local signature = flow_signature(result, width, viewport)
   local update = parent.tags.transfer_graph ~= signature
-  if update then parent.clear() end
+  if not update then return end
+  parent.clear()
   parent.style.width, parent.style.height = width, height
   local painter = plot(parent, player, width, height)
   local platform_name = result.platform.name
@@ -491,7 +492,6 @@ local function flow_graph(player, parent, result, width, viewport)
     local tip = manifest_tooltip(Loc("transfers-made-aboard", platform_name), Loc("transfers-recorded-platform-production"), result.made.items, result.made.seconds)
     Tooltip.ribbon(parent, { shape }, tip, { transfer_ribbon = "made" }, "ssk_transfer_ribbon_made_")
   end
-  if not update then return end
   parent.tags = { transfer_graph = signature }
   canvas_label(parent, Loc("transfers-loading-surfaces"), "heading_2_label", x_left, 2, card_w)
   canvas_label(parent, Loc("transfers-selected-platform"), "heading_2_label", x_center, 2, center_w, "center")

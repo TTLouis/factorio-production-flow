@@ -172,7 +172,7 @@ end
 -- Both the table and the chart use the model for their selected surface and period.
 function B.material_reader(sidx, model, include_inactive)
   local graph = Graph.get()
-  local capacity = Sampler.capacity(sidx)
+  local capacity = model.capacity or Sampler.capacity(sidx)
   local stock = Sampler.stock(sidx)
   local known = Sampler.stock_known(sidx)
   local used = used_recipes(graph, model)

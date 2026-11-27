@@ -36,11 +36,29 @@ local function capabilities()
     destination=available,inventory_snapshots=available}
 end
 
+local function ensure_in_flight_index(s)
+  local by_eta=s.in_flight_by_eta
+  if by_eta then return by_eta end
+  by_eta={}
+  s.in_flight_by_eta=by_eta
+  s.min_eta=nil
+  for id,r in pairs(s.in_flight or {}) do
+    local bucket=by_eta[r.eta]
+    if not bucket then bucket={};by_eta[r.eta]=bucket end
+    bucket[id]=r
+    if not s.min_eta or r.eta<s.min_eta then s.min_eta=r.eta end
+  end
+  return by_eta
+end
+
 function C.init(tick)
   if not storage.se_cannons then
-    storage.se_cannons={version=1,history={},first=1,count=0,serial=0,start_tick=tick,dropped={},in_flight={}}
+    storage.se_cannons={version=1,history={},first=1,count=0,serial=0,start_tick=tick,dropped={},in_flight={},
+      in_flight_by_eta={},zone_cache={}}
   end
   storage.se_cannons.in_flight=storage.se_cannons.in_flight or {}
+  storage.se_cannons.zone_cache=storage.se_cannons.zone_cache or {}
+  ensure_in_flight_index(storage.se_cannons)
   return storage.se_cannons
 end
 
@@ -49,6 +67,20 @@ local function remove_first(s,overflow)
   s.history[s.first]=nil
   s.first=s.first%LIMIT+1;s.count=s.count-1
   if s.in_flight then s.in_flight[record.id]=nil end
+  local bucket=s.in_flight_by_eta and record.eta and s.in_flight_by_eta[record.eta]
+  if bucket then
+    bucket[record.id]=nil
+    if not next(bucket) then
+      s.in_flight_by_eta[record.eta]=nil
+      if s.min_eta==record.eta then
+        local next_min
+        for eta in pairs(s.in_flight_by_eta) do
+          if not next_min or eta<next_min then next_min=eta end
+        end
+        s.min_eta=next_min
+      end
+    end
+  end
   if s.last_beam and s.last_beam.record==record then s.last_beam=nil end
   local force=record.sender.force
   if overflow and force.valid then s.dropped[force.index]={force=force,tick=record.tick} end
@@ -60,6 +92,11 @@ function C.prune(tick)
   while s.count>0 and s.history[s.first].tick<tick-RETENTION do remove_first(s) end
   for id,v in pairs(s.dropped) do
     if not v.force.valid or v.tick<tick-RETENTION then s.dropped[id]=nil end
+  end
+  if s.zone_cache then
+    for idx,cached in pairs(s.zone_cache) do
+      if not (cached.surface and cached.surface.valid) then s.zone_cache[idx]=nil end
+    end
   end
 end
 
@@ -121,9 +158,11 @@ local function fired_payload(cannon)
 end
 
 -- Cannon routes share SE zone identities with rocket routes. A cached entry
--- is reused only for the same surface object, never for a reused index.
-local zone_cache={}
-local function zone_of(surface)
+-- is stored in storage.se_cannons (MP-safe) and reused only for the same
+-- surface object, never for a reused index.
+local function zone_of(s,surface)
+  local zone_cache=s.zone_cache
+  if not zone_cache then zone_cache={};s.zone_cache=zone_cache end
   local cached=zone_cache[surface.index]
   if cached and cached.surface==surface then return cached.zone,cached.name end
   local zone,name
@@ -148,6 +187,15 @@ local function effect_position(e,name,surface)
   if finite(x) and finite(y) then return {x=x,y=y} end
 end
 
+local function track_in_flight(s,r)
+  local by_eta=ensure_in_flight_index(s)
+  s.in_flight[r.id]=r
+  local bucket=by_eta[r.eta]
+  if not bucket then bucket={};by_eta[r.eta]=bucket end
+  bucket[r.id]=r
+  if not s.min_eta or r.eta<s.min_eta then s.min_eta=r.eta end
+end
+
 -- Pair the projectile with the beam raised immediately before it in the same
 -- tick. Anything else (no beam, stale beam, other force) stays unpaired.
 local function on_projectile(e,surface,s)
@@ -159,12 +207,12 @@ local function on_projectile(e,surface,s)
   if projectile and projectile.force~=r.sender.force then return end
   local p=effect_position(e,PROJECTILE,surface)
   if not p then return end
-  local zone,zone_name=zone_of(surface)
+  local zone,zone_name=zone_of(s,surface)
   r.destination={surface=surface,zone=zone,name=zone_name or surface.name,position={x=p.x,y=p.y+FALL_ALTITUDE}}
-  if not r.sender.zone then r.sender.zone=zone_of(r.sender.surface) end
+  if not r.sender.zone then r.sender.zone=zone_of(s,r.sender.surface) end
   r.eta=e.tick+FALL_TIME
   r.status="in-flight"
-  s.in_flight[r.id]=r
+  track_in_flight(s,r)
 end
 
 local function on_impact(e,surface,s)
@@ -225,35 +273,53 @@ end
 
 -- Settle each paired shot one tick after SE lands it, so an impact marker
 -- raised during the landing tick has always been seen first.
+local function settle_shot(s,in_flight,id,r)
+  in_flight[id]=nil
+  local d=r.destination
+  r.landed_tick=r.eta
+  if r.spilled then
+    r.status="spilled"
+  elseif not d.surface.valid then
+    r.status="lost"
+  else
+    -- The same lookup SE uses to choose the chest it inserts into.
+    local ok,chests=pcall(function()
+      return d.surface.find_entities_filtered{name=RECEIVER,position=d.position,limit=1}
+    end)
+    local chest=ok and chests and chests[1]
+    if chest and chest.valid and r.sent then
+      r.received=copy_manifest(r.sent)
+      r.arrival_tick=r.eta
+      r.receiver=Endpoints.snapshot(chest,"delivery-cannon-receiver",d.zone)
+      r.status="received"
+    else
+      r.status="arrived"
+    end
+  end
+end
+
 function C.on_tick(tick)
   local s=storage.se_cannons
   local in_flight=s and s.in_flight
   if not (in_flight and next(in_flight)) then return end
-  for id,r in pairs(in_flight) do
-    if tick>r.eta then
-      in_flight[id]=nil
-      local d=r.destination
-      r.landed_tick=r.eta
-      if r.spilled then
-        r.status="spilled"
-      elseif not d.surface.valid then
-        r.status="lost"
-      else
-        -- The same lookup SE uses to choose the chest it inserts into.
-        local ok,chests=pcall(function()
-          return d.surface.find_entities_filtered{name=RECEIVER,position=d.position,limit=1}
-        end)
-        local chest=ok and chests and chests[1]
-        if chest and chest.valid and r.sent then
-          r.received=copy_manifest(r.sent)
-          r.arrival_tick=r.eta
-          r.receiver=Endpoints.snapshot(chest,"delivery-cannon-receiver",d.zone)
-          r.status="received"
-        else
-          r.status="arrived"
-        end
+  local by_eta=ensure_in_flight_index(s)
+  if s.min_eta and tick<=s.min_eta then return end
+  local settled=false
+  for eta,bucket in pairs(by_eta) do
+    if tick>eta then
+      by_eta[eta]=nil
+      settled=true
+      for id,r in pairs(bucket) do
+        if in_flight[id]==r then settle_shot(s,in_flight,id,r) end
       end
     end
+  end
+  if settled then
+    local next_min
+    for eta in pairs(by_eta) do
+      if not next_min or eta<next_min then next_min=eta end
+    end
+    s.min_eta=next_min
   end
 end
 
@@ -268,9 +334,10 @@ function C.query(force,surface,tick,seconds)
   result.truncated=dropped and dropped.force==force and dropped.tick>=since or false
   for i=s.count-1,0,-1 do
     local r=s.history[(s.first-1+i)%LIMIT+1]
+    if r.tick<since then break end
     local d=r.destination
     if r.sender.force==force and (r.sender.surface==surface or d and d.surface==surface)
-      and r.tick>=since and r.tick<=tick then
+      and r.tick<=tick then
       result.observations[#result.observations+1]=r
       result.shot_count=result.shot_count+1
     end

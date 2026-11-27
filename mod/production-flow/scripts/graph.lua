@@ -6,9 +6,19 @@ local G = {}
 
 function G.key(t, n) return t .. "/" .. n end
 
+local lab_cache_protos, lab_cache_fn, lab_cache_set, lab_cache_names
+
 function G.lab_inputs()
+  local filter_fn = prototypes and prototypes.get_entity_filtered
+  local is_table = type(prototypes) == "table"
+  if lab_cache_set and (not is_table or (prototypes == lab_cache_protos and filter_fn == lab_cache_fn)) then
+    local set, names = {}, {}
+    for k in pairs(lab_cache_set) do set[k] = true end
+    for i, n in ipairs(lab_cache_names) do names[i] = n end
+    return set, names
+  end
   local set, names = {}, {}
-  for _, lab in pairs(prototypes.get_entity_filtered({ { filter = "type", type = "lab" } })) do
+  for _, lab in pairs(filter_fn({ { filter = "type", type = "lab" } })) do
     for _, input in pairs(lab.lab_inputs or {}) do
       local name = type(input) == "table" and input.name or input
       local key = G.key("item", name)
@@ -19,7 +29,11 @@ function G.lab_inputs()
     end
   end
   table.sort(names)
-  return set, names
+  lab_cache_protos, lab_cache_fn, lab_cache_set, lab_cache_names = is_table and prototypes or true, is_table and filter_fn or true, set, names
+  local set_copy, names_copy = {}, {}
+  for k in pairs(set) do set_copy[k] = true end
+  for i, n in ipairs(names) do names_copy[i] = n end
+  return set_copy, names_copy
 end
 
 -- expected output per craft, and the part of it that productivity applies to

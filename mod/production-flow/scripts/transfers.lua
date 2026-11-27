@@ -312,11 +312,32 @@ function T.on_landed(event)
   pending.contents = contents
 end
 
+local function ensure_legacy_count(state)
+  if state.legacy_count ~= nil and state.legacy_seen_count == state.count and state.legacy_seen_first == state.first then
+    return
+  end
+  local legacy = 0
+  for i = 0, state.count - 1 do
+    local record = state.history[(state.first - 1 + i) % HISTORY_LIMIT + 1]
+    if record and not record.shipment_id then legacy = legacy + 1 end
+  end
+  state.legacy_count = legacy
+  state.legacy_seen_count = state.count
+  state.legacy_seen_first = state.first
+end
+
 local function discard_oldest(state)
   local record = state.history[state.first]
   state.history[state.first] = nil
   state.first = state.first % HISTORY_LIMIT + 1
   state.count = state.count - 1
+  if state.legacy_count then
+    if record and not record.shipment_id then
+      state.legacy_count = math.max(0, state.legacy_count - 1)
+    end
+    state.legacy_seen_count = state.count
+    state.legacy_seen_first = state.first
+  end
   return record
 end
 
@@ -328,13 +349,17 @@ end
 
 local function add_arrival(state, record)
   expire_history(state, record.tick)
+  ensure_legacy_count(state)
   if state.count == HISTORY_LIMIT then
     local removed = discard_oldest(state)
     if removed.force.valid then state.dropped[removed.force.index] = { force = removed.force, tick = removed.tick } end
   end
+  if not record.shipment_id then state.legacy_count = state.legacy_count + 1 end
   local tail = (state.first - 1 + state.count) % HISTORY_LIMIT + 1
   state.history[tail] = record
   state.count = state.count + 1
+  state.legacy_seen_count = state.count
+  state.legacy_seen_first = state.first
 end
 
 function T.on_delivered(event)
@@ -524,14 +549,17 @@ function T.boundaries(force, surface, tick, seconds, filters)
       result.dropped_tick = math.max(result.dropped_tick or dropped.tick, dropped.tick)
       if dropped.tick >= result.from_tick then result.truncated = true end
     end
-    for i = state.count - 1, 0, -1 do
-      local slot = (state.first - 1 + i) % HISTORY_LIMIT + 1
-      local record = state.history[slot]
-      if record.tick < result.from_tick then break end
-      if not record.shipment_id then
-        local id = "legacy:" .. slot .. ":" .. record.tick
-        append { id = id, key = id .. ":received", shipment_id = id, kind = "received", force = record.force,
-          from = record.from, to = record.to, tick = record.tick, items = record.items, quality_exact = false, legacy = true }
+    ensure_legacy_count(state)
+    if state.legacy_count > 0 then
+      for i = state.count - 1, 0, -1 do
+        local slot = (state.first - 1 + i) % HISTORY_LIMIT + 1
+        local record = state.history[slot]
+        if record.tick < result.from_tick then break end
+        if not record.shipment_id then
+          local id = "legacy:" .. slot .. ":" .. record.tick
+          append { id = id, key = id .. ":received", shipment_id = id, kind = "received", force = record.force,
+            from = record.from, to = record.to, tick = record.tick, items = record.items, quality_exact = false, legacy = true }
+        end
       end
     end
   end

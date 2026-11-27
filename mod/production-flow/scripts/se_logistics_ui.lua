@@ -544,7 +544,7 @@ function UI.render(content,player,surface,period,state,width,height)
   end
   state.view=state.view or "flow";state.history=state.history or {}
   if not state.endpoints or state.rescan_endpoints then state.endpoints=Cannons.discover(surface,player.force);state.rescan_endpoints=nil end
-  local base=Data.query(player.force,surface,game.tick,period,{timing="either"})
+  local base=Data.query(player.force,surface,game.tick,period,{timing="either",_skip_groups=true})
   state.cannon_shots=#(base.unpaired or {})
   local materials=choices(base,player,surface,state)
   if not state.material and state.view=="items" then state.material=materials[1] end
@@ -560,11 +560,11 @@ function UI.render(content,player,surface,period,state,width,height)
     state.history.route,state.history.direction=nil,nil
   end
   if state.view=="history" then filters={material=state.history.material,quality=state.history.quality,method=state.history.method,route=state.history.route,direction=state.history.direction,timing="either"} end
-  local coverage=(base.coverage or {})[filters.method=="cannon" and "cannon" or "rocket"] or 0
+  local data=Data.narrow(base,filters)
+  local coverage=(data.coverage or {})[filters.method=="cannon" and "cannon" or "rocket"] or 0
   local status=panel.heading.se_coverage
-  status.caption=base.truncated and Loc("se-history-incomplete") or Loc("ui-recorded",Sampler.duration(coverage),Sampler.duration(period))
+  status.caption=data.truncated and Loc("se-history-incomplete") or Loc("ui-recorded",Sampler.duration(coverage),Sampler.duration(period))
   status.tooltip=Tooltip.lines({status.caption,Loc("se-recording-help")})
-  local data=Data.query(player.force,surface,game.tick,period,filters)
   data.receipt_coverage=false
   data.sent_coverage=filters.method=="rocket" and not data.truncated and (data.seconds or 0)>0
     and ((data.coverage or {}).rocket or 0)>=data.seconds

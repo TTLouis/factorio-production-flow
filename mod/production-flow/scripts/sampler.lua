@@ -368,8 +368,9 @@ end
 
 Sm.craft_productivity = craft_productivity
 
-local function player_machine(e)
-  return e and e.valid and game.forces and game.forces.player and e.force==game.forces.player
+local function player_machine(e, player_force)
+  local force = player_force or (game.forces and game.forces.player)
+  return e and e.valid and force and e.force == force
 end
 
 local function seed_machine(rec,e)
@@ -608,6 +609,7 @@ function Sm.on_tick(tick)
   local machines = storage.machines
   local recipes = storage.graph and storage.graph.recipes
   local cell_units = storage.cell_units
+  local player_force = game.forces and game.forces.player
 
   for _ = 1, per do
     local n = #list
@@ -630,7 +632,7 @@ function Sm.on_tick(tick)
       machines[u] = nil
       list[cur] = list[n]
       list[n] = nil
-    elseif not player_machine(e) then
+    elseif not player_machine(e, player_force) then
       remove_observation(rec)
       rec.eligible,rec.r,rec.pf=false,nil,nil
       cur=cur+1
@@ -942,8 +944,13 @@ end
 ---@return table<string, {cps:number, normal_cps:number}> recipes
 ---@return number seconds Measured duration used as the denominator.
 ---@return number requested Requested window in seconds.
-function Sm.cell_rates(cell_id, sidx, period, since_tick, exclusive)
-  local sources, period_start = rate_sources(sidx, period)
+function Sm.cell_rates(cell_id, sidx, period, since_tick, exclusive, pre_sources, pre_period_start)
+  local sources, period_start
+  if pre_sources then
+    sources, period_start = pre_sources, pre_period_start
+  else
+    sources, period_start = rate_sources(sidx, period)
+  end
   local end_tick = math.floor(game.tick / BIN_TICKS) * BIN_TICKS
   local since = since_tick and math.floor(since_tick / BIN_TICKS) * BIN_TICKS or period_start
   local start_tick = math.max(period_start, since)
@@ -990,12 +997,65 @@ function Sm.purge_cell(cell_id)
   end
 end
 
+Sm.rate_sources = rate_sources
+
+local function flush_unit_membership(unit, old_units, old_shared)
+  if not (storage.nbins and storage.machines) then return end
+  local rec = storage.machines[unit]
+  if not (rec and player_machine(rec.e)) then return end
+  if rec.eligible ~= true then
+    remove_observation(rec)
+    seed_machine(rec, rec.e)
+    return
+  end
+  init_machine_status()
+  local bin = cur_bin(game.tick)
+  local recipes = storage.graph and storage.graph.recipes
+  sample_machine(rec, rec.e, game.tick, bin, recipes, old_units)
+end
+
+-- Incremental update for machine slot replacement (avoids full Cells.reindex).
+function Sm.update_cell_units(affected_units, new_units, new_shared)
+  local old_units = storage.cell_units or {}
+  local old_shared = storage.cell_shared_units or {}
+  local sorted = {}
+  for unit in pairs(affected_units) do sorted[#sorted + 1] = unit end
+  table.sort(sorted)
+  for _, unit in ipairs(sorted) do
+    if not same_membership(old_units[unit] or {}, new_units[unit], old_shared[unit], new_shared[unit]) then
+      flush_unit_membership(unit, old_units, old_shared)
+    end
+    old_units[unit] = new_units[unit]
+    old_shared[unit] = new_shared[unit]
+  end
+  storage.cell_units = next(old_units) and old_units or nil
+  storage.cell_shared_units = next(old_shared) and old_shared or nil
+end
+
+function Sm.machine_summary(sidx)
+  local m, cap = {}, {}
+  local g = storage.graph
+  local recipes = g and g.recipes
+  local player_force = game.forces and game.forces.player
+  for _, rec in pairs(storage.machines) do
+    if rec.r and (not sidx or rec.s == sidx) and player_machine(rec.e, player_force) then
+      local rname = rec.r
+      m[rname] = (m[rname] or 0) + 1
+      local r = recipes and recipes[rname]
+      local energy = r and r.energy or 0
+      if energy > 0 and rec.spd then cap[rname] = (cap[rname] or 0) + rec.spd / energy end
+    end
+  end
+  return m, cap
+end
+
 ---@param sidx integer? Surface index; nil combines all registered surfaces.
 ---@return table<string, integer> counts Recipe name -> registered machine count.
 function Sm.machine_counts(sidx)
   local m = {}
+  local player_force = game.forces and game.forces.player
   for _, rec in pairs(storage.machines) do
-    if rec.r and player_machine(rec.e) and (not sidx or rec.s == sidx) then m[rec.r] = (m[rec.r] or 0) + 1 end
+    if rec.r and (not sidx or rec.s == sidx) and player_machine(rec.e, player_force) then m[rec.r] = (m[rec.r] or 0) + 1 end
   end
   return m
 end
@@ -1027,14 +1087,17 @@ function Sm.find_status_machine(sidx, force, recipe, category)
     local e = Sm.status_machine(latest, sidx, force, recipe, category)
     if e then return e end
   end
-  local checked = 0
+  local candidates = {}
   for unit in pairs(issue.units) do
-    if unit ~= latest then
-      local e = Sm.status_machine(unit, sidx, force, recipe, category)
-      if e then return e end
-      checked = checked + 1
-      if checked == PREVIEW_CHECKS then return end
-    end
+    if unit ~= latest then candidates[#candidates + 1] = unit end
+  end
+  table.sort(candidates)
+  local checked = 0
+  for _, unit in ipairs(candidates) do
+    local e = Sm.status_machine(unit, sidx, force, recipe, category)
+    if e then return e end
+    checked = checked + 1
+    if checked == PREVIEW_CHECKS then return end
   end
 end
 
@@ -1044,8 +1107,9 @@ end
 function Sm.capacity(sidx)
   local g = storage.graph
   local cap = {}
+  local player_force = game.forces and game.forces.player
   for _, rec in pairs(storage.machines) do
-    if rec.r and player_machine(rec.e) and (not sidx or rec.s == sidx) then
+    if rec.r and (not sidx or rec.s == sidx) and player_machine(rec.e, player_force) then
       local r = g and g.recipes[rec.r]
       local energy = r and r.energy or 0
       if energy > 0 and rec.spd then cap[rec.r] = (cap[rec.r] or 0) + rec.spd / energy end
