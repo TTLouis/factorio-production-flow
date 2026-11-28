@@ -341,6 +341,17 @@ do
   assert(hidden.links["recipe/cell-" .. made.Cable .. ">" .. cable_key]
     and hidden.links[cable_key .. ">recipe/cell-" .. made.Circuits],
     "A hidden parent output must not remove an internal transfer")
+  circuits.parent_id = nil
+  records[parent_id].ports = {
+    inputs = { ["item/copper-plate"] = true, ["item/iron-plate"] = true },
+    outputs = { ["item/electronic-circuit"] = true },
+  }
+  local partial = Flow.build(parent_id, { mode = "capacity", surface = nauvis.index })
+  local remainder_key = "recipe/cell-" .. parent_id
+  assert(partial.nodes[remainder_key].tier == 4 and partial.links[cable_key .. ">" .. remainder_key]
+    and not partial.cell_returns,
+    "A child must feed the remaining parent machines through a forward link")
+  circuits.parent_id = parent_id
   records[parent_id].ports = nil
   local unit, entity = next(cable.members)
   circuits.members[unit] = entity

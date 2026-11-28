@@ -13,6 +13,7 @@ local Cells = require("scripts.cells")
 local CellRail = require("scripts.cell_rail")
 local CellCapacity = require("scripts.cell_capacity")
 local Mining = require("scripts.mining_details")
+local CellTips = require("scripts.cell_tips")
 
 local STATS_EVERY = 60
 local UI_REFRESH_STRIDE, UI_REFRESH_SLOTS = 6, 50 -- One pass per player every 300 ticks.
@@ -29,6 +30,7 @@ local function setup(rescan)
   -- Rebuild cell slot and sampler attribution indexes after an upgrade or mod change.
   if storage.production_cells then Cells.reindex() end
   for _, p in pairs(game.players) do UI.ensure_button(p) end
+  if game.simulation and not remote.interfaces[CellTips.interface] then CellTips.register(UI) end
 end
 
 if SECannons.available() then

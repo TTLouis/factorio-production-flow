@@ -25,13 +25,18 @@ the layout of dense charts are still being refined.
   browse Space Exploration cargo rocket and delivery cannon routes, items and
   shipment history.
 - **Focus.** Trace upstream and downstream recipe connections for one material.
-- **Cells.** Group machines into production cells, compare measured throughput
-  with capacity, and follow linked train stops and their cargo history.
+- **Cells.** Group machines into production cells and subdivisions, compare
+  measured throughput with capacity, and follow linked train stops, their
+  buffer stock, and cargo history.
 - **Full Sankey.** Explore the recipe network on the selected surface. The Chart
   overview outlines the visible area as you pan and zoom. Click a material in
   the overview to jump to it. Selecting a material pins its rate card and dims
   unrelated nodes and flows. The card keeps recent history visible after the
   bar drops out of the current period.
+
+Open **Tips and tricks → Production Flow** for animated lessons on creating
+cells and subdivisions and linking train stops and buffers. The same section
+has guides to the production charts and the Transfers tab for your game setup.
 
 In Full Sankey, use **Shift + mouse wheel**, **wheel tilt**, or **Page Up / Page Down**
 to scroll horizontally. The overview box is on by default. Turn off **Live Full

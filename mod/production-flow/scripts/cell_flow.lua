@@ -21,11 +21,11 @@ end
 -- Smelting therefore precedes casting, which precedes the cells using the
 -- castings. Cells feeding each other in a loop are ordered by creation: the
 -- oldest waiting cell is placed first.
-function Flow.stages(ids, records)
+function Flow.stages(ids, records, port_overrides)
   local makers, ports = {}, {}
   for _, id in ipairs(ids) do
     local record = records[id]
-    ports[id] = Cells.boundary(record)
+    ports[id] = port_overrides and port_overrides[id] or Cells.boundary(record)
     for key in pairs(ports[id].outputs) do
       local where = record.surface_index .. "|" .. key
       makers[where] = makers[where] or {}
@@ -255,6 +255,17 @@ local function trace_boundary(graph, ports)
   end
 end
 
+local function net_flows(rates, fuels)
+  local net = {}
+  Capacity.flows(rates,
+    function(_, key, rate) net[key] = (net[key] or 0) - rate end,
+    function(_, key, rate) net[key] = (net[key] or 0) + rate end)
+  for key, users in pairs(fuels) do
+    for _, rate in pairs(users) do net[key] = (net[key] or 0) - rate end
+  end
+  return net
+end
+
 ---@param selected integer? Cell id; nil builds the All view.
 ---@param opts table? { mode = "measured"|"capacity", period = seconds, surface = index? }
 function Flow.build(selected, opts)
@@ -388,7 +399,16 @@ function Flow.build(selected, opts)
         end
       end
     end
-    ids[#ids + 1], stage[parent_id], memberships[parent_id] = parent_id, 1, parent_members
+    -- Stage the machines left in the parent by their own inputs and outputs.
+    -- The saved parent boundary covers the entire line, including its children.
+    local remainder = { inputs = {}, outputs = {} }
+    for key, amount in pairs(net_flows(parent_capacity, parent_fuels)) do
+      if amount < -1e-6 then remainder.inputs[key] = true end
+      if amount > 1e-6 then remainder.outputs[key] = true end
+    end
+    ids[#ids + 1], memberships[parent_id] = parent_id, parent_members
+    table.sort(ids)
+    stage = Flow.stages(ids, records, { [parent_id] = remainder })
   end
   local entries = {}
   for _, id in ipairs(ids) do
@@ -413,13 +433,7 @@ function Flow.build(selected, opts)
         graph.requested = requested
         if seconds + 1 < requested then graph.newest = math.min(graph.newest or seconds, seconds) end
       end
-      local net = {}
-      Capacity.flows(rates,
-        function(_, key, rate) net[key] = (net[key] or 0) - rate end,
-        function(_, key, rate) net[key] = (net[key] or 0) + rate end)
-      for key, users in pairs(fuels) do
-        for _, rate in pairs(users) do net[key] = (net[key] or 0) - rate end
-      end
+      local net = net_flows(rates, fuels)
       local has_production = false
       for _, rate in pairs(rates) do
         if rate.normal + rate.bonus > 1e-6 then has_production = true; break end

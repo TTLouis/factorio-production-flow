@@ -4,7 +4,7 @@ This file supplies the next Mod Portal description. The screenshots are native F
 
 ## Short description
 
-Spot production shortages with interactive Sankey charts, item and fluid history, and chest stock tracking. Transfers follows Space Age cargo deliveries and Space Exploration cargo rockets and delivery cannons.
+Trace production and stock with interactive Sankey charts. Group machines into production cells, track train cargo, and follow shipments in Space Age and Space Exploration.
 
 ## Mod page description
 
@@ -20,7 +20,9 @@ Available in English, Simplified Chinese (简体中文), and Traditional Chinese
 
 ### Group your factory into production cells
 
-Open **Cells**, click **+**, and drag over a production area. The editor suggests a name, an icon, inputs and outputs, and can link train stops and storage in the selection. Click **?** beside **+** for the creation guide, including how item or fluid icons in stop names help match storage. Adjust the suggestions to match your setup, and divide larger builds into smaller cells when you want to inspect their stages separately.
+Open **Cells**, click **+**, and drag over a production area. The editor suggests a name, an icon, inputs and outputs. Include train stops and their buffer chests or tanks in the same selection to link them, or add them in the editor. Open a saved cell and click **+** in its Flow toolbar to group part of the line into a subdivision. The parent chart shows how the subdivisions feed the rest of the line.
+
+Open **Tips and tricks → Production Flow** for animated lessons on creating a cell, adding subdivisions, and linking train stops and buffers. The same section explains how to read the production charts and how the **Transfers** tab tracks cargo in Space Age and Space Exploration. Click **?** beside **+** in the Cells tab for more on how stop names and item or fluid icons help match buffers.
 
 - **Flow** shows what a cell takes in and makes. Switch between **Measured** and **Capacity** to compare recorded production with what the machines could make at full speed. Choose **All** to compare net inputs and outputs across production stages.
 - **Map** shows where the cell's machines, train stops and buffers are. See their outlines in the world and on the map, then jump to the area in remote view.

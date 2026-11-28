@@ -9,5 +9,5 @@
     "? space-age",
     "? space-exploration"
   ],
-  "description": "See where your factory's resources go. Spot imbalances and explore item and fluid production with interactive Sankey charts."
+  "description": "Trace production and stock with interactive Sankey charts. Group machines into production cells, track train cargo, and follow shipments in Space Age and Space Exploration."
 }

@@ -1,5 +1,6 @@
 local S = require("shared.sprites")
 local palette = require("shared.palette")
+require("cell-tips")
 
 local steps = S.steps
 local ATLAS = "__production-flow__/graphics/ribbons.png"

@@ -407,14 +407,17 @@ function UI.on_player_removed(index)
   end
 end
 
-function UI.open(player)
+function UI.open(player, size)
   Cells.cancel(player)
   UI.close(player)
   if player.force~=game.forces.player then player.print(Loc("ui-player-force-only"));return end
   local res, sc = player.display_resolution, player.display_scale
   local W, H = UI.dimensions(res, sc)
   local compact_window = player.mod_settings["ssk-allow-small-window"]
-  if W < MIN_SAFE_WINDOW_WIDTH or (W < MIN_WINDOW_WIDTH and not (compact_window and compact_window.value)) then
+  if size then
+    -- The test player reports the client resolution in the embedded tip.
+    W, H = size.width, size.height
+  elseif W < MIN_SAFE_WINDOW_WIDTH or (W < MIN_WINDOW_WIDTH and not (compact_window and compact_window.value)) then
     player.print(Loc("ui-window-too-small"))
     return
   end
@@ -424,7 +427,7 @@ function UI.open(player)
   local f = player.gui.screen.add { type = "frame", name = WIN, direction = "vertical" }
   f.style.width, f.style.height = W, H
   us.canvas_w = W - WINDOW_SIDE_CHROME
-  us.canvas_h = math.max(100, H - 240)
+  us.canvas_h = math.max(100, H - (size and 224 or 240))
 
   local tb = f.add { type = "flow", name="ssk_window_bar", direction = "horizontal" }
   tb.drag_target = f
@@ -490,7 +493,7 @@ function UI.open(player)
   end
   tabs.selected_tab_index = sel
 
-  f.auto_center = true
+  if size then f.location = { 8, 8 } else f.auto_center = true end
   player.opened = f
   UI.refresh(player, false, true)
 end
@@ -668,7 +671,7 @@ end
 
 -- Opens the Cells tab on a saved cell, switching the header's surface to the
 -- cell's surface the way choosing it from the surface picker would.
-local function show_cell(player, id)
+function UI.show_cell(player, id, size)
   local cells = storage.production_cells
   local record = cells and cells.records[id]
   local surface = record and game.surfaces[record.surface_index]
@@ -679,9 +682,10 @@ local function show_cell(player, id)
   end
   us.tab_id = "cells"
   us.cells = us.cells or {}
-  us.cells.selected, us.cells.chart = id, {}
+  us.cells.selected, us.cells.chart = id, { chart_fit = size and size.chart_fit, keep_cell_labels = size and size.chart_fit }
+  if size and size.mode then us.cells.mode = size.mode end
   Cells.close(player)
-  UI.open(player)
+  UI.open(player, size)
 end
 
 -- Closes the window and opens remote view where the Map tab is looking.
@@ -744,7 +748,7 @@ function UI.on_click(e)
     Cells.prompt_delete(player, tags.ssk_cell_delete_request, false, Cells.close)
     return true
   end
-  if tags.ssk_cell == "show" then show_cell(player, tags.cell_id); return true end
+  if tags.ssk_cell == "show" then UI.show_cell(player, tags.cell_id); return true end
   if Cells.on_click(player, el) then return true end
   if MachineStatus.on_click(player, el, UI.close) then return true end
   local us = ustate(e.player_index)

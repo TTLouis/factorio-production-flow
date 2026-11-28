@@ -1282,9 +1282,13 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons, read_ba
         stack(in_segs, "inputs", n.x)
         stack(n.fouts, "outputs", n.x + half)
         local label_w = L.label_w[n.ci]
-        late[#late + 1] = { n.x + (n.width - label_w) / 2, n.top, label_w, 18,
+        local compact_label = not detailed and us.keep_cell_labels and us.show_labels
+        local label_y = compact_label and math.max(0, n.y - 13 / zoom) or n.top
+        local label_h = compact_label and 12 / zoom or 18
+        late[#late + 1] = { n.x + (n.width - label_w) / 2, label_y, label_w, label_h,
           { type = "label", style = "caption_label", caption = n.cell_name, tooltip = tooltip,
-            tags = { ssk_label = n.key } }, align = "center", node_label = n.key }
+            tags = { ssk_label = n.key } }, align = "center", node_label = n.key,
+          keep = compact_label, font = compact_label and "default-tiny-bold" or nil }
       else
         node_bar(n.x, n.y, View.NODE_W, n.h, n.color or n.ginfo.color, tooltip, bar_tags)
       local iy = n.y - View.NODE_W - View.ICON_GAP
