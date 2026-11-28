@@ -133,12 +133,7 @@ local function assert_receipts_measured(records)
 end
 local function received_label(record) return record.received and #record.received or "unknown" end
 function C.register(UI,config)
-  -- The real save covers night-vision detection. Force the same backend here
-  -- to cover populated, physically observed rocket/cannon routes as well.
-  local GuiPlot=require("scripts.gui_plot")
-  local original_needed=GuiPlot.needed
-  GuiPlot.needed=function() return true end
-  evidence.gui_backend="shared GUI sprites; forced in the private capture hook"
+  evidence.gui_backend="shared GUI sprites in the Transfers views"
   local focused=config and config.focused
   local wanted={}
   for _,name in ipairs({"se-transfers-flow-default","se-transfers-items-recent-real","se-transfers-items-factory-history",
@@ -245,7 +240,6 @@ function C.register(UI,config)
       assert(p.display_scale==1 and p.display_resolution.width==1920 and p.display_resolution.height==1080)
       log("SE LOGISTICS GUI PASS")
       UI.auto_refresh=auto_refresh
-      GuiPlot.needed=original_needed
       game.speed=1
       game.auto_save("se-logistics-captured")
       done=true

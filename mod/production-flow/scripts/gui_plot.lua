@@ -5,19 +5,6 @@ local Palette=require('shared.palette')
 local Colors=require('shared.plot_colors')
 local Geometry=require('scripts.ribbon_geometry')
 local G={}
-function G.needed(player)
-  -- Remote view has its own controller. Night vision can come from the
-  -- attached physical character's grid even when that view exposes no armor.
-  local character=player.character
-  local owner=character and character.valid and character or player
-  if not owner.get_inventory then return false end
-  local armor=owner.get_inventory(defines.inventory.character_armor)
-  if not (armor and armor.valid and armor[1] and armor[1].valid_for_read and armor[1].grid) then return false end
-  for _,equipment in pairs(armor[1].grid.equipment) do
-    if equipment.type=='night-vision-equipment' then return true end
-  end
-  return false
-end
 local function closest(colors,color)
   local best,distance
   for key,c in pairs(colors) do

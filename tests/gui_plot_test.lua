@@ -2,14 +2,10 @@ local G=TREQ('scripts.gui_plot')
 local SK=TREQ('scripts.sankey_ui')
 local player=game.players[1]
 local original=player.get_inventory
-local original_character=player.character
-player.get_inventory=function()return {valid=true,[1]={valid_for_read=true,grid={equipment={}}}} end
-assert(not G.needed(player))
-player.get_inventory=function()return {valid=true,[1]={valid_for_read=true,grid={equipment={{type='night-vision-equipment'}}}}} end
-assert(G.needed(player),'Night-vision colour lookup requires GUI rendering')
-player.character={valid=true,get_inventory=player.get_inventory}
-player.get_inventory=function() return nil end
-assert(G.needed(player),'Remote view must detect night vision on the attached physical character')
+player.get_inventory=function(inventory)
+  assert(inventory~=defines.inventory.character_armor,'Renderer choice should not inspect armor')
+  return original and original(inventory)
+end
 local root=player.gui.screen.add{type='flow',name='gui_plot_test',direction='vertical'}
 local p=G.begin(root,400,200)
 p.rect(10,20,30,40,{r=.92,g=.58,b=.30,a=1})
@@ -22,10 +18,12 @@ for _,scale in ipairs({1,1.25,1.5}) do
   for _,e in ipairs(p.root.children) do cursor=cursor+px(e.style.top_margin)+px(e.style.height)+px(e.style.bottom_margin) end
   assert(cursor==0,'GUI plot primitives moved the next hover target at fractional scale')
 end
-root.clear()
-SK.fill(player,root,{view='focus',focus='item/electronic-circuit',focus_steps=2,renderer='poly',period=600},1000,700,true)
-local st=storage.sk_render['1:focus']
-assert(#st.ribbons>0)
-for _,r in ipairs(st.ribbons) do assert(r.elem and not r.ro,'Night vision left a chart ribbon inside the tinted world camera') end
-root.destroy();player.get_inventory=original;player.character=original_character
-print('GUI PLOT PASS: night-vision fallback, shared ribbon geometry and exact fractional-scale positioning')
+for _,renderer in ipairs{'sprites','poly'} do
+  root.clear()
+  SK.fill(player,root,{view='focus',focus='item/electronic-circuit',focus_steps=2,renderer=renderer,period=600},1000,700,true)
+  local ribbons=storage.sk_render['1:focus'].ribbons
+  assert(#ribbons>0)
+  for _,r in ipairs(ribbons) do assert((r.ro~=nil)==(renderer=='poly'),'Chart did not use the selected renderer') end
+end
+root.destroy();player.get_inventory=original
+print('GUI PLOT PASS: selected renderer, shared ribbon geometry and exact fractional-scale positioning')

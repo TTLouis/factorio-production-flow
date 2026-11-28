@@ -16,3 +16,16 @@ Use this handoff to prepare the next version block in the [Factorio changelog](.
 ### Mod information
 
 The [Mod Portal description](mod-portal.md) explains cell setup, subdivisions, and train tracking, and points players to the lessons. The [README](../README.md) and [in-game mod description](../mod/production-flow/info.json) also describe production cells.
+
+## Chart renderer startup setting
+
+### Features
+
+- Choose **Chart renderer** under **Settings → Mod settings → Startup** for Balance Flow, Balance History, Focus, and Full Sankey. **GUI sprites** is the default and keeps chart colours independent of night vision. The two camera choices remove or keep the equipment's original tint. Restart Factorio to apply a change.
+- The neutral camera option also removes the tint from the game world while night vision still brightens the scene. The GUI default restores the equipment's original colours for players who had the previous standalone tint setting enabled.
+
+### Mod information
+
+The [Mod Portal description](mod-portal.md) explains the three startup choices.
+
+The [local validation report](../tests/out/startup-chart-renderer-main-20261128/README.md) covers the port onto `main`, the three startup profiles, and the night-vision colour checks.

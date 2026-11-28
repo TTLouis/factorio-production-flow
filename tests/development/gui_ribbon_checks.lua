@@ -2,7 +2,6 @@
 local Geometry = require('scripts.ribbon_geometry')
 local Palette = require('shared.palette')
 local Sprites = require('shared.sprites')
-local GuiPlot = require('scripts.gui_plot')
 local T = {}
 
 function T.equip(player)
@@ -87,8 +86,7 @@ end
 function T.inspect(canvas,player,case)
   local st = storage.sk_render[player.index]
   local sprite = st.ribbons[1].elem ~= nil
-  assert(sprite == (case.renderer=='sprites' or case.night_vision==true),'Unexpected ribbon backend')
-  assert(GuiPlot.needed(player) == (case.night_vision==true),'Night-vision fallback detection mismatch')
+  assert(sprite == (case.renderer=='sprites'),'Unexpected ribbon backend')
   local energy
   if case.night_vision then
     for _, equipment in pairs(player.character.get_inventory(defines.inventory.character_armor)[1].grid.equipment) do
@@ -98,7 +96,7 @@ function T.inspect(canvas,player,case)
   end
 
   local result = {backend=sprite and 'sprites' or 'poly', night_vision_energy=energy,
-    tint_override=settings.startup['ssk-remove-night-vision-tint'].value, elbows=0, probes={}}
+    tint_override=settings.startup['ssk-chart-renderer'].value=='camera', elbows=0, probes={}}
   local last, steep = {}, 0
   for _,path in ipairs(st.paths) do
     local key = path.from .. '>' .. path.to

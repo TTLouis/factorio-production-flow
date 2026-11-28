@@ -3,6 +3,20 @@
 return function(handlers)
   local UI,SK,H,C=TREQ('scripts.ui'),TREQ('scripts.sankey_ui'),TREQ('scripts.history_ui'),TREQ('scripts.canvas')
   local p,us=game.players[1],storage.ui[1]
+  local startup=settings.startup['ssk-chart-renderer']
+  us.renderer,us.startup_renderer='poly',nil
+  SK.focus_state(us).renderer='poly'
+  SK.balance_state(us).renderer='poly'
+  UI.open(p)
+  assert(us.renderer=='sprites' and us.fx.renderer=='sprites' and us.bal_fx.renderer=='sprites',
+    'Default GUI renderer must replace legacy camera preferences')
+  for _,mode in ipairs{'camera','gui','camera-original-tint','gui'} do
+    startup.value=mode
+    UI.open(p)
+    local renderer=mode=='gui' and 'sprites' or 'poly'
+    assert(us.renderer==renderer and us.fx.renderer==renderer and us.bal_fx.renderer==renderer,
+      'Startup renderer change did not apply to saved view state')
+  end
   local function find(e,predicate)
     if predicate(e) then return e end
     for _,child in ipairs(e.children) do local hit=find(child,predicate);if hit then return hit end end

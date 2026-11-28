@@ -84,7 +84,7 @@ local cases={}
 for _,renderer in ipairs({'poly','sprites'}) do
   for _,tab in ipairs({'balance','focus','sankey'}) do cases[#cases+1]={tab=tab,renderer=renderer,name=tab..'-'..renderer} end
 end
-if RibbonCheck then cases[#cases+1]={tab='sankey',renderer='poly',name='sankey-night-vision',night_vision=true} end
+if RibbonCheck then cases[#cases+1]={tab='sankey',renderer='sprites',name='sankey-night-vision',night_vision=true} end
 local function inspect(UI,p,c)
   local root=p.gui.screen.ssk_main
   local canvas=assert(find(root,function(e)return e.name=='ssk_canvas' end))

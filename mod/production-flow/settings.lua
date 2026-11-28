@@ -1,9 +1,10 @@
 data:extend({
   {
-    type = "bool-setting",
-    name = "ssk-remove-night-vision-tint",
+    type = "string-setting",
+    name = "ssk-chart-renderer",
     setting_type = "startup",
-    default_value = true,
+    default_value = "gui",
+    allowed_values = {"gui", "camera", "camera-original-tint"},
     order = "a",
   },
   {

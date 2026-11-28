@@ -17,7 +17,6 @@ local Watch = require("scripts.watch")
 local Tooltip = require("scripts.tooltip")
 local RecipeDetails = require("scripts.recipe_details")
 local RateCard = require("scripts.rate_card_ui")
-local GuiPlot = require("scripts.gui_plot")
 
 local SK = {}
 local ZOOM_STEP = 1.25
@@ -982,7 +981,7 @@ local function draw(canvas, L, us, st, player, W, H, zoom, recipe_icons, read_ba
   end
   POLY = nil
   if player then Canvas.clear(player.index) end
-  if us.renderer == "poly" and player and not GuiPlot.needed(player) then
+  if us.renderer == "poly" and player then
     POLY = Canvas.begin(player, W, H)
     local cam = canvas.add(Canvas.camera_spec(player, POLY))
     place(cam, 0, 0, W, H)
@@ -2206,7 +2205,7 @@ end
 function SK.focus_state(us)
   local fx = us.fx
   if not fx then
-    fx = { view = "focus", focus_steps = 2, heights = "sqrt", lines = "curves", renderer = "sprites" }
+    fx = { view = "focus", focus_steps = 2, heights = "sqrt", lines = "curves", renderer = us.renderer }
     us.fx = fx
   end
   fx.period, fx.sidx = us.period, us.sidx
@@ -2218,7 +2217,7 @@ end
 
 function SK.balance_state(us)
   if not us.bal_fx then us.bal_fx = { view = "focus", neighborhood = true, focus_steps = 1,
-    heights = "sqrt", lines = "curves", renderer = "sprites", live = true } end
+    heights = "sqrt", lines = "curves", renderer = us.renderer, live = true } end
   local fx = us.bal_fx
   fx.period, fx.sidx = us.period, us.sidx
   if fx.show_labels == nil then fx.show_labels = true end

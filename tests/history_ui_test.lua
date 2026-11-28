@@ -317,10 +317,7 @@ assert(UI.on_tab_changed(event(tabs)))
 assert(us.tab_id == "balance" and root.ssk_window_bar.ssk_surface_picker.visible)
 assert(named(root, "ssk_bal_items") == items and named(root, "ssk_history_controls") == controls)
 assert(UI.on_click(event({ tags = { ssk_ui = "focus_item", key = "item/iron-plate" } })))
-local get_inventory = player.get_inventory
-player.get_inventory = function()
-  return {valid=true, [1]={valid_for_read=true, grid={equipment={{type="night-vision-equipment"}}}}}
-end
+us.renderer="sprites"
 UI.refresh(player, true)
 local gui_plot = assert(named(root, "ssk_history_gui_plot"))
 local target = gui_plot.parent.ssk_history_tooltips.children[1]
@@ -330,18 +327,14 @@ assert(UI.on_hover(event(target), true) and hover.bands[1].sprite.visible)
 UI.refresh(player, true)
 assert(not gui_plot.valid and target.valid and storage.history_hover[player.index].bands[1].sprite.visible,
   "A GUI plot refresh must preserve the active tooltip target and redraw its highlight")
-player.get_inventory = get_inventory
 local active_mods=script.active_mods
 script.active_mods={["space-exploration"]="0.7.64"}
-UI.refresh(player, true)
-local se_plot=named(root,"ssk_history_gui_plot")
-assert(not se_plot.parent.ssk_history_camera and #objects()==0,
-  "SE Balance History must bypass world-camera colour lookup even when equipped armor is unavailable")
-script.active_mods=active_mods
+us.renderer="poly"
 UI.refresh(player, true)
 camera = assert(named(root, "ssk_history_camera"))
 assert(camera.parent.children[1] == camera and target.valid,
-  "Removing night vision must restore the camera underneath the retained tooltip targets")
+  "The selected renderer must install a camera beneath retained targets even in Space Exploration")
+script.active_mods=active_mods
 assert(UI.on_hover(event(target), false) and not storage.history_hover[player.index].bands[1].rect.visible)
 old = objects()
 UI.close(player)

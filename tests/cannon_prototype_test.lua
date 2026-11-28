@@ -5,7 +5,7 @@ assert(manifest:find('"? space-exploration"', 1, true),
   'Space Exploration must be listed as an optional dependency for data-stage ordering')
 local saved={type='direct',action_delivery={type='instant',target_effects={{type='damage',damage={amount=1,type='physical'}}}}}
 mods={['space-exploration']='0.7.64'}
-settings={startup={['ssk-remove-night-vision-tint']={value=false}}}
+settings={startup={['ssk-chart-renderer']={value='gui'}}}
 data={raw={explosion={['se-delivery-cannon-beam']={created_effect=saved}}}}
 dofile('data-final-fixes.lua')
 local effects=data.raw.explosion['se-delivery-cannon-beam'].created_effect
@@ -33,12 +33,20 @@ local original={{0.25,'first'},{0.75,'second'}}
 local variant={color_lookup=original,darkness_to_turn_on=0.7,energy_input='10kW'}
 local base={color_lookup=original}
 data.raw['night-vision-equipment']={base=base,variant=variant}
-dofile('data-final-fixes.lua')
-assert(base.color_lookup==original and variant.color_lookup==original,'Disabled tint setting altered an equipment LUT')
-settings.startup['ssk-remove-night-vision-tint'].value=true
+local declared
+data.extend=function(_,definitions) declared=definitions[1] end
+dofile('settings.lua')
+assert(declared.name=='ssk-chart-renderer' and declared.type=='string-setting' and declared.setting_type=='startup')
+assert(declared.default_value=='gui' and table.concat(declared.allowed_values,',')=='gui,camera,camera-original-tint')
+for _,mode in ipairs{'gui','camera-original-tint'} do
+  settings.startup['ssk-chart-renderer'].value=mode
+  dofile('data-final-fixes.lua')
+  assert(base.color_lookup==original and variant.color_lookup==original,mode..' altered an equipment lookup')
+end
+settings.startup['ssk-chart-renderer'].value='camera'
 dofile('data-final-fixes.lua')
 for _,equipment in pairs(data.raw['night-vision-equipment']) do
   assert(#equipment.color_lookup==1 and equipment.color_lookup[1][2]=='identity')
 end
 assert(variant.darkness_to_turn_on==0.7 and variant.energy_input=='10kW')
-print('NIGHT VISION PROTOTYPES PASS: neutral lookup for each equipment, disabled mode preserves original palettes')
+print('NIGHT VISION PROTOTYPES PASS: all startup modes apply their expected equipment lookups')

@@ -106,6 +106,6 @@ Open the **?** button in-game for help with controls, measurements and chart lim
 
 Requires **Factorio 2.1**. Space Age and Space Exploration are optional integrations that enable Transfers. Production history and cargo tracking fill as the mod observes activity. Production charts show recipe relationships on a single surface, and Transfers records observed cargo shipments between surfaces, with the measurement limits described above. Broader modpack compatibility, multiplayer and large-factory performance are still being tested.
 
-**Remove night vision tint** is enabled by default under **Settings → Mod settings → Startup**. It uses neutral colours throughout the game while night vision equipment is active. Night vision still brightens the scene, and the neutral palette can look brighter than the equipment's original palette. Turn it off and restart Factorio to restore the original look. Production Flow charts use their own palette in either mode.
+**Chart renderer** is under **Settings → Mod settings → Startup**. **GUI sprites** is the default and keeps chart colours independent of night vision. **Camera (remove night vision tint)** uses neutral night vision throughout the game while keeping the scene brighter. **Camera (keep night vision tint)** preserves the equipment's original colours, which can also tint charts drawn by the camera. Restart Factorio to apply the change.
 
 Created by **TTLouis** under the **MIT license**. [Source code](https://github.com/TTLouis/factorio-production-flow)

@@ -760,7 +760,7 @@ function H.fill(player, panel, us, key, width, panel_height, toolbar_height, opt
   local bands = {}
   local painter, stock_regions
   -- Keep ordinary History plots outside the world-camera colour lookup.
-  if us.renderer~="poly" or script.active_mods["space-exploration"] or GuiPlot.needed(player) then
+  if us.renderer~="poly" then
     Canvas.clear(player.index)
     local rate_gui = gui_plot(rate_plot, "ssk_history_camera", chart_width, rate_height, active)
     local net_gui = gui_plot(net_plot, "ssk_history_net_camera", chart_width, net_height, rates)

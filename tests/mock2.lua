@@ -132,6 +132,7 @@ game = { tick = 0, surfaces = setmetatable({ nauvis }, { __index = function(t, k
            return function(a, b) s = (s * 1103515245 + 12345) % 2147483648; local f = s / 2147483648
              if a then return a + math.floor(f * (b - a + 1)) end return f end end }
 settings = { global = { ["ssk-stock-scan-minutes"] = { value = 5 }, ["ssk-entities-per-tick"] = { value = 3 }, ["ssk-window-seconds"] = { value = 60 }, ["ssk-auto-export-minutes"] = { value = 5 } } }
+settings.startup = { ["ssk-chart-renderer"] = { value = "gui" } }
 WRITES = {}
 local function tojson(v)
   local t = type(v)

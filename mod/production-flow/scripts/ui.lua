@@ -88,13 +88,12 @@ local function ustate(pi)
     s.tier_lo, s.tier_hi = nil, nil
     s.readability_defaults = true
   end
-  -- Older saves selected the experimental world camera. Charts use native GUI
-  -- sprites so the game world's colour lookup cannot alter the chart palette.
-  if not s.gui_chart_defaults then
-    s.renderer = "sprites"
-    if s.fx then s.fx.renderer = "sprites" end
-    if s.bal_fx then s.bal_fx.renderer = "sprites" end
-    s.gui_chart_defaults = true
+  -- Startup selection supersedes chart renderer preferences saved by earlier versions.
+  local renderer = settings.startup["ssk-chart-renderer"].value == "gui" and "sprites" or "poly"
+  if s.startup_renderer ~= renderer then
+    s.renderer, s.startup_renderer = renderer, renderer
+    if s.fx then s.fx.renderer = renderer end
+    if s.bal_fx then s.bal_fx.renderer = renderer end
   end
   -- Replace the unpublished grouped default once. Later explicit grouping
   -- choices survive reopening the window and loading the save.
