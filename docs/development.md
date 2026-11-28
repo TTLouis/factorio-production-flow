@@ -313,6 +313,8 @@ Before drafting update notes or a mod description, follow the
 [release writing guide](release-writing-guide.md). Keep public copy concise and
 player-facing; reserve fuller technical explanations for GitHub.
 
+Start the next changelog with the [changes queued for the next release](next-release.md).
+
 Release history has one editable source: `mod/production-flow/changelog.txt`.
 After editing it, run `python tools/changelog.py --write` to regenerate the root
 `CHANGELOG.md`, then `python tools/changelog.py --check`. Generate GitHub release
